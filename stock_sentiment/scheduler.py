@@ -22,19 +22,17 @@ class Scheduler:
 
     def __init__(
         self,
-        max_price: float = 100.0,
         min_return: float = 10.0,
         top_n: int = 30,
         interval_hours: float = 24.0,  # Default: daily
         run_backtest: bool = True,
     ):
-        self.app = ScreenerApp(max_price=max_price, min_return=min_return, top_n=top_n)
+        self.app = ScreenerApp(min_return=min_return, top_n=top_n)
         self.history = History()
         self.alerts = AlertManager(self.history)
         self.backtester = Backtester(self.history)
         self.interval_hours = interval_hours
         self.run_backtest = run_backtest
-        self.max_price = max_price
         self.min_return = min_return
         self.top_n = top_n
 
@@ -42,7 +40,7 @@ class Scheduler:
         """Main scheduling loop."""
         console.print("\n[bold cyan]Starting Scheduled Stock Screener[/bold cyan]\n")
         console.print(f"  Schedule: Every {self._format_interval()}")
-        console.print(f"  Criteria: Price < ${self.max_price}, 3M return > {self.min_return}%")
+        console.print(f"  Criteria: 3M return > {self.min_return}%")
         console.print(f"  Backtest on each run: {'Yes' if self.run_backtest else 'No'}")
         console.print(f"  Alerts: Enabled (desktop + terminal)")
         console.print(f"  History: ~/.stock_screener/history.db")
@@ -91,7 +89,7 @@ class Scheduler:
 
         # Step 2: Save to history
         run_id = self.history.save_run(
-            predictions, self.max_price, self.min_return, self.top_n
+            predictions, self.min_return, self.top_n
         )
         console.print(f"\n[green]  Saved run #{run_id} with {len(predictions)} predictions to history.[/green]")
 

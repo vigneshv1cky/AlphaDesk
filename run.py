@@ -2,7 +2,7 @@
 """
 Stock Screener & Predictor
 ===========================
-Finds stocks under $100 with strong 3-month performance,
+Finds stocks with strong 3-month performance,
 fetches this week's news, and predicts movement using
 FinBERT sentiment + technical analysis.
 
@@ -35,7 +35,6 @@ Modes:
   python run.py --alerts                  Show recent alerts
 
 Screener options:
-  python run.py --max-price 50            Only stocks under $50
   python run.py --min-return 25           Only stocks up >25% in 3 months
   python run.py --top 50                  Show top 50 results
 
@@ -68,12 +67,6 @@ It does NOT constitute financial advice.
 
     # Screener options
     parser.add_argument(
-        "--max-price",
-        type=float,
-        default=100.0,
-        help="Maximum stock price (default: $100)",
-    )
-    parser.add_argument(
         "--min-return",
         type=float,
         default=10.0,
@@ -105,7 +98,7 @@ It does NOT constitute financial advice.
     console.print()
     console.print("[bold cyan]╔══════════════════════════════════════════════╗[/bold cyan]")
     console.print("[bold cyan]║     📊 Stock Screener & Predictor           ║[/bold cyan]")
-    console.print("[bold cyan]║  Find hot stocks under $100 + predict moves ║[/bold cyan]")
+    console.print("[bold cyan]║  Find hot stocks + predict moves            ║[/bold cyan]")
     console.print("[bold cyan]║  Powered by FinBERT NLP + Technical Analysis║[/bold cyan]")
     console.print("[bold cyan]╚══════════════════════════════════════════════╝[/bold cyan]")
     console.print()
@@ -129,7 +122,6 @@ def _run_once(args):
     from stock_sentiment.screener_app import ScreenerApp
 
     app = ScreenerApp(
-        max_price=args.max_price,
         min_return=args.min_return,
         top_n=args.top,
     )
@@ -141,7 +133,6 @@ def _run_scheduled(args):
     from stock_sentiment.scheduler import Scheduler
 
     scheduler = Scheduler(
-        max_price=args.max_price,
         min_return=args.min_return,
         top_n=args.top,
         interval_hours=args.every,

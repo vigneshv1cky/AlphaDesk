@@ -30,7 +30,6 @@ class History:
             CREATE TABLE IF NOT EXISTS runs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 run_at TEXT NOT NULL,
-                max_price REAL,
                 min_return REAL,
                 stock_count INTEGER,
                 top_n INTEGER
@@ -99,12 +98,12 @@ class History:
         """)
         self.conn.commit()
 
-    def save_run(self, predictions: list, max_price: float, min_return: float, top_n: int) -> int:
+    def save_run(self, predictions: list, min_return: float, top_n: int) -> int:
         """Save a full screener run. Returns run_id."""
         now = datetime.now(timezone.utc).isoformat()
         cursor = self.conn.execute(
-            "INSERT INTO runs (run_at, max_price, min_return, stock_count, top_n) VALUES (?, ?, ?, ?, ?)",
-            (now, max_price, min_return, len(predictions), top_n),
+            "INSERT INTO runs (run_at, min_return, stock_count, top_n) VALUES (?, ?, ?, ?)",
+            (now, min_return, len(predictions), top_n),
         )
         run_id = cursor.lastrowid
 

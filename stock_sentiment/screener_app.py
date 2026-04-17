@@ -1,4 +1,4 @@
-"""Screener mode: find hot stocks under $100, get this week's news, predict movement."""
+"""Screener mode: find hot stocks, get this week's news, predict movement."""
 
 import ssl
 import time
@@ -22,9 +22,9 @@ console = Console()
 class ScreenerApp:
     """Orchestrates the stock screener pipeline."""
 
-    def __init__(self, max_price: float = 100.0, min_return: float = 10.0, top_n: int = 30):
+    def __init__(self, min_return: float = 10.0, top_n: int = 30):
         self.screener = StockScreener(
-            max_price=max_price, min_3m_return=min_return, top_n=top_n
+            min_3m_return=min_return, top_n=top_n
         )
         self.price_fetcher = PriceFetcher(cache_ttl_seconds=600)
         self.tech_analyzer = TechnicalAnalyzer()
@@ -35,7 +35,7 @@ class ScreenerApp:
     def run(self, cloud_mode: bool = False):
         """Full pipeline: screen → fetch news → analyze → predict → display."""
         console.print("\n[bold cyan]Starting Stock Screener & Predictor...[/bold cyan]\n")
-        console.print(f"  Criteria: Price < ${self.screener.max_price}, 3-month return > {self.screener.min_3m_return}%")
+        console.print(f"  Criteria: 3-month return > {self.screener.min_3m_return}%")
         console.print(f"  News window: This week only")
         console.print(f"  Output: {'Cloud (S3 + Email)' if cloud_mode else 'Terminal'}")
         console.print()
@@ -44,7 +44,7 @@ class ScreenerApp:
         screened = self.screener.screen()
         if not screened:
             console.print("[red]No stocks matched the criteria. Try lowering the minimum return.[/red]")
-            return
+            return ([], 0, [])
 
         symbols = [s.symbol for s in screened]
         console.print(f"\n  Top performers: {', '.join(symbols[:10])}{'...' if len(symbols) > 10 else ''}\n")
@@ -84,7 +84,7 @@ class ScreenerApp:
 
             history = History()
             history.save_run(
-                predictions, self.screener.max_price,
+                predictions,
                 self.screener.min_3m_return, self.screener.top_n,
             )
 
@@ -105,6 +105,8 @@ class ScreenerApp:
             if alerts:
                 from stock_sentiment.alerts import AlertManager
                 AlertManager().display_alerts(alerts)
+
+        return (predictions, len(screened), alerts)
 
     def _fetch_weekly_news(self, symbols: list[str]) -> dict[str, list[Article]]:
         """Fetch this week's news for each stock symbol via Google News RSS."""

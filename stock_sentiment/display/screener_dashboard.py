@@ -58,7 +58,7 @@ class ScreenerDashboard:
         # Header
         self.console.print(Panel(
             "[bold cyan]📊 Stock Screener & Predictor[/bold cyan]\n"
-            "[dim]Stocks under $100 with strong 3-month momentum + this week's news[/dim]",
+            "[dim]Stocks with strong 3-month momentum + this week's news[/dim]",
             border_style="cyan",
         ))
 

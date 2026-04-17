@@ -1,4 +1,4 @@
-"""Stock screener: finds stocks under $100 with strong 3-month performance."""
+"""Stock screener: finds stocks with strong 3-month performance."""
 
 import time
 from dataclasses import dataclass
@@ -96,15 +96,13 @@ class ScreenedStock:
 
 
 class StockScreener:
-    """Screens for stocks under $100 with strong 3-month performance."""
+    """Screens for stocks with strong 3-month performance."""
 
     def __init__(
         self,
-        max_price: float = 100.0,
         min_3m_return: float = 10.0,  # Minimum 10% gain in 3 months
         top_n: int = 30,  # Return top N stocks
     ):
-        self.max_price = max_price
         self.min_3m_return = min_3m_return
         self.top_n = top_n
 
@@ -115,7 +113,7 @@ class StockScreener:
         symbols = universe or SCREEN_UNIVERSE
         console.print(
             f"[cyan]Screening {len(symbols)} stocks "
-            f"(price < ${self.max_price}, 3-month return > {self.min_3m_return}%)...[/cyan]"
+            f"(3-month return > {self.min_3m_return}%)...[/cyan]"
         )
 
         # Batch download 3 months of data
@@ -153,8 +151,8 @@ class StockScreener:
                 closes = df["Close"].astype(float)
                 current_price = float(closes.iloc[-1])
 
-                # Filter: must be under max_price
-                if current_price > self.max_price or current_price < 1.0:
+                # Filter: minimum price
+                if current_price < 1.0:
                     continue
 
                 # 3-month return

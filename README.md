@@ -1,6 +1,6 @@
 # Stock Sentiment Analyzer
 
-Stock screener and predictor powered by FinBERT NLP and technical analysis. Finds stocks under $100 with strong 3-month performance, fetches recent news, and predicts movement using sentiment analysis.
+Stock screener and predictor powered by FinBERT NLP and technical analysis. Finds stocks with strong 3-month performance, fetches recent news, and predicts movement using sentiment analysis.
 
 **DISCLAIMER: This tool is for educational purposes only. It does NOT constitute financial advice.**
 
@@ -33,7 +33,6 @@ stock-sentiment --alerts
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--max-price` | Maximum stock price | $100 |
 | `--min-return` | Minimum 3-month return % | 10% |
 | `--top` | Number of top stocks to show | 30 |
 | `--schedule` | Auto-run on a schedule | off |
