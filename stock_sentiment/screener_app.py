@@ -8,13 +8,13 @@ from datetime import datetime, timedelta, timezone
 import feedparser
 from rich.console import Console
 
-from etf_sentiment.display.screener_dashboard import ScreenerDashboard
-from etf_sentiment.market.price_fetcher import PriceFetcher
-from etf_sentiment.market.screener import StockScreener
-from etf_sentiment.market.stock_predictor import StockPredictor
-from etf_sentiment.market.technicals import TechnicalAnalyzer
-from etf_sentiment.news.base import Article, ScoredArticle
-from etf_sentiment.nlp.sentiment import SentimentAnalyzer
+from stock_sentiment.display.screener_dashboard import ScreenerDashboard
+from stock_sentiment.market.price_fetcher import PriceFetcher
+from stock_sentiment.market.screener import StockScreener
+from stock_sentiment.market.stock_predictor import StockPredictor
+from stock_sentiment.market.technicals import TechnicalAnalyzer
+from stock_sentiment.news.base import Article, ScoredArticle
+from stock_sentiment.nlp.sentiment import SentimentAnalyzer
 
 console = Console()
 
@@ -79,8 +79,8 @@ class ScreenerApp:
         # Step 6: Save to history + check alerts
         alerts = []
         try:
-            from etf_sentiment.history import History
-            from etf_sentiment.alerts import AlertManager
+            from stock_sentiment.history import History
+            from stock_sentiment.alerts import AlertManager
 
             history = History()
             history.save_run(
@@ -98,12 +98,12 @@ class ScreenerApp:
 
         # Step 7: Output
         if cloud_mode:
-            from etf_sentiment.cloud_output import run_cloud_mode
+            from stock_sentiment.cloud_output import run_cloud_mode
             run_cloud_mode(predictions, len(screened), alerts)
         else:
             self.dashboard.render(predictions, len(screened))
             if alerts:
-                from etf_sentiment.alerts import AlertManager
+                from stock_sentiment.alerts import AlertManager
                 AlertManager().display_alerts(alerts)
 
     def _fetch_weekly_news(self, symbols: list[str]) -> dict[str, list[Article]]:

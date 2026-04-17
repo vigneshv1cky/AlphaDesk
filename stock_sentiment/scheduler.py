@@ -9,10 +9,10 @@ from datetime import datetime, timezone
 
 from rich.console import Console
 
-from etf_sentiment.alerts import AlertManager
-from etf_sentiment.backtester import Backtester
-from etf_sentiment.history import History
-from etf_sentiment.screener_app import ScreenerApp
+from stock_sentiment.alerts import AlertManager
+from stock_sentiment.backtester import Backtester
+from stock_sentiment.history import History
+from stock_sentiment.screener_app import ScreenerApp
 
 console = Console()
 

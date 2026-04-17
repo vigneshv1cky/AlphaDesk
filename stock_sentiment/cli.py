@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI entry point for etf-sentiment-analyzer."""
+"""CLI entry point for stock-sentiment-analyzer."""
 
 import sys
 import os

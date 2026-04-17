@@ -1,4 +1,4 @@
-"""Fetches and caches stock/ETF price data via yfinance."""
+"""Fetches and caches stock price data via yfinance."""
 
 import time
 from dataclasses import dataclass
@@ -23,7 +23,7 @@ class PriceData:
 
 
 class PriceFetcher:
-    """Fetches and caches stock/ETF price data via yfinance."""
+    """Fetches and caches stock price data via yfinance."""
 
     def __init__(self, cache_ttl_seconds: int = 900):
         self._cache: dict[str, PriceData] = {}

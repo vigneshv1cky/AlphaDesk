@@ -126,7 +126,7 @@ It does NOT constitute financial advice.
 
 def _run_once(args):
     """Run the screener once."""
-    from etf_sentiment.screener_app import ScreenerApp
+    from stock_sentiment.screener_app import ScreenerApp
 
     app = ScreenerApp(
         max_price=args.max_price,
@@ -138,7 +138,7 @@ def _run_once(args):
 
 def _run_scheduled(args):
     """Run the screener on a schedule."""
-    from etf_sentiment.scheduler import Scheduler
+    from stock_sentiment.scheduler import Scheduler
 
     scheduler = Scheduler(
         max_price=args.max_price,
@@ -152,7 +152,7 @@ def _run_scheduled(args):
 
 def _run_backtest():
     """Run backtesting on past predictions."""
-    from etf_sentiment.backtester import Backtester
+    from stock_sentiment.backtester import Backtester
 
     backtester = Backtester()
     backtester.run()
@@ -160,7 +160,7 @@ def _run_backtest():
 
 def _show_alerts():
     """Show recent alerts."""
-    from etf_sentiment.alerts import AlertManager
+    from stock_sentiment.alerts import AlertManager
 
     alert_mgr = AlertManager()
     alert_mgr.show_recent_alerts(hours=72)

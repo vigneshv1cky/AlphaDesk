@@ -1,4 +1,4 @@
-# ETF Sentiment Analyzer
+# Stock Sentiment Analyzer
 
 Stock screener and predictor powered by FinBERT NLP and technical analysis. Finds stocks under $100 with strong 3-month performance, fetches recent news, and predicts movement using sentiment analysis.
 
@@ -7,26 +7,26 @@ Stock screener and predictor powered by FinBERT NLP and technical analysis. Find
 ## Installation
 
 ```bash
-pip install etf-sentiment-analyzer
+pip install stock-sentiment-analyzer
 ```
 
 ## Usage
 
 ```bash
 # Run screener once
-etf-sentiment
+stock-sentiment
 
 # Auto-run daily with alerts
-etf-sentiment --schedule
+stock-sentiment --schedule
 
 # Auto-run every 12 hours
-etf-sentiment --schedule --every 12
+stock-sentiment --schedule --every 12
 
 # Check past prediction accuracy
-etf-sentiment --backtest
+stock-sentiment --backtest
 
 # Show recent alerts
-etf-sentiment --alerts
+stock-sentiment --alerts
 ```
 
 ### Options

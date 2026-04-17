@@ -26,8 +26,8 @@ class ScoredArticle:
     sentiment_label: str  # "positive", "negative", "neutral"
     sentiment_score: float  # Raw confidence 0-1
     normalized_score: float  # Mapped to -1 (bearish) to +1 (bullish)
-    etf_symbols: list = field(default_factory=list)
-    relevance_scores: dict = field(default_factory=dict)  # {etf: score}
+    stock_symbols: list = field(default_factory=list)
+    relevance_scores: dict = field(default_factory=dict)  # {stock: score}
 
 
 class NewsSource(ABC):

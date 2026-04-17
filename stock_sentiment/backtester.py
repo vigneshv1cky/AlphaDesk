@@ -11,8 +11,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from etf_sentiment.history import History
-from etf_sentiment.market.price_fetcher import PriceFetcher
+from stock_sentiment.history import History
+from stock_sentiment.market.price_fetcher import PriceFetcher
 
 console = Console()
 

@@ -4,8 +4,8 @@ import math
 from dataclasses import dataclass
 from typing import Optional
 
-from etf_sentiment.market.screener import ScreenedStock
-from etf_sentiment.market.technicals import TechnicalIndicators
+from stock_sentiment.market.screener import ScreenedStock
+from stock_sentiment.market.technicals import TechnicalIndicators
 
 
 @dataclass

@@ -6,7 +6,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from etf_sentiment.market.price_fetcher import PriceData
+from stock_sentiment.market.price_fetcher import PriceData
 
 
 @dataclass
