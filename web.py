@@ -166,6 +166,10 @@ html_template = """
 def home():
     return html_template
 
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
 class ScreenRequest(BaseModel):
     min_return: float = 10.0
     top_n: int = 30

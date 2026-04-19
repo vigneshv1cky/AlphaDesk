@@ -13,11 +13,14 @@ RUN pip install --no-cache-dir -r requirements.txt boto3
 
 # Copy app code
 COPY run.py .
+COPY web.py .
 COPY stock_sentiment/ stock_sentiment/
 
 # Pre-download FinBERT model so it's baked into the image
 RUN python -c "from transformers import pipeline; pipeline('sentiment-analysis', model='ProsusAI/finbert', device=-1)"
 
-# Default: cloud mode (save to S3 + email)
-ENTRYPOINT ["python", "run.py"]
-CMD ["--cloud"]
+# Expose the port App Runner will use
+EXPOSE 8080
+
+# Default: Run the FastAPI web server
+ENTRYPOINT ["uvicorn", "web:app", "--host", "0.0.0.0", "--port", "8080"]
