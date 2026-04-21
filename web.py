@@ -13,8 +13,23 @@ from stock_sentiment.screener_app import ScreenerApp
 from stock_sentiment.cloud_output import generate_html_report
 from stock_sentiment.history import History
 from stock_sentiment.market.broker import PaperBroker
+from stock_sentiment.scheduler import Scheduler
+import threading
 
 app = FastAPI(title="Stock Screener Web App")
+
+# Background thread to run the trading bot scheduler
+def run_bot_in_background():
+    print("[Web] Starting background trading bot...")
+    # These settings match your default 'run.py --schedule' behavior
+    scheduler = Scheduler(min_return=10.0, top_n=30, interval_hours=1.0)
+    scheduler.run()
+
+@app.on_event("startup")
+async def startup_event():
+    # Start the bot in its own thread so it doesn't block FastAPI
+    bot_thread = threading.Thread(target=run_bot_in_background, daemon=True)
+    bot_thread.start()
 
 # Create a thread pool to run the screener
 executor = ThreadPoolExecutor(max_workers=2)
@@ -42,10 +57,37 @@ html_template = """
             background-color: var(--bg-color);
             color: var(--text-color);
             margin: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .sidebar {
+            width: 240px;
+            background-color: #161b22;
+            border-right: 1px solid var(--border-color);
+            padding: 2rem 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            flex-shrink: 0;
+            box-shadow: 2px 0 8px rgba(0,0,0,0.2);
+            z-index: 10;
+            box-sizing: border-box;
+        }
+        .sidebar h1 {
+            font-size: 1.4rem;
+            margin: 0;
+            text-align: center;
+            color: var(--accent-color);
+        }
+        .main-content {
+            flex-grow: 1;
             padding: 2rem;
+            overflow-y: auto;
             display: flex;
             flex-direction: column;
             align-items: center;
+            position: relative;
         }
         .container {
             max-width: 800px;
@@ -58,33 +100,34 @@ html_template = """
             box-shadow: 0 4px 12px rgba(0,0,0,0.5);
             margin-bottom: 2rem;
         }
-        h1 { margin-top: 0; color: var(--accent-color); }
         
         .tabs {
             display: flex;
-            justify-content: center;
+            flex-direction: column;
             gap: 10px;
-            margin-bottom: 20px;
-            border-bottom: 1px solid var(--border-color);
-            padding-bottom: 10px;
         }
         .tab-btn {
-            background: var(--tab-bg);
+            background: transparent;
             color: var(--text-color);
-            border: 1px solid var(--border-color);
-            padding: 10px 20px;
+            border: 1px solid transparent;
+            padding: 12px 20px;
             border-radius: 6px;
             cursor: pointer;
             transition: all 0.2s;
             font-weight: bold;
+            text-align: left;
+            font-size: 1rem;
         }
         .tab-btn.active {
             background: var(--tab-active);
-            border-color: var(--accent-color);
+            border-color: var(--border-color);
+            border-left: 4px solid var(--accent-color);
+            border-radius: 0 6px 6px 0;
             color: var(--accent-color);
         }
         .tab-btn:hover:not(.active) {
             background: #1f2428;
+            border-radius: 6px;
         }
         
         .tab-content {
@@ -130,7 +173,7 @@ html_template = """
             width: 80px;
         }
 
-        #result { margin-top: 2rem; width: 100%; max-width: 1200px; }
+        #result { margin-top: 1rem; width: 100%; max-width: 1200px; }
         
         .metric-cards {
             display: grid;
@@ -186,6 +229,18 @@ html_template = """
         .bullish { color: #3fb950; }
         .bearish { color: #f85149; }
 
+        /* Resizer */
+        .resizer {
+            width: 5px;
+            cursor: ew-resize;
+            background: #161b22;
+            z-index: 15;
+            transition: background 0.2s;
+        }
+        .resizer:hover, .resizer.active {
+            background: #30363d;
+        }
+
         /* Spinner */
         .spinner {
             display: none;
@@ -201,52 +256,67 @@ html_template = """
     </style>
 </head>
 <body>
-    <div class="container" id="main-container">
+    <div class="sidebar" id="sidebar">
         <h1>📊 Stock Screener & Bot</h1>
-        
         <div class="tabs">
             <button class="tab-btn active" onclick="switchTab('performance')">Bot Performance</button>
             <button class="tab-btn" onclick="switchTab('manual')">Manual Screener</button>
         </div>
-
-        <div id="performance-tab" class="tab-content active">
-            <p>Recent performance metrics from Alpaca and local backtests.</p>
-            <div class="spinner" id="perf-spinner" style="display: block;"></div>
-            <div id="perf-content" style="display: none;">
-                <div class="metric-cards" id="perf-metrics">
-                    <!-- Metrics will be injected here -->
-                </div>
-                <div id="perf-positions" class="list-container">
-                    <h3>Active Positions</h3>
-                    <div id="positions-list"></div>
-                </div>
-                <div id="perf-picks" class="list-container">
-                    <h3>Last Run's Top Picks</h3>
-                    <div id="picks-list"></div>
-                </div>
-            </div>
-            <button class="action-btn" style="margin-top: 1rem;" onclick="loadPerformance()">Refresh Data</button>
-        </div>
-
-        <div id="manual-tab" class="tab-content">
-            <p>Run the analysis manually to find top performing stocks.</p>
-            <div class="form-group">
-                <label>
-                    Min 3-Month Return (%):
-                    <input type="number" id="min_return" value="10.0" step="0.1">
-                </label>
-                <label>
-                    Top N:
-                    <input type="number" id="top_n" value="30">
-                </label>
-            </div>
-
-            <button class="action-btn" id="run-btn" onclick="runScreener()">Run Screener</button>
-            <div class="spinner" id="manual-spinner"></div>
-        </div>
     </div>
-    
-    <div id="result"></div>
+
+    <div class="resizer" id="resizer"></div>
+
+    <div class="main-content">
+        <div class="container" id="main-container">
+            <div id="performance-tab" class="tab-content active">
+                <p>Recent performance metrics from Alpaca and local backtests.</p>
+                <div class="spinner" id="perf-spinner" style="display: block;"></div>
+                <div id="perf-content" style="display: none;">
+                    <div class="metric-cards" id="perf-metrics">
+                        <!-- Metrics will be injected here -->
+                    </div>
+                    <div id="perf-positions" class="list-container">
+                        <h3>Active Positions</h3>
+                        <div id="positions-list"></div>
+                    </div>
+                    <div id="perf-picks" class="list-container">
+                        <h3>Last Run's Top Picks</h3>
+                        <div id="picks-list"></div>
+                    </div>
+
+                    <div style="margin-top: 2rem; padding: 1.5rem; border: 1px solid #d73a49; border-radius: 8px; background: rgba(215, 58, 73, 0.1);">
+                        <h3 style="color: #ff7b72; margin-top: 0;">Force Bot Execution</h3>
+                        <p style="font-size: 14px; color: #8b949e;">
+                            This will immediately run a full trading cycle (screening, sentiment analysis, and trade execution).
+                            <strong>Warning:</strong> This will place real paper trades on your Alpaca account.
+                        </p>
+                        <button class="action-btn" id="force-btn" style="background-color: #d73a49;" onclick="forceTrade()">Force Bot Trade & Run</button>
+                        <div class="spinner" id="force-spinner"></div>
+                    </div>
+                </div>
+                <button class="action-btn" style="margin-top: 1rem;" onclick="loadPerformance()">Refresh Data</button>
+            </div>
+
+            <div id="manual-tab" class="tab-content">
+                <p>Run the analysis manually to find top performing stocks.</p>
+                <div class="form-group">
+                    <label>
+                        Min 3-Month Return (%):
+                        <input type="number" id="min_return" value="10.0" step="0.1">
+                    </label>
+                    <label>
+                        Top N:
+                        <input type="number" id="top_n" value="30">
+                    </label>
+                </div>
+
+                <button class="action-btn" id="run-btn" onclick="runScreener()">Run Screener</button>
+                <div class="spinner" id="manual-spinner"></div>
+            </div>
+        </div>
+        
+        <div id="result"></div>
+    </div>
 
     <script>
         function switchTab(tabId) {
@@ -367,16 +437,79 @@ html_template = """
                 }
 
                 const htmlReport = await response.text();
-                // Replace the entire document to show the report completely
-                document.open();
-                document.write(htmlReport);
-                document.close();
+                resultDiv.innerHTML = htmlReport;
             } catch (error) {
                 resultDiv.innerHTML = `<p style="color: #f85149;">Error: ${error.message}</p>`;
+            } finally {
                 btn.disabled = false;
                 spinner.style.display = 'none';
             }
         }
+
+        async function forceTrade() {
+            const btn = document.getElementById('force-btn');
+            const spinner = document.getElementById('force-spinner');
+            const resultDiv = document.getElementById('result');
+            
+            if (!confirm("Are you sure you want to force a trade cycle? This will place real paper trades.")) {
+                return;
+            }
+
+            btn.disabled = true;
+            spinner.style.display = 'block';
+            resultDiv.innerHTML = '';
+            
+            try {
+                const response = await fetch('/api/force-trade', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ min_return: 10.0, top_n: 30 })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Server error: ' + response.statusText);
+                }
+
+                const htmlFragment = await response.text();
+                resultDiv.innerHTML = htmlFragment;
+                
+                // Refresh performance data after trade
+                loadPerformance();
+            } catch (error) {
+                resultDiv.innerHTML = `<p style="color: #f85149;">Error: ${error.message}</p>`;
+            } finally {
+                btn.disabled = false;
+                spinner.style.display = 'none';
+            }
+        }
+
+        // Sidebar Resizer Logic
+        const resizer = document.getElementById('resizer');
+        const sidebar = document.getElementById('sidebar');
+        let isResizing = false;
+
+        resizer.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            document.body.style.cursor = 'ew-resize';
+            resizer.classList.add('active');
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizing) return;
+            let newWidth = e.clientX;
+            if (newWidth < 150) newWidth = 150;
+            if (newWidth > 800) newWidth = 800;
+            sidebar.style.width = newWidth + 'px';
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isResizing) {
+                isResizing = false;
+                document.body.style.cursor = '';
+                resizer.classList.remove('active');
+            }
+        });
 
         // Load performance data initially if it's the active tab
         window.onload = () => {
@@ -406,11 +539,25 @@ async def screen_stocks(req: ScreenRequest):
     def _run_screener():
         screener_app = ScreenerApp(min_return=req.min_return, top_n=req.top_n)
         predictions, count, alerts = screener_app.run(cloud_mode=False)
-        return generate_html_report(predictions, count)
+        return generate_html_report(predictions, count, fragment=True)
 
     loop = asyncio.get_running_loop()
     html_report = await loop.run_in_executor(executor, _run_screener)
     return html_report
+
+@app.post("/api/force-trade", response_class=HTMLResponse)
+async def force_trade(req: ScreenRequest):
+    def _run_force_trade():
+        # Instantiate a new Scheduler with the requested parameters
+        scheduler = Scheduler(min_return=req.min_return, top_n=req.top_n)
+        # Execute one cycle
+        predictions, count, alerts = scheduler.execute_cycle()
+        # Return a fragment of the HTML report
+        return generate_html_report(predictions, count, fragment=True)
+
+    loop = asyncio.get_running_loop()
+    html_fragment = await loop.run_in_executor(executor, _run_force_trade)
+    return html_fragment
 
 @app.get("/api/performance", response_class=JSONResponse)
 def get_performance():

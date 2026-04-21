@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 
-def generate_html_report(predictions: list, screened_count: int) -> str:
+def generate_html_report(predictions: list, screened_count: int, fragment: bool = False) -> str:
     """Generate a styled HTML email report from predictions."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
@@ -85,11 +85,7 @@ def generate_html_report(predictions: list, screened_count: int) -> str:
             {f'<div style="margin-top:8px;font-size:13px"><b>Headlines:</b><ul style="padding-left:16px">{headlines_html}</ul></div>' if headlines_html else ''}
         </div>"""
 
-    html = f"""<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><title>Stock Screener Report - {now}</title></head>
-<body style="background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif;max-width:1200px;margin:0 auto;padding:20px">
-
+    content_html = f"""
 <div style="text-align:center;padding:20px;background:#161b22;border-radius:12px;margin-bottom:20px">
     <h1 style="margin:0;color:#58a6ff">📊 Stock Screener Report</h1>
     <p style="color:#8b949e;margin:8px 0">Generated: {now}</p>
@@ -133,7 +129,16 @@ def generate_html_report(predictions: list, screened_count: int) -> str:
         Always do your own research before investing.
     </p>
 </div>
+"""
 
+    if fragment:
+        return content_html
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Stock Screener Report - {now}</title></head>
+<body style="background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif;max-width:1200px;margin:0 auto;padding:20px">
+{content_html}
 </body>
 </html>"""
 

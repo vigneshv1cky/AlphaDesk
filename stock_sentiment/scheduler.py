@@ -13,6 +13,7 @@ from stock_sentiment.alerts import AlertManager
 from stock_sentiment.backtester import Backtester
 from stock_sentiment.history import History
 from stock_sentiment.screener_app import ScreenerApp
+from stock_sentiment.market.broker import PaperBroker
 
 console = Console()
 
@@ -77,7 +78,7 @@ class Scheduler:
                     console.print(f"[bold cyan]  Run #{run_count} — {now.strftime('%Y-%m-%d %H:%M:%S UTC')}[/bold cyan]")
                     console.print(f"[bold]{'='*60}[/bold]\n")
 
-                    self._execute_cycle()
+                    self.execute_cycle()
 
                 # Calculate sleep time
                 interval_seconds = self.interval_hours * 3600
@@ -114,13 +115,13 @@ class Scheduler:
         finally:
             self.history.close()
 
-    def _execute_cycle(self):
+    def execute_cycle(self):
         """Run one full cycle: screen → predict → save → alert → backtest."""
 
         # Step 1: Run the screener
-        predictions = self._run_screener()
+        predictions, screened_count = self._run_screener()
         if not predictions:
-            return
+            return [], 0, []
 
         # Step 2: Save to history
         run_id = self.history.save_run(
@@ -144,13 +145,15 @@ class Scheduler:
         if self.run_backtest:
             console.print()
             self.backtester.run(min_age_days=5)
+            
+        return predictions, screened_count, alerts
 
-    def _run_screener(self) -> list:
-        """Run the screener and return predictions (without displaying dashboard)."""
+    def _run_screener(self) -> tuple:
+        """Run the screener and return (predictions, screened_count)."""
         screened = self.app.screener.screen()
         if not screened:
             console.print("[red]No stocks matched criteria.[/red]")
-            return []
+            return [], 0
 
         symbols = [s.symbol for s in screened]
 
@@ -183,7 +186,7 @@ class Scheduler:
         # Display
         self.app.dashboard.render(predictions, len(screened))
 
-        return predictions
+        return predictions, len(screened)
 
     def _format_interval(self) -> str:
         if self.interval_hours >= 24:
@@ -196,4 +199,3 @@ class Scheduler:
                 return f"{days:.0f} days"
         else:
             return f"{self.interval_hours:.0f} hours"
-          return f"{self.interval_hours:.0f} hours"
