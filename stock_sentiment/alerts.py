@@ -8,7 +8,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from stock_sentiment.history import History
+from stock_sentiment.history import BaseStorage, History
 
 console = Console()
 
@@ -16,7 +16,7 @@ console = Console()
 class AlertManager:
     """Detects and delivers alerts based on prediction changes."""
 
-    def __init__(self, history: History = None, disable_notifications: bool = False):
+    def __init__(self, history: BaseStorage | None = None, disable_notifications: bool = False):
         self.history = history or History()
         # disable_notifications kept for call-site compat; desktop notifications removed
 
@@ -55,7 +55,8 @@ class AlertManager:
 
                 # Check for flips and surges if we have previous data
                 if last_run:
-                    prev = self.history.get_prediction_by_symbol_and_run(symbol, last_run.get("id") or last_run.get("run_id"))
+                    run_id = str(last_run.get("id") or last_run.get("run_id") or "")
+                    prev = self.history.get_prediction_by_symbol_and_run(symbol, run_id)
                     if prev:
                         # BULLISH_FLIP
                         if pred.prediction == "BULLISH" and prev.get("prediction") != "BULLISH":

@@ -6,14 +6,15 @@ from collections import defaultdict
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
-    from datetime import timezone as ZoneInfo # Fallback
+    from datetime import timezone as ZoneInfo  # type: ignore[assignment]
 
 try:
     from alpaca.trading.client import TradingClient
     from alpaca.trading.requests import GetOrdersRequest, GetPortfolioHistoryRequest
     from alpaca.trading.enums import OrderSide, QueryOrderStatus, OrderStatus
 except ImportError:
-    TradingClient = None
+    TradingClient = None  # type: ignore[assignment,misc]
+
 
 class PerformanceTracker:
     """Tracks and calculates portfolio performance using Alpaca data."""
@@ -21,7 +22,7 @@ class PerformanceTracker:
     def __init__(self):
         self.api_key = os.environ.get("ALPACA_API_KEY")
         self.secret_key = os.environ.get("ALPACA_SECRET_KEY")
-        if TradingClient:
+        if TradingClient is not None:
             from stock_sentiment.config import load_settings
             settings = load_settings()
             env_paper = os.environ.get("ALPACA_PAPER")

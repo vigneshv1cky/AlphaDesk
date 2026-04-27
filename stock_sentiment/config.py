@@ -11,6 +11,7 @@ _DEFAULTS: dict = {
     "alpaca_paper": True,
     "alpaca_live_api_key": "",
     "alpaca_live_secret_key": "",
+    "fixed_position_dollars": 0,
 }
 
 

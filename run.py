@@ -85,8 +85,8 @@ It does NOT constitute financial advice.
     parser.add_argument(
         "--every",
         type=float,
-        default=0.5,
-        help="Schedule interval in hours (default: 0.5 = 30 minutes)",
+        default=0.25,
+        help="Schedule interval in hours (default: 0.25 = 15 minutes)",
     )
     parser.add_argument(
         "--no-backtest",

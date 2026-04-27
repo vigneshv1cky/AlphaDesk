@@ -22,7 +22,12 @@ SCREEN_UNIVERSE = [
     "SLAB", "ACLS", "RMBS", "DIOD", "INDI", "SITM", "CRUS", "LSCC", "MTSI", "NVTS",
     "POWI", "V", "MA", "GS", "JPM", "BAC", "MS", "C", "WFC",
     "AXP", "BLK", "MSTR", "COIN", "WULF", "IREN", "MARA", "RIOT", "CLSK",
-    "HUT", "CORZ", "CIFR", "PYPL", "NU", "IBKR", "ALLY", "STNE", "LMT", "RTX",
+    "HUT", "CORZ", "CIFR", "PYPL", "NU", "IBKR", "ALLY", "STNE", "SQ", "LC", "RKT",
+    "PGR", "TRV", "CB", "AFL", "MET", "PRU",
+    "BX", "KKR", "APO", "BRK-B",
+    "CME", "ICE", "CBOE", "SPGI", "MCO",
+    "USB", "PNC", "TFC", "FITB",
+    "LMT", "RTX",
     "NOC", "GD", "BA", "LHX", "HWM", "TDG", "HII", "LDOS", "BWXT", "AXON",
     "RKLB", "IRDM", "KTOS", "XOM", "CVX", "COP", "OXY", "EOG", "SLB", "PBR",
     "TTE", "SHEL", "BP", "EQNR", "MPC", "PSX", "VLO", "APA", "MUR", "DVN",
@@ -98,7 +103,14 @@ class StockScreener:
                 # Barricade 1: Relative Volume
                 volumes = df["Volume"].astype(float)
                 avg_vol = float(volumes.tail(20).mean())
-                rvol = float(volumes.iloc[-1]) / avg_vol if avg_vol > 0 else 0
+                # Use previous session if today's bar is still partial (market open)
+                last_bar_date = volumes.index[-1].date()
+                vol_for_rvol = (
+                    float(volumes.iloc[-2])
+                    if last_bar_date >= datetime.now(timezone.utc).date() and len(volumes) >= 2
+                    else float(volumes.iloc[-1])
+                )
+                rvol = vol_for_rvol / avg_vol if avg_vol > 0 else 0
                 if rvol < 1.0:
                     rvol_rejected += 1
                     continue

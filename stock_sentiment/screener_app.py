@@ -10,7 +10,6 @@ import feedparser
 from rich.console import Console
 
 from stock_sentiment.display.screener_dashboard import ScreenerDashboard
-from stock_sentiment.market.market_regime import detect_regime
 from stock_sentiment.market.price_fetcher import PriceFetcher
 from stock_sentiment.market.screener import StockScreener
 from stock_sentiment.market.stock_predictor import StockPredictor
@@ -37,14 +36,10 @@ class ScreenerApp:
         from datetime import datetime as _dt
         now_str = _dt.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-        # Detect market regime — adjusts buy threshold and position sizing
-        regime = detect_regime()
-
         # ── Header ────────────────────────────────────────────────────────
         console.rule("[bold cyan]🧠  AI Decision Engine[/bold cyan]")
         console.print(
-            f"  [dim]Trigger:[/dim] [yellow]{trigger}[/yellow]  ·  {now_str}\n"
-            f"  [dim]Market:[/dim]  [bold]{regime}[/bold]"
+            f"  [dim]Trigger:[/dim] [yellow]{trigger}[/yellow]  ·  {now_str}"
         )
         console.rule()
         console.print()
@@ -140,31 +135,38 @@ class ScreenerApp:
         # Step 6: Save to history + check alerts
         alerts = []
         history = None
+        run_id = None
         try:
             from stock_sentiment.history import History
             from stock_sentiment.alerts import AlertManager
             history = History()
-            history.save_run(predictions, 0.0, self.screener.top_n, trigger_type=trigger)
+            run_id = history.save_run(predictions, 0.0, self.screener.top_n, trigger_type=trigger)
             alert_mgr = AlertManager(history, disable_notifications=True)
             alerts = alert_mgr.check_and_alert(predictions)
         except Exception as e:
             import traceback
             print(f"[ScreenerApp] ERROR in data persistence: {e}")
             traceback.print_exc()
-        finally:
-            if history:
-                history.close()
 
         # Step 7: Execute trades via Alpaca (regime sets threshold + sizing)
         if execute_trades:
             try:
                 from stock_sentiment.market.broker import PaperBroker
                 broker = PaperBroker()
-                broker.execute_trades(predictions, regime=regime, trigger=trigger)
+                exec_log = broker.execute_trades(predictions, trigger=trigger)
+                if history and run_id and exec_log:
+                    for trade in exec_log.get("bought", []) + [
+                        {"symbol": t["in"], "trade_type": t.get("trade_type", "SWING")}
+                        for t in exec_log.get("swapped", [])
+                    ]:
+                        history.update_trade_type(trade["symbol"], run_id, trade.get("trade_type", "SWING"))
             except Exception as e:
                 print(f"[ScreenerApp] Broker error: {e}")
         else:
             print("[ScreenerApp] Step 7: Trade execution skipped (screen-only mode).")
+
+        if history:
+            history.close()
 
         # Step 8: Output
         self.dashboard.render(predictions, len(screened))

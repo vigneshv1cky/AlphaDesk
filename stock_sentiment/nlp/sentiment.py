@@ -1,7 +1,7 @@
-"""Amazon Nova Micro-based financial sentiment scorer (article-level).
+"""Financial sentiment scorer with model fallback chain.
 
-Cheaper than Haiku (~7x) for bulk per-article scoring.
-Qualitative conviction scoring (red flags, catalysts) stays on Haiku in stock_predictor.py.
+Primary: Amazon Nova Micro (cheapest, ~7x cheaper than Haiku).
+Fallbacks: Nova Lite → Claude Haiku → neutral.
 """
 
 import json
@@ -9,10 +9,15 @@ import os
 import re
 from dataclasses import dataclass
 
-
 import boto3
 
-_MODEL_ID = "amazon.nova-micro-v1:0"
+# Tried in order; first success wins.
+_MODEL_CHAIN = [
+    "amazon.nova-micro-v1:0",
+    "amazon.nova-lite-v1:0",
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+]
+
 _SYSTEM = (
     "You are a financial sentiment scorer for equity investors. "
     "Score each numbered headline from -1.0 (very negative) to 1.0 (very positive). "
@@ -37,8 +42,29 @@ def _from_score(s: float) -> SentimentResult:
     return SentimentResult(label=label, score=abs(s), normalized=s)
 
 
+def _parse_scores(text_out: str, n: int) -> list[float] | None:
+    """Extract a list of n floats from model output. Returns None if unparseable."""
+    m = re.search(r'\[[\s\S]*\]', text_out)
+    if m:
+        try:
+            scores = json.loads(m.group())
+            if isinstance(scores, list):
+                while len(scores) < n:
+                    scores.append(0.0)
+                return [float(s) for s in scores[:n]]
+        except Exception:
+            pass
+    raw_nums = re.findall(r'-?\d+(?:\.\d+)?', text_out)
+    if raw_nums:
+        scores = [float(x) for x in raw_nums[:n]]
+        while len(scores) < n:
+            scores.append(0.0)
+        return scores
+    return None
+
+
 class SentimentAnalyzer:
-    """Nova Micro-backed bulk article sentiment scorer."""
+    """Bulk article sentiment scorer with Nova Micro → Nova Lite → Haiku fallback."""
 
     def __init__(self, region_name: str | None = None):
         self._region = region_name or os.environ.get("AWS_REGION", "us-east-1")
@@ -53,50 +79,39 @@ class SentimentAnalyzer:
         results = self.analyze_batch([text])
         return results[0] if results else _neutral()
 
-    _BATCH_SIZE = 50  # keeps output well within token limits
+    _BATCH_SIZE = 50
 
     def analyze_batch(self, texts: list[str]) -> list[SentimentResult]:
         if not texts:
             return []
 
-        print(f"[NLP] Nova Micro sentiment scoring {len(texts)} articles (batch_size={self._BATCH_SIZE})...")
+        print(f"[NLP] Sentiment scoring {len(texts)} articles (batch_size={self._BATCH_SIZE})...")
         results: list[SentimentResult] = []
         for batch_start in range(0, len(texts), self._BATCH_SIZE):
             batch = texts[batch_start: batch_start + self._BATCH_SIZE]
             results.extend(self._score_batch(batch, batch_start))
-        print(f"[NLP] Nova Micro scoring complete: {len(results)} results.")
+        print(f"[NLP] Sentiment scoring complete: {len(results)} results.")
         return results
 
     def _score_batch(self, texts: list[str], offset: int) -> list[SentimentResult]:
-        numbered = "\n".join(f"{offset + i + 1}. {t[:300]}" for i, t in enumerate(texts))
+        numbered = "\n".join(f"{offset + i + 1}. {t}" for i, t in enumerate(texts))
 
-        try:
-            resp = self._get_client().converse(
-                modelId=_MODEL_ID,
-                system=[{"text": _SYSTEM}],
-                messages=[{"role": "user", "content": [{"text": numbered}]}],
-                inferenceConfig={"maxTokens": 512, "temperature": 0},
-            )
-            text_out = resp["output"]["message"]["content"][0]["text"].strip()
-            # Try 1: extract the JSON array even if the model prepends explanation text
-            m = re.search(r'\[[\s\S]*\]', text_out)
-            if m:
-                try:
-                    scores = json.loads(m.group())
-                    if isinstance(scores, list):
-                        while len(scores) < len(texts):
-                            scores.append(0.0)
-                        return [_from_score(s) for s in scores[: len(texts)]]
-                except Exception:
-                    pass
-            # Try 2: pull every float/int from the response as a last resort
-            raw_nums = re.findall(r'-?\d+(?:\.\d+)?', text_out)
-            if raw_nums:
-                scores = [float(n) for n in raw_nums[: len(texts)]]
-                while len(scores) < len(texts):
-                    scores.append(0.0)
-                return [_from_score(s) for s in scores]
-            raise ValueError("No scores extractable from response")
-        except Exception as e:
-            print(f"[NLP] Nova Micro batch error (offset={offset}): {e} — falling back to neutral.")
-            return [_neutral() for _ in texts]
+        for model_id in _MODEL_CHAIN:
+            try:
+                resp = self._get_client().converse(
+                    modelId=model_id,
+                    system=[{"text": _SYSTEM}],
+                    messages=[{"role": "user", "content": [{"text": numbered}]}],
+                    inferenceConfig={"maxTokens": 512, "temperature": 0},
+                )
+                text_out = resp["output"]["message"]["content"][0]["text"].strip()
+                scores = _parse_scores(text_out, len(texts))
+                if scores is not None:
+                    print(f"[NLP] Scored batch (offset={offset}) with {model_id}.")
+                    return [_from_score(s) for s in scores]
+                print(f"[NLP] {model_id} returned unparseable output — trying next model.")
+            except Exception as e:
+                print(f"[NLP] {model_id} failed (offset={offset}): {e} — trying next model.")
+
+        print(f"[NLP] All models failed for batch (offset={offset}) — returning neutral.")
+        return [_neutral() for _ in texts]

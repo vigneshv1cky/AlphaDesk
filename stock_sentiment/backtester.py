@@ -4,14 +4,12 @@ Looks at predictions made 5+ days ago, fetches what the stock
 actually did, and reports accuracy.
 """
 
-from datetime import datetime, timezone
-
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from stock_sentiment.history import History
+from stock_sentiment.history import BaseStorage, History
 from stock_sentiment.market.price_fetcher import PriceFetcher
 
 console = Console()
@@ -20,7 +18,7 @@ console = Console()
 class Backtester:
     """Checks past predictions against actual outcomes."""
 
-    def __init__(self, history: History = None):
+    def __init__(self, history: BaseStorage | None = None):
         self.history = history or History()
         self.price_fetcher = PriceFetcher(cache_ttl_seconds=300)
 
@@ -28,7 +26,6 @@ class Backtester:
         """Check all predictions old enough and report results."""
         console.print("\n[bold cyan]Running Backtest...[/bold cyan]\n")
 
-        # Find predictions that haven't been checked yet
         unchecked = self.history.get_predictions_needing_backtest(min_age_days)
 
         if not unchecked:
@@ -39,12 +36,10 @@ class Backtester:
 
         console.print(f"  Found {len(unchecked)} predictions to check...")
 
-        # Fetch current prices for all symbols
         symbols = list(set(p["symbol"] for p in unchecked))
         console.print(f"  Fetching prices for {len(symbols)} symbols...")
 
         import yfinance as yf
-        # We need historical data from prediction date to now
         prices_data = yf.download(
             symbols,
             period="1mo",
@@ -76,7 +71,6 @@ class Backtester:
                 closes = df["Close"].astype(float)
                 dates = [str(d)[:10] for d in closes.index]
 
-                # Find the prediction date index
                 pred_idx = None
                 for i, d in enumerate(dates):
                     if d >= pred_date:
@@ -86,8 +80,7 @@ class Backtester:
                 if pred_idx is None:
                     continue
 
-                # Get prices at 1d, 3d, 5d, 10d after prediction
-                prices = {}
+                prices: dict[str, float | None] = {}
                 for label, offset in [("1d", 1), ("3d", 3), ("5d", 5), ("10d", 10)]:
                     idx = pred_idx + offset
                     if idx < len(closes):
@@ -98,8 +91,6 @@ class Backtester:
                         prices[label] = None
                         prices[f"ret_{label}"] = None
 
-                # Was the prediction correct?
-                # BULLISH = stock went up; BEARISH = stock went down
                 ret_5d = prices.get("ret_5d") or prices.get("ret_3d") or prices.get("ret_1d")
                 if ret_5d is not None:
                     if pred["prediction"] == "BULLISH":
@@ -107,13 +98,13 @@ class Backtester:
                     elif pred["prediction"] == "BEARISH":
                         correct = ret_5d < 0
                     else:  # NEUTRAL
-                        correct = abs(ret_5d) < 3  # Within 3% counts as correct for NEUTRAL
+                        correct = abs(ret_5d) < 3
                 else:
                     correct = None
 
                 if correct is not None:
                     self.history.save_outcome(
-                        pred["id"], symbol, pred_price, prices, correct,
+                        pred["predicted_at"], symbol, pred_price, prices, correct,
                         ret_5d_pct=prices.get("ret_5d"),
                     )
                     checked += 1
@@ -125,29 +116,25 @@ class Backtester:
         self._show_results()
 
     def _show_existing_stats(self):
-        """Show stats from previously checked predictions."""
         stats = self.history.get_backtest_stats()
         if stats["total"] == 0:
             return
-
         console.print(self._render_stats(stats))
         console.print()
         console.print(self._render_outcomes_table())
 
     def _show_results(self):
-        """Show full backtest results."""
         stats = self.history.get_backtest_stats()
         console.print(self._render_stats(stats))
         console.print()
         console.print(self._render_outcomes_table())
 
     def _render_stats(self, stats: dict) -> Panel:
-        """Render aggregate backtest statistics."""
         if stats["total"] == 0:
             return Panel("[dim]No backtest data yet.[/dim]", title="Backtest Stats")
 
         accuracy_color = "green" if stats["accuracy"] > 0.6 else "yellow" if stats["accuracy"] > 0.4 else "red"
-        bullish_acc_color = "green" if stats["bullish_accuracy"] > 0.6 else "yellow" if stats["bullish_accuracy"] > 0.4 else "red"
+        bullish_acc_color = "green" if stats.get("bullish_accuracy", 0) > 0.6 else "yellow" if stats.get("bullish_accuracy", 0) > 0.4 else "red"
 
         def fmt_ret(r):
             if r is None:
@@ -158,13 +145,13 @@ class Backtester:
         lines = [
             f"  Total predictions tested: [bold]{stats['total']}[/bold]",
             f"  Overall accuracy:         [{accuracy_color}][bold]{stats['accuracy']:.1%}[/bold][/{accuracy_color}] ({stats['correct']}/{stats['total']})",
-            f"  Bullish accuracy:         [{bullish_acc_color}][bold]{stats['bullish_accuracy']:.1%}[/bold][/{bullish_acc_color}] ({stats['bullish_total']} bullish predictions)",
-            f"",
-            f"  Avg return after predictions:",
-            f"    1 day:  {fmt_ret(stats['avg_return_1d'])}",
-            f"    3 days: {fmt_ret(stats['avg_return_3d'])}",
-            f"    5 days: {fmt_ret(stats['avg_return_5d'])}",
-            f"   10 days: {fmt_ret(stats['avg_return_10d'])}",
+            f"  Bullish accuracy:         [{bullish_acc_color}][bold]{stats.get('bullish_accuracy', 0):.1%}[/bold][/{bullish_acc_color}] ({stats.get('bullish_total', 0)} bullish predictions)",
+            "",
+            "  Avg return after predictions:",
+            f"    1 day:  {fmt_ret(stats.get('avg_return_1d'))}",
+            f"    3 days: {fmt_ret(stats.get('avg_return_3d'))}",
+            f"    5 days: {fmt_ret(stats.get('avg_return_5d'))}",
+            f"   10 days: {fmt_ret(stats.get('avg_return_10d'))}",
         ]
 
         return Panel(
@@ -174,8 +161,7 @@ class Backtester:
         )
 
     def _render_outcomes_table(self) -> Panel:
-        """Render recent individual outcomes."""
-        outcomes = self.history.get_outcomes(limit=30)
+        outcomes = self.history.get_outcomes_with_subscores()[:30]
         if not outcomes:
             return Panel("[dim]No individual outcomes to show.[/dim]", title="Outcomes")
 
@@ -214,12 +200,12 @@ class Backtester:
             table.add_row(
                 o["symbol"],
                 Text(o["prediction"], style=pred_style),
-                f"{o['confidence']:.0f}%",
+                f"{o.get('confidence', o.get('overall_score', 0)):.0f}%",
                 f"${o['price_at_prediction']:.2f}",
-                fmt_ret(o["return_1d_pct"]),
-                fmt_ret(o["return_3d_pct"]),
-                fmt_ret(o["return_5d_pct"]),
-                fmt_ret(o["return_10d_pct"]),
+                fmt_ret(o.get("return_1d_pct") or o.get("ret_1d")),
+                fmt_ret(o.get("return_3d_pct") or o.get("ret_3d")),
+                fmt_ret(o.get("return_5d_pct") or o.get("ret_5d_pct")),
+                fmt_ret(o.get("return_10d_pct") or o.get("ret_10d")),
                 correct_text,
                 Text(o.get("predicted_move", "")[:18] or "", style="dim"),
             )

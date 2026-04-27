@@ -15,7 +15,9 @@ Actions:
 import asyncio
 import json
 import os
+import re
 import threading
+import time
 from datetime import datetime, timezone
 
 import boto3
@@ -31,6 +33,8 @@ _HAIKU_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 _NOVA_THRESHOLD = 0.65    # abs(score) below this → ignore (noise)
 _ENTRY_MIN_SCORE = 78     # Haiku conviction required for a real-time entry
 _ACTION_COOLDOWN_MIN = 15  # minutes between actions on the same symbol
+_HAIKU_RETRIES = 3
+_HAIKU_RETRY_DELAY = 2.0  # seconds between retries (doubles each attempt)
 
 
 class NewsMonitor:
@@ -42,6 +46,7 @@ class NewsMonitor:
         self._held: set[str] = set()
         self._cooldowns: dict[str, datetime] = {}
         self._lock = threading.Lock()
+        self._haiku_lock = threading.Lock()  # serialize Bedrock calls to avoid throttling
         self._nova = SentimentAnalyzer()
         self._bedrock = None
         self._region = os.environ.get("AWS_REGION", "us-east-1")
@@ -137,8 +142,9 @@ class NewsMonitor:
                 f"  [dim]{article.headline[:80]} ({article.source})[/dim]"
             )
 
-            # Stage 2 — Haiku deep analysis
+            # Stage 2 — Haiku deep analysis (cooldown set regardless of action to rate-limit calls)
             llm = self._haiku_analyze(symbol, article.headline, result.normalized)
+            self._set_cooldown(symbol)
 
             if llm.get("red_flag") and symbol in held:
                 console.print(
@@ -148,7 +154,6 @@ class NewsMonitor:
                 )
                 try:
                     self.broker._close_position_safely(symbol)
-                    self._set_cooldown(symbol)
                 except Exception as e:
                     console.print(f"  [red]✖  Close failed for {symbol}: {e}[/red]")
 
@@ -164,7 +169,6 @@ class NewsMonitor:
                     f"  [dim]{llm.get('reasoning', '')}[/dim]"
                 )
                 self._attempt_entry(symbol, llm["score"])
-                self._set_cooldown(symbol)
 
     # ------------------------------------------------------------------
     # Haiku single-stock analysis
@@ -178,18 +182,29 @@ class NewsMonitor:
             "or red flag (SEC/DOJ, lawsuit, guidance cut, CEO departure, recall).\n"
             'Return ONLY JSON: {"score": 0-100, "red_flag": bool, "reasoning": "one sentence"}'
         )
-        try:
-            resp = self._get_bedrock().converse(
-                modelId=_HAIKU_MODEL,
-                system=[{"text": "You are a financial news analyst for equity swing trading. Be concise."}],
-                messages=[{"role": "user", "content": [{"text": prompt}]}],
-                inferenceConfig={"maxTokens": 200, "temperature": 0},
-            )
-            text = resp["output"]["message"]["content"][0]["text"]
-            return json.loads(text)
-        except Exception as e:
-            console.print(f"  [yellow]⚠  Haiku call failed for {symbol}: {e}[/yellow]")
-            return {"score": 50, "red_flag": False, "reasoning": "unavailable"}
+        with self._haiku_lock:
+            delay = _HAIKU_RETRY_DELAY
+            for attempt in range(_HAIKU_RETRIES):
+                try:
+                    resp = self._get_bedrock().converse(
+                        modelId=_HAIKU_MODEL,
+                        system=[{"text": "You are a financial news analyst for equity swing trading. Be concise."}],
+                        messages=[{"role": "user", "content": [{"text": prompt}]}],
+                        inferenceConfig={"maxTokens": 200, "temperature": 0},
+                    )
+                    text = resp["output"]["message"]["content"][0]["text"].strip()
+                    if not text:
+                        raise ValueError("empty response")
+                    # extract JSON block in case model wraps it in prose
+                    m = re.search(r"\{.*\}", text, re.DOTALL)
+                    return json.loads(m.group() if m else text)
+                except Exception as e:
+                    if attempt < _HAIKU_RETRIES - 1:
+                        time.sleep(delay)
+                        delay *= 2
+                    else:
+                        console.print(f"  [yellow]⚠  Haiku call failed for {symbol}: {e}[/yellow]")
+        return {"score": 50, "red_flag": False, "reasoning": "unavailable"}
 
     # ------------------------------------------------------------------
     # Entry helper

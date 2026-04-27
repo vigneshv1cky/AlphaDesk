@@ -58,7 +58,14 @@
                     <div class="metric-cards" id="perf-metrics" style="display: none;"></div>
 
                     <div id="perf-positions" class="list-container" style="display: none;">
-                        <h3>Active Positions</h3>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+                            <h3 style="margin:0;">Active Positions</h3>
+                            <div style="display:flex; align-items:center; gap:0.75rem;">
+                                <span style="font-size:11px; color:#8b949e;" id="refresh-last-updated">—</span>
+                                <div class="spinner" id="refresh-spinner" style="visibility:hidden; width:16px; height:16px; border-width:2px;"></div>
+                                <button class="action-btn" id="refresh-btn" onclick="loadPerformance()" style="padding:0.3rem 0.75rem; font-size:12px;">Refresh</button>
+                            </div>
+                        </div>
                         <div id="positions-list"></div>
                     </div>
 
@@ -70,7 +77,6 @@
                             <h3 style="margin:0; color:var(--accent-color);">Last Execution</h3>
                             <span id="exec-meta" style="font-size:12px; color:#8b949e;"></span>
                         </div>
-                        <div id="exec-regime" style="font-size:12px; color:#8b949e; margin-bottom:1rem;"></div>
                         <div id="exec-bought"></div>
                         <div id="exec-sold"></div>
                         <div id="exec-swapped"></div>
@@ -92,14 +98,33 @@
                     </div>
                     <div id="trade-result" style="text-align: left; margin-top: 1rem;"></div>
                 </div>
-                <div style="text-align: left; margin-top: 1rem;">
-                    <button class="action-btn" onclick="loadPerformance()">Refresh Metrics</button>
-                </div>
             </div>
 
             <!-- HISTORY TAB -->
             <div id="history-tab" class="tab-content">
                 <h3>Closed Trade Log (P/L)</h3>
+
+                <div id="trade-summary" style="display:none; margin-bottom:1.25rem;">
+                    <div class="metric-cards" style="grid-template-columns: repeat(4, 1fr);">
+                        <div class="card">
+                            <h3>Total P/L</h3>
+                            <div class="value" id="summary-total-pl">—</div>
+                        </div>
+                        <div class="card">
+                            <h3>Win Rate</h3>
+                            <div class="value" id="summary-win-rate">—</div>
+                        </div>
+                        <div class="card">
+                            <h3>Avg Win</h3>
+                            <div class="value" id="summary-avg-win" style="color:#3fb950;">—</div>
+                        </div>
+                        <div class="card">
+                            <h3>Avg Loss</h3>
+                            <div class="value" id="summary-avg-loss" style="color:#f85149;">—</div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="spinner" id="history-spinner" style="display: none;"></div>
                 <div class="history-table-container">
                     <table class="history-table">
@@ -109,9 +134,9 @@
                                 <th>Entry</th>
                                 <th>Exit</th>
                                 <th>Qty</th>
-                                <th>$ P/L</th>
-                                <th>% Ret</th>
-                                <th>Closed At</th>
+                                <th class="sortable" data-col="pl_dollars" onclick="sortHistory(this)">$ P/L <span class="sort-arrow">↕</span></th>
+                                <th class="sortable" data-col="pl_pct" onclick="sortHistory(this)">% Ret <span class="sort-arrow">↕</span></th>
+                                <th class="sortable" data-col="exit_time" onclick="sortHistory(this)">Closed At <span class="sort-arrow">↕</span></th>
                                 <th>Status</th>
                             </tr>
                         </thead>
@@ -138,7 +163,7 @@
             <div id="settings-tab" class="tab-content">
                 <h3 style="margin-bottom: 0.25rem;">Bot Settings</h3>
                 <p style="color: #8b949e; font-size: 13px; margin-bottom: 2rem;">
-                    Changes take effect on the next screener cycle (within 30 minutes).
+                    Changes take effect on the next screener cycle (within 15 minutes).
                 </p>
 
                 <div
@@ -180,6 +205,24 @@
                                 border:1px solid var(--border-color); background:#161b22;
                                 color:#e6edf3; font-size:13px; box-sizing:border-box;">
                         </div>
+                    </div>
+                </div>
+
+                <div
+                    style="border:1px solid var(--border-color); border-radius:8px; padding:1.5rem; background:#0d1117; margin-bottom:1rem;">
+                    <h4 style="margin-top:0; color:var(--accent-color);">Position Sizing</h4>
+
+                    <div style="margin-bottom:0.5rem;">
+                        <label style="display:block; font-size:13px; color:#8b949e; margin-bottom:0.5rem;">Fixed Dollar Amount Per Trade</label>
+                        <input id="fixed-position-dollars" type="number" min="0" step="100"
+                            placeholder="0 = dynamic sizing (% of portfolio)"
+                            style="width:100%; padding:0.5rem 0.75rem; border-radius:6px;
+                                border:1px solid var(--border-color); background:#161b22;
+                                color:#e6edf3; font-size:13px; box-sizing:border-box;">
+                        <p style="font-size:12px; color:#8b949e; margin-top:0.5rem; margin-bottom:0;">
+                            Enter a fixed $ amount (e.g. <strong style="color:#e6edf3;">1000</strong>) to invest the same amount in every trade regardless of conviction score — equal weighting.
+                            Set to <strong style="color:#e6edf3;">0</strong> to use the default dynamic sizing (5–9.5% of portfolio scaled by conviction score).
+                        </p>
                     </div>
                 </div>
 

@@ -22,7 +22,7 @@ from stock_sentiment.cloud_output import generate_html_report  # noqa: E402
 from stock_sentiment.config import load_settings, save_settings  # noqa: E402
 from stock_sentiment.history import History  # noqa: E402
 from stock_sentiment.market.performance import PerformanceTracker  # noqa: E402
-from stock_sentiment.scheduler import Scheduler  # noqa: E402
+from stock_sentiment.scheduler import Scheduler, _cycle_lock  # noqa: E402
 from stock_sentiment.screener_app import ScreenerApp  # noqa: E402
 
 app = FastAPI(title="Sentinel")
@@ -40,7 +40,7 @@ def run_bot_in_background():
     try:
         time.sleep(5)
         print("[Web] Initializing Autonomous Scheduler (Triple-Door Logic)")
-        scheduler = Scheduler(top_n=40, interval_hours=0.5)
+        scheduler = Scheduler(top_n=40, interval_hours=0.25)
         scheduler.run()
     except Exception as e:
         print(f"[Web] CRITICAL: Background bot failed: {e}")
@@ -60,7 +60,6 @@ async def startup_event():
 
 
 executor = ThreadPoolExecutor(max_workers=2)
-_trade_lock = threading.Lock()
 
 # Random token generated on login — never the password itself
 _session_token: str | None = None
@@ -155,8 +154,8 @@ async def screen_stocks():
 @app.post("/api/force-trade", response_class=HTMLResponse, dependencies=[Depends(check_auth)])
 async def force_trade():
     def _run():
-        if not _trade_lock.acquire(blocking=False):
-            return "<p style='color: orange'>Trade cycle already running — try again in a moment.</p>"
+        if not _cycle_lock.acquire(blocking=True, timeout=300):
+            return "<p style='color: orange'>Scheduler is still running — timed out after 5 minutes.</p>"
         scheduler = Scheduler(top_n=40)
         try:
             predictions, count, _ = scheduler.execute_cycle(trigger="FORCE_EXEC")
@@ -167,7 +166,7 @@ async def force_trade():
             return f"<p style='color: red'>Error: {str(e)}</p>"
         finally:
             scheduler.history.close()
-            _trade_lock.release()
+            _cycle_lock.release()
 
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(executor, _run)
@@ -211,6 +210,7 @@ def get_performance():
                     "current_price": float(p.current_price),
                     "unrealized_pl": float(p.unrealized_pl),
                     "unrealized_plpc": float(p.unrealized_plpc) * 100,
+                    "side": "SHORT" if str(getattr(p, "side", "")).lower() in ("short", "positionside.short") else "LONG",
                 }
                 for p in tracker.client.get_all_positions()
             ]
@@ -257,6 +257,7 @@ def get_settings():
         "alpaca_paper": settings.get("alpaca_paper", True),
         "alpaca_live_key_set": bool(live_key),
         "alpaca_live_key_hint": f"····{live_key[-4:]}" if len(live_key) >= 4 else "",
+        "fixed_position_dollars": settings.get("fixed_position_dollars", 0),
     }
 
 
@@ -266,6 +267,7 @@ class SettingsUpdate(BaseModel):
     alpaca_paper: bool | None = None
     alpaca_live_api_key: str | None = None
     alpaca_live_secret_key: str | None = None
+    fixed_position_dollars: float | None = None
 
 
 @app.post("/api/settings", response_class=JSONResponse, dependencies=[Depends(check_auth)])

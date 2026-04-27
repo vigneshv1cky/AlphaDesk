@@ -1,6 +1,7 @@
-"""Scheduler: auto-run the screener on a schedule and monitor live news between cycles."""
+"""Scheduler: auto-run the screener every 15 minutes during market hours."""
 
 import os
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -10,19 +11,21 @@ from stock_sentiment.alerts import AlertManager
 from stock_sentiment.backtester import Backtester
 from stock_sentiment.history import History
 from stock_sentiment.market.broker import PaperBroker
-from stock_sentiment.market.news_monitor import NewsMonitor
 from stock_sentiment.screener_app import ScreenerApp
 
 console = Console()
 
+# Shared lock — background scheduler holds this during execute_cycle(); force-trade waits on it.
+_cycle_lock = threading.Lock()
+
 
 class Scheduler:
-    """Runs the screener on a schedule with real-time news monitoring between cycles."""
+    """Runs the full screen → predict → trade pipeline every 15 minutes."""
 
     def __init__(
         self,
         top_n: int = 40,
-        interval_hours: float = 0.5,
+        interval_hours: float = 0.25,
         run_backtest: bool = True,
         min_return: float = 10.0,
     ):
@@ -31,7 +34,6 @@ class Scheduler:
         self.alerts = AlertManager(self.history, disable_notifications=True)
         self.backtester = Backtester(self.history)
         self.broker = PaperBroker()
-        self.monitor = NewsMonitor(broker=self.broker)
         self.interval_hours = interval_hours
         self.run_backtest = run_backtest
         self.top_n = top_n
@@ -52,9 +54,6 @@ class Scheduler:
         console.print(f"  History:  {storage_type}")
         console.print()
 
-        # Start real-time news monitor in background
-        self.monitor.start()
-
         try:
             while True:
                 time.sleep(1)
@@ -74,7 +73,7 @@ class Scheduler:
                         if market_open:
                             time_to_close = (clock.next_close - clock.timestamp).total_seconds()
                             mins_to_close = int(time_to_close // 60)
-                            if time_to_close < 1800:
+                            if time_to_close < 900:
                                 market_open = False
                                 status_msg = "Market Closing Soon - Skipping"
                                 console.print(
@@ -87,7 +86,7 @@ class Scheduler:
                                 f"[cyan]🔔  Pre-market window ({int(time_to_open//60)}m to open) — preparing orders.[/cyan]"
                             )
 
-                        if not market_open and status_msg.startswith("Market Closed"):
+                        if not market_open and "Closing" not in status_msg:
                             next_open = clock.next_open.strftime("%H:%M UTC")
                             status_msg = f"Market Closed until {next_open}"
                     except Exception as e:
@@ -108,15 +107,8 @@ class Scheduler:
                     console.print(f"[bold]{'─' * 60}[/bold]\n")
 
                     self.history.save_heartbeat("Active", f"Executing Cycle #{self.run_count}")
-                    predictions, _, _ = self.execute_cycle(trigger="BOT SCAN")
-
-                    if predictions and self.broker.client:
-                        try:
-                            positions = self.broker.client.get_all_positions()
-                            held = {p.symbol for p in positions}
-                        except Exception:
-                            held = set()
-                        self.monitor.update_watchlist(predictions, held)
+                    with _cycle_lock:
+                        self.execute_cycle(trigger="BOT SCAN")
 
                 # Calculate sleep time
                 interval_seconds = self.interval_hours * 3600
@@ -124,7 +116,7 @@ class Scheduler:
                     try:
                         clock = self.broker.client.get_clock()
                         time_to_open = (clock.next_open - clock.timestamp).total_seconds()
-                        if not clock.is_open or (clock.next_close - clock.timestamp).total_seconds() < 1800:
+                        if not clock.is_open or (clock.next_close - clock.timestamp).total_seconds() < 900:
                             if time_to_open > 900:
                                 interval_seconds = time_to_open - 900
                             elif time_to_open > 0:
@@ -177,6 +169,9 @@ class Scheduler:
         return predictions, screened_count, alerts
 
     def _format_interval(self) -> str:
+        mins = int(self.interval_hours * 60)
         if self.interval_hours >= 24:
             return f"{self.interval_hours / 24:.0f} days"
-        return "30 minutes" if self.interval_hours == 0.5 else f"{self.interval_hours} hours"
+        if self.interval_hours >= 1:
+            return f"{self.interval_hours:.0f} hours"
+        return f"{mins} minutes"

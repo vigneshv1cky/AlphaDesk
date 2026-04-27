@@ -5,57 +5,94 @@ Supports dual backends: DynamoDB and SQLite (with WAL mode for concurrency).
 
 import os
 import json
-import uuid
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Optional, List, Dict, Set, Any
+from typing import Optional
 
 import boto3
-from boto3.dynamodb.conditions import Key, Attr
+from boto3.dynamodb.conditions import Attr
 
 # --- Helper Utilities ---
 
+
 def _to_decimal(obj):
-    if isinstance(obj, float): return Decimal(str(obj))
-    if isinstance(obj, dict): return {k: _to_decimal(v) for k, v in obj.items()}
-    if isinstance(obj, list): return [_to_decimal(v) for v in obj]
+    if isinstance(obj, float):
+        return Decimal(str(obj))
+    if isinstance(obj, dict):
+        return {k: _to_decimal(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_to_decimal(v) for v in obj]
     return obj
 
+
 def _from_decimal(obj):
-    if isinstance(obj, Decimal): return float(obj)
-    if isinstance(obj, dict): return {k: _from_decimal(v) for k, v in obj.items()}
-    if isinstance(obj, list): return [_from_decimal(v) for v in obj]
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, dict):
+        return {k: _from_decimal(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_from_decimal(v) for v in obj]
     return obj
+
 
 # --- Storage Interface ---
 
 class BaseStorage:
-    def save_run(self, predictions: list, min_return: float, top_n: int, trigger_type: str = "MANUAL") -> str: raise NotImplementedError
-    def get_latest_run(self, exclude_triggers: list | None = None) -> Optional[dict]: raise NotImplementedError
-    def get_predictions_for_run(self, run_id: str) -> list[dict]: raise NotImplementedError
-    def save_heartbeat(self, status: str, message: str = ""): raise NotImplementedError
-    def get_heartbeat(self) -> Optional[dict]: raise NotImplementedError
-    def get_backtest_stats(self) -> dict: raise NotImplementedError
-    def get_predictions_needing_backtest(self, min_age_days: int = 5) -> list[dict]: raise NotImplementedError
-    def save_outcome(self, prediction_id: str, symbol: str, price_at_pred: float, prices: dict, prediction_correct: bool, ret_5d_pct: Optional[float] = None): raise NotImplementedError
-    def get_outcomes_with_subscores(self) -> list[dict]: raise NotImplementedError
-    def close(self): pass
+    def save_run(self, predictions: list, min_return: float, top_n: int, trigger_type: str = "MANUAL") -> str:
+        raise NotImplementedError
+
+    def get_latest_run(self, exclude_triggers: list | None = None) -> Optional[dict]:
+        raise NotImplementedError
+
+    def get_predictions_for_run(self, run_id: str) -> list[dict]:
+        raise NotImplementedError
+
+    def save_heartbeat(self, status: str, message: str = ""):
+        raise NotImplementedError
+
+    def get_heartbeat(self) -> Optional[dict]:
+        raise NotImplementedError
+
+    def get_backtest_stats(self) -> dict:
+        raise NotImplementedError
+
+    def get_predictions_needing_backtest(self, min_age_days: int = 5) -> list[dict]:
+        raise NotImplementedError
+
+    def save_outcome(self, prediction_id: str, symbol: str, price_at_pred: float, prices: dict, prediction_correct: bool, ret_5d_pct: Optional[float] = None):
+        raise NotImplementedError
+
+    def get_outcomes_with_subscores(self) -> list[dict]:
+        raise NotImplementedError
+
+    def close(self):
+        pass
 
     def get_all_symbols_from_last_run(self) -> list[str]:
         latest = self.get_latest_run()
-        if not latest: return []
-        preds = self.get_predictions_for_run(latest.get('id') or latest.get('run_id'))
-        return [p.get('symbol') for p in preds if p.get('symbol')]
+        if not latest:
+            return []
+        run_id = str(latest.get('id') or latest.get('run_id') or '')
+        preds = self.get_predictions_for_run(run_id)
+        return [str(p['symbol']) for p in preds if p.get('symbol')]
 
     def get_prediction_by_symbol_and_run(self, symbol: str, run_id: str) -> Optional[dict]:
         preds = self.get_predictions_for_run(run_id)
         for p in preds:
-            if p.get('symbol') == symbol: return p
+            if p.get('symbol') == symbol:
+                return p
         return None
 
+    def update_trade_type(self, symbol: str, run_id: str, trade_type: str):
+        pass
+
     def save_alert(self, **kwargs):
-        pass # Can be extended to persist alerts
+        pass
+
+    def get_recent_alerts(self, hours: int = 24) -> list[dict]:
+        return []
+
 
 class DynamoDBStorage(BaseStorage):
     def __init__(self, region_name="us-east-1"):
@@ -90,21 +127,25 @@ class DynamoDBStorage(BaseStorage):
     def get_latest_run(self, exclude_triggers: list | None = None) -> Optional[dict]:
         try:
             items = self.runs_table.scan().get('Items', [])
-            if not items: return None
+            if not items:
+                return None
             if exclude_triggers:
                 items = [i for i in items if i.get('trigger_type') not in exclude_triggers]
-            if not items: return None
+            if not items:
+                return None
             latest = max(items, key=lambda x: x['run_at'])
             res = _from_decimal(latest)
             res['id'] = res['run_id']
             return res
-        except: return None
+        except Exception:
+            return None
 
     def get_predictions_for_run(self, run_id: str) -> list[dict]:
         try:
             response = self.preds_table.scan(FilterExpression=Attr('run_id').eq(run_id))
             return [_from_decimal(i) for i in response.get('Items', [])]
-        except: return []
+        except Exception:
+            return []
 
     def save_heartbeat(self, status: str, message: str = ""):
         self.status_table.put_item(Item=_to_decimal({
@@ -116,17 +157,20 @@ class DynamoDBStorage(BaseStorage):
         try:
             res = self.status_table.get_item(Key={'system_id': 'bot_heartbeat'}).get('Item')
             return _from_decimal(res)
-        except: return None
+        except Exception:
+            return None
 
     def get_backtest_stats(self) -> dict:
         try:
             response = self.preds_table.scan(FilterExpression=Attr('checked_at').exists())
             outcomes = response.get('Items', [])
             total = len(outcomes)
-            if total == 0: return {"total": 0}
+            if total == 0:
+                return {"total": 0}
             correct = sum(1 for o in outcomes if o.get('prediction_correct'))
             return {"total": total, "correct": correct, "accuracy": correct / total}
-        except: return {"total": 0}
+        except Exception:
+            return {"total": 0}
 
     def get_predictions_needing_backtest(self, min_age_days: int = 5) -> list[dict]:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=min_age_days)).isoformat()
@@ -145,9 +189,18 @@ class DynamoDBStorage(BaseStorage):
             ExpressionAttributeValues=attr_vals,
         )
 
+    def update_trade_type(self, symbol: str, run_id: str, trade_type: str):
+        try:
+            self.preds_table.update_item(
+                Key={'symbol': symbol, 'predicted_at': run_id},
+                UpdateExpression="SET trade_type = :tt",
+                ExpressionAttributeValues={':tt': trade_type},
+            )
+        except Exception:
+            pass
+
     def get_outcomes_with_subscores(self) -> list[dict]:
         try:
-            from boto3.dynamodb.conditions import Attr
             response = self.preds_table.scan(
                 FilterExpression=Attr('checked_at').exists() & Attr('momentum_score').exists()
             )
@@ -155,17 +208,18 @@ class DynamoDBStorage(BaseStorage):
         except Exception:
             return []
 
+
 class SQLiteStorage(BaseStorage):
     def __init__(self, db_path="~/.stock_screener/local_history.db"):
         self.db_path = os.path.expanduser(db_path)
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30.0)
         self.conn.row_factory = sqlite3.Row
-        
-        # --- WAL MODE (Institutional Fix for Concurrency) ---
+
+        # WAL mode for concurrent read/write from scheduler + web threads
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
-        
+
         self._init_schema()
 
     def _init_schema(self):
@@ -175,13 +229,13 @@ class SQLiteStorage(BaseStorage):
             cursor.execute("SELECT trigger_type FROM runs LIMIT 1")
         except sqlite3.OperationalError:
             cursor.execute("ALTER TABLE runs ADD COLUMN trigger_type TEXT DEFAULT 'UNKNOWN'")
-        
+
         cursor.execute("CREATE TABLE IF NOT EXISTS system_status (system_id TEXT PRIMARY KEY, status TEXT, message TEXT, last_updated TEXT)")
         cursor.execute("""CREATE TABLE IF NOT EXISTS predictions (
-            symbol TEXT, predicted_at TEXT, run_id TEXT, price_at_prediction REAL, prediction TEXT, overall_score REAL, archetype TEXT, volume_ratio REAL, rsi REAL, reasoning TEXT, 
+            symbol TEXT, predicted_at TEXT, run_id TEXT, price_at_prediction REAL, prediction TEXT, overall_score REAL, archetype TEXT, volume_ratio REAL, rsi REAL, reasoning TEXT,
             prediction_correct INTEGER, checked_at TEXT, PRIMARY KEY (symbol, predicted_at))""")
-            
-        # Migration: Add new columns if missing
+
+        # Migration: add new columns if missing
         new_columns = {
             "archetype": "TEXT",
             "volume_ratio": "REAL",
@@ -196,6 +250,8 @@ class SQLiteStorage(BaseStorage):
             "avg_sentiment": "REAL",
             "bullish_count": "INTEGER",
             "ret_5d_pct": "REAL",
+            "trade_type": "TEXT",
+            "direction": "TEXT",
         }
         for col, col_type in new_columns.items():
             try:
@@ -203,14 +259,16 @@ class SQLiteStorage(BaseStorage):
             except sqlite3.OperationalError:
                 print(f"[SQLite] Migration: Adding '{col}' column to predictions...")
                 cursor.execute(f"ALTER TABLE predictions ADD COLUMN {col} {col_type}")
-                
+
         self.conn.commit()
 
     def save_run(self, predictions: list, min_return: float, top_n: int, trigger_type: str = "MANUAL") -> str:
         now = datetime.now(timezone.utc).isoformat()
         print(f"[SQLite] Saving {trigger_type} run...")
-        self.conn.execute("INSERT INTO runs (run_id, run_at, min_return, stock_count, top_n, trigger_type) VALUES (?, ?, ?, ?, ?, ?)", 
-                          (now, now, min_return, len(predictions), top_n, trigger_type))
+        self.conn.execute(
+            "INSERT INTO runs (run_id, run_at, min_return, stock_count, top_n, trigger_type) VALUES (?, ?, ?, ?, ?, ?)",
+            (now, now, min_return, len(predictions), top_n, trigger_type),
+        )
         for p in predictions:
             self.conn.execute(
                 "INSERT INTO predictions (symbol, predicted_at, run_id, price_at_prediction, prediction, "
@@ -235,8 +293,10 @@ class SQLiteStorage(BaseStorage):
             ).fetchone()
         else:
             row = self.conn.execute("SELECT * FROM runs ORDER BY ROWID DESC LIMIT 1").fetchone()
-        if not row: return None
-        res = dict(row); res['id'] = res['run_id']
+        if not row:
+            return None
+        res = dict(row)
+        res['id'] = res['run_id']
         return res
 
     def get_predictions_for_run(self, run_id: str) -> list[dict]:
@@ -244,8 +304,10 @@ class SQLiteStorage(BaseStorage):
         return [dict(r) for r in rows]
 
     def save_heartbeat(self, status: str, message: str = ""):
-        self.conn.execute("INSERT OR REPLACE INTO system_status (system_id, status, message, last_updated) VALUES (?,?,?,?)",
-                          ('bot_heartbeat', status, message, datetime.now(timezone.utc).isoformat()))
+        self.conn.execute(
+            "INSERT OR REPLACE INTO system_status (system_id, status, message, last_updated) VALUES (?,?,?,?)",
+            ('bot_heartbeat', status, message, datetime.now(timezone.utc).isoformat()),
+        )
         self.conn.commit()
 
     def get_heartbeat(self) -> Optional[dict]:
@@ -256,13 +318,16 @@ class SQLiteStorage(BaseStorage):
         rows = self.conn.execute("SELECT * FROM predictions WHERE checked_at IS NOT NULL").fetchall()
         outcomes = [dict(r) for r in rows]
         total = len(outcomes)
-        if total == 0: return {"total": 0}
+        if total == 0:
+            return {"total": 0}
         correct = sum(1 for o in outcomes if o.get('prediction_correct'))
         return {"total": total, "correct": correct, "accuracy": correct / total}
 
     def get_predictions_needing_backtest(self, min_age_days: int = 5) -> list[dict]:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=min_age_days)).isoformat()
-        rows = self.conn.execute("SELECT * FROM predictions WHERE predicted_at < ? AND checked_at IS NULL", (cutoff,)).fetchall()
+        rows = self.conn.execute(
+            "SELECT * FROM predictions WHERE predicted_at < ? AND checked_at IS NULL", (cutoff,)
+        ).fetchall()
         return [dict(r) for r in rows]
 
     def save_outcome(self, prediction_id: str, symbol: str, price_at_pred: float, prices: dict, prediction_correct: bool, ret_5d_pct: Optional[float] = None):
@@ -272,14 +337,24 @@ class SQLiteStorage(BaseStorage):
         )
         self.conn.commit()
 
+    def update_trade_type(self, symbol: str, run_id: str, trade_type: str):
+        self.conn.execute(
+            "UPDATE predictions SET trade_type = ? WHERE symbol = ? AND run_id = ?",
+            (trade_type, symbol, run_id),
+        )
+        self.conn.commit()
+
     def get_outcomes_with_subscores(self) -> list[dict]:
         rows = self.conn.execute(
             "SELECT * FROM predictions WHERE checked_at IS NOT NULL AND momentum_score IS NOT NULL"
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def close(self): self.conn.close()
+    def close(self):
+        self.conn.close()
 
-def History():
-    if os.environ.get("ENV") == "PROD": return DynamoDBStorage()
+
+def History() -> BaseStorage:
+    if os.environ.get("ENV") == "PROD":
+        return DynamoDBStorage()
     return SQLiteStorage()

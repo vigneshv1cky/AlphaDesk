@@ -157,6 +157,21 @@ button.action-btn:hover { background-color: var(--button-hover); }
     color: #8b949e;
     border-bottom: 1px solid var(--border-color);
 }
+.history-table th.sortable {
+    cursor: pointer;
+    user-select: none;
+}
+.history-table th.sortable:hover {
+    background: #1c2128;
+}
+.history-table .sort-arrow {
+    color: #444d56;
+    font-size: 11px;
+    margin-left: 3px;
+}
+.history-table .sort-arrow.active {
+    color: var(--accent-color);
+}
 .history-table td {
     padding: 12px;
     border-bottom: 1px solid var(--border-color);

@@ -36,6 +36,40 @@ function switchTab(tabId) {
   }
 }
 
+let _historyData = [];
+let _historySort = { col: null, asc: true };
+
+function _renderHistoryRows(trades) {
+  const tableBody = document.getElementById("history-table-body");
+  tableBody.innerHTML = "";
+  trades.forEach((trade) => {
+    const plColor = trade.pl_dollars >= 0 ? "bullish" : "bearish";
+    const plPrefix = trade.pl_dollars >= 0 ? "+" : "";
+    tableBody.innerHTML += `<tr><td><strong>${trade.symbol}</strong></td><td>$${trade.entry_price.toFixed(2)}</td><td>$${trade.exit_price.toFixed(2)}</td><td>${trade.qty.toFixed(2)}</td><td class="${plColor}">${plPrefix}$${trade.pl_dollars.toFixed(2)}</td><td class="${plColor}">${plPrefix}${trade.pl_pct.toFixed(2)}%</td><td>${trade.exit_time}</td><td><span class="badge ${trade.status.toLowerCase()}">${trade.status}</span></td></tr>`;
+  });
+}
+
+function sortHistory(th) {
+  const col = th.dataset.col;
+  if (_historySort.col === col) {
+    _historySort.asc = !_historySort.asc;
+  } else {
+    _historySort.col = col;
+    _historySort.asc = false; // default: highest first
+  }
+  document.querySelectorAll(".sortable .sort-arrow").forEach(span => {
+    const isActive = span.closest("th").dataset.col === col;
+    span.textContent = isActive ? (_historySort.asc ? "↑" : "↓") : "↕";
+    span.classList.toggle("active", isActive);
+  });
+  const sorted = [..._historyData].sort((a, b) => {
+    const av = a[col], bv = b[col];
+    if (typeof av === "string") return _historySort.asc ? av.localeCompare(bv) : bv.localeCompare(av);
+    return _historySort.asc ? av - bv : bv - av;
+  });
+  _renderHistoryRows(sorted);
+}
+
 async function loadHistory() {
   const tableBody = document.getElementById("history-table-body");
   const spinner = document.getElementById("history-spinner");
@@ -45,14 +79,33 @@ async function loadHistory() {
     const response = await fetch("/api/history");
     const data = await response.json();
     if (data.history && data.history.length > 0) {
-      data.history.forEach((trade) => {
-        const plColor = trade.pl_dollars >= 0 ? "bullish" : "bearish";
-        const plPrefix = trade.pl_dollars >= 0 ? "+" : "";
-        tableBody.innerHTML += `<tr><td><strong>${trade.symbol}</strong></td><td>$${trade.entry_price.toFixed(2)}</td><td>$${trade.exit_price.toFixed(2)}</td><td>${trade.qty.toFixed(2)}</td><td class="${plColor}">${plPrefix}$${trade.pl_dollars.toFixed(2)}</td><td class="${plColor}">${plPrefix}${trade.pl_pct.toFixed(2)}%</td><td>${trade.exit_time}</td><td><span class="badge ${trade.status.toLowerCase()}">${trade.status}</span></td></tr>`;
-      });
+      _historyData = data.history;
+      _historySort = { col: null, asc: true };
+      _renderHistoryRows(_historyData);
+
+      // Summary stats
+      const trades = data.history;
+      const totalPL = trades.reduce((s, t) => s + t.pl_dollars, 0);
+      const wins = trades.filter(t => t.pl_dollars > 0);
+      const losses = trades.filter(t => t.pl_dollars < 0);
+      const winRate = (wins.length / trades.length) * 100;
+      const avgWin = wins.length ? wins.reduce((s, t) => s + t.pl_dollars, 0) / wins.length : 0;
+      const avgLoss = losses.length ? losses.reduce((s, t) => s + t.pl_dollars, 0) / losses.length : 0;
+
+      const plSign = totalPL >= 0 ? "+" : "";
+      const plColor = totalPL >= 0 ? "#3fb950" : "#f85149";
+      document.getElementById("summary-total-pl").textContent = `${plSign}$${totalPL.toFixed(2)}`;
+      document.getElementById("summary-total-pl").style.color = plColor;
+      document.getElementById("summary-win-rate").textContent = `${winRate.toFixed(1)}%`;
+      document.getElementById("summary-win-rate").style.color = winRate >= 50 ? "#3fb950" : "#f85149";
+      document.getElementById("summary-avg-win").textContent = wins.length ? `+$${avgWin.toFixed(2)}` : "—";
+      document.getElementById("summary-avg-loss").textContent = losses.length ? `-$${Math.abs(avgLoss).toFixed(2)}` : "—";
+      document.getElementById("trade-summary").style.display = "block";
     } else {
+      _historyData = [];
       tableBody.innerHTML =
         '<tr><td colspan="8" style="text-align:center; color:#8b949e">No matched trade pairs found.</td></tr>';
+      document.getElementById("trade-summary").style.display = "none";
     }
   } catch (e) {
     remoteLog("Error loading history: " + e.message, "ERROR");
@@ -114,8 +167,13 @@ function updateTickers() {
 }
 
 async function loadPerformance() {
+  const refreshBtn = document.getElementById("refresh-btn");
+  const refreshSpinner = document.getElementById("refresh-spinner");
+  if (refreshBtn) { refreshBtn.disabled = true; refreshBtn.style.opacity = "0.45"; }
+  if (refreshSpinner) refreshSpinner.style.visibility = "visible";
   try {
     const response = await fetch("/api/performance");
+    if (response.status === 401) { window.location.href = "/login"; return; }
     const data = await response.json();
 
     if (data.bot_status) {
@@ -160,9 +218,15 @@ async function loadPerformance() {
 
     let posHtml = "";
     if (data.positions && data.positions.length > 0) {
-      data.positions.forEach((p) => {
+      const sorted = [...data.positions].sort((a, b) => b.unrealized_plpc - a.unrealized_plpc);
+      posHtml += `<div class="list-item" style="color:#8b949e; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; border-bottom:1px solid var(--border-color); padding-bottom:0.4rem; margin-bottom:0.25rem;"><span>Symbol</span><span>Position</span><span>P/L $</span><span>P/L %</span></div>`;
+      sorted.forEach((p) => {
         const color = p.unrealized_pl >= 0 ? "bullish" : "bearish";
-        posHtml += `<div class="list-item"><strong>${p.symbol}</strong><span>${p.qty.toFixed(2)} @ $${p.avg_entry_price.toFixed(2)}</span><span class="${color}">${p.unrealized_pl >= 0 ? "+" : ""}${p.unrealized_plpc.toFixed(2)}%</span></div>`;
+        const sign = p.unrealized_pl >= 0 ? "+" : "";
+        const side = p.side || "LONG";
+        const sideColor = side === "SHORT" ? "#f85149" : "#3fb950";
+        const sideBadge = `<span style="font-size:9px;background:${sideColor}22;color:${sideColor};border:1px solid ${sideColor}55;border-radius:3px;padding:1px 4px;margin-left:5px;vertical-align:middle;">${side}</span>`;
+        posHtml += `<div class="list-item"><span><strong>${p.symbol}</strong>${sideBadge}</span><span>${p.qty.toFixed(0)} @ $${p.avg_entry_price.toFixed(2)}</span><span class="${color}">${sign}$${p.unrealized_pl.toFixed(2)}</span><span class="${color}">${sign}${p.unrealized_plpc.toFixed(2)}%</span></div>`;
       });
     } else {
       posHtml =
@@ -174,11 +238,24 @@ async function loadPerformance() {
     document.getElementById("initial-load-msg").style.display = "none";
     document.getElementById("perf-metrics").style.display = "grid";
     document.getElementById("perf-positions").style.display = "block";
+
+    const refreshTS = document.getElementById("refresh-last-updated");
+    if (refreshTS) {
+      const now = new Date().toLocaleString("en-US", {
+        timeZone: "America/New_York",
+        hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true,
+      });
+      refreshTS.textContent = `as of ${now} NY`;
+    }
+
     updateTickers();
     startTicker();
     loadLastExecution();
   } catch (e) {
     remoteLog(`Error: ${e.message}`, "ERROR");
+  } finally {
+    if (refreshBtn) { refreshBtn.disabled = false; refreshBtn.style.opacity = "1"; }
+    if (refreshSpinner) refreshSpinner.style.visibility = "hidden";
   }
 }
 
@@ -193,7 +270,6 @@ async function loadLastExecution() {
     const ts = new Date(d.timestamp).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true });
     const triggerLabel = { "FORCE_EXEC": "Manual Override", "BOT SCAN": "Scheduled Bot", "MANUAL": "Screen Only" }[d.trigger] || d.trigger;
     document.getElementById("exec-meta").textContent = `${ts} NY · ${triggerLabel}`;
-    document.getElementById("exec-regime").textContent = d.regime || "";
 
     const hasBuys = d.bought && d.bought.length > 0;
     const hasSells = d.sold && d.sold.length > 0;
@@ -208,15 +284,20 @@ async function loadLastExecution() {
         <table style="width:100%; border-collapse:collapse; font-size:13px;">
           <thead><tr style="color:#8b949e; border-bottom:1px solid var(--border-color);">
             <th style="text-align:left;padding:4px 8px">Symbol</th><th style="text-align:left;padding:4px 8px">Archetype</th>
+            <th style="text-align:left;padding:4px 8px">Type</th>
             <th style="text-align:right;padding:4px 8px">Score</th><th style="text-align:right;padding:4px 8px">Qty</th>
             <th style="text-align:right;padding:4px 8px">Price</th><th style="text-align:right;padding:4px 8px">Cost</th>
             <th style="text-align:left;padding:4px 8px">AI Reason</th>
           </tr></thead><tbody>`;
       d.bought.forEach(b => {
         const reason = (b.reasons || []).find(r => r.length > 20 && !r.startsWith("Archetype") && !r.startsWith("RVOL") && !r.startsWith("Sent:") && !r.startsWith("Earnings")) || (b.reasons || [])[0] || "—";
+        const typeTag = b.trade_type === "DAY"
+          ? `<span style="font-size:11px;font-weight:700;color:#f0883e;border:1px solid #f0883e;border-radius:3px;padding:1px 5px">DAY</span>`
+          : `<span style="font-size:11px;font-weight:600;color:#58a6ff;border:1px solid #58a6ff;border-radius:3px;padding:1px 5px">SWING</span>`;
         bHtml += `<tr style="border-bottom:1px solid #21262d;">
           <td style="padding:6px 8px;font-weight:700;color:#e6edf3">${b.symbol}</td>
           <td style="padding:6px 8px;color:#8b949e">${b.archetype || "—"}</td>
+          <td style="padding:6px 8px">${typeTag}</td>
           <td style="padding:6px 8px;text-align:right;color:#3fb950">${b.score}</td>
           <td style="padding:6px 8px;text-align:right">${b.qty}</td>
           <td style="padding:6px 8px;text-align:right">$${(b.price||0).toFixed(2)}</td>
@@ -293,6 +374,11 @@ async function runScreener() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
+    if (response.status === 401) {
+      document.getElementById("screener-result").innerHTML =
+        "<p style='color:#f85149;'>Session expired — please <a href='/login' style='color:#58a6ff;'>log in again</a>.</p>";
+      return;
+    }
     document.getElementById("screener-result").innerHTML =
       await response.text();
   } catch (e) {
@@ -326,6 +412,11 @@ async function forceTrade() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
+    if (response.status === 401) {
+      document.getElementById("trade-result").innerHTML =
+        "<p style='color:#f85149;'>Session expired — please <a href='/login' style='color:#58a6ff;'>log in again</a>.</p>";
+      return;
+    }
     document.getElementById("trade-result").innerHTML = await response.text();
     await loadPerformance();
     await loadLastExecution();
@@ -378,6 +469,8 @@ async function loadSettings() {
       modeSel.value = data.alpaca_paper === false ? "live" : "paper";
       updateTradingModeUI(modeSel.value, data.alpaca_live_key_hint || "");
     }
+    const fixedPos = document.getElementById("fixed-position-dollars");
+    if (fixedPos) fixedPos.value = data.fixed_position_dollars || 0;
   } catch (e) {
     console.error("Failed to load settings:", e);
   }
@@ -407,7 +500,12 @@ async function saveSettings() {
   const statusEl = document.getElementById("settings-save-status");
   const btn = document.getElementById("settings-save-btn");
 
-  const payload = { news_provider: provider, alpaca_paper: alpacaPaper };
+  const fixedPos = document.getElementById("fixed-position-dollars");
+  const payload = {
+    news_provider: provider,
+    alpaca_paper: alpacaPaper,
+    fixed_position_dollars: fixedPos ? (parseFloat(fixedPos.value) || 0) : 0,
+  };
 
   if (!alpacaPaper) {
     const apiKey = document.getElementById("live-api-key-input").value.trim();

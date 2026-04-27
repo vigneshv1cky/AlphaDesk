@@ -88,6 +88,11 @@ if ! ALB_ARN=$(aws elbv2 describe-load-balancers --names "${ALB_NAME}" --query '
     ALB_ARN=$(aws elbv2 create-load-balancer --name "${ALB_NAME}" --subnets $SUBNET_LIST --security-groups "${ALB_SG_ID}" --query 'LoadBalancers[0].LoadBalancerArn' --output text --region "${AWS_REGION}")
     aws elbv2 create-listener --load-balancer-arn "${ALB_ARN}" --protocol HTTP --port 80 --default-actions Type=forward,TargetGroupArn="${TG_ARN}" --region "${AWS_REGION}" > /dev/null
 fi
+# Force execution takes ~90s (yfinance + Haiku). Set timeout above that so the browser doesn't get a 504.
+aws elbv2 modify-load-balancer-attributes \
+    --load-balancer-arn "${ALB_ARN}" \
+    --attributes Key=idle_timeout.timeout_seconds,Value=300 \
+    --region "${AWS_REGION}" > /dev/null
 ALB_DNS=$(aws elbv2 describe-load-balancers --names "${ALB_NAME}" --query 'LoadBalancers[0].DNSName' --output text --region "${AWS_REGION}")
 
 # ============================================================
