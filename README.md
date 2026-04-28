@@ -1,106 +1,265 @@
 # Institutional-Grade Automated Swing Trading Platform
 
-A quantitative, serverless algorithmic trading platform built in Python. This system operates autonomously in the cloud, utilizing a sophisticated pipeline that screens a curated universe of equities, analyzes financial news sentiment via NLP (FinBERT), calculates technical momentum indicators, and executes mathematically risk-managed trades through the Alpaca Brokerage API.
-
-It also features a real-time Web Command Center built with FastAPI for performance tracking, manual overrides, and seamless cloud deployment.
+A quantitative, serverless algorithmic trading platform built in Python. It operates autonomously in the cloud using a three-layer decision stack — Screen → Predict → Execute — powered by AWS Bedrock NLP, adaptive percentile thresholds, and Alpaca brokerage integration. A FastAPI web dashboard provides real-time performance tracking, trade history, and live configuration.
 
 ---
 
-## 1. Core Services (The Decision Stack)
+## Decision Pipeline
 
-### 1.1 The Screener (Gatekeeper Logic)
-The `StockScreener` processes a static `SCREEN_UNIVERSE` of roughly 200+ high-alpha, liquid equities (e.g., TSLA, NVDA, PLTR, CRWD) and subjects them to rigorous institutional barricades:
+### Layer 1: Screener
 
-*   **Filter 1: Volume Requirement:** Rejects any stock with a Relative Volume (RVOL) `< 1.0`. The current daily volume must exceed its 20-day average to guarantee institutional interest.
-*   **Filter 2: Earnings Avoidance:** Rejects any stock reporting earnings within the next **3 days** to avoid overnight gap-risk and extreme volatility.
-*   **Filter 3: Archetype Classification (The "OR" Gate):** A stock must fit into one of three specific swing-trading archetypes to proceed:
-    *   **Breakout Star:** 1-week price change $\ge$ 10.0% OR 1-month change $\ge$ 15.0%.
-    *   **Recovery Phoenix:** 3-month drawdown $\le$ -15.0% AND recent 3-day bounce $\ge$ 4.0% AND RVOL > 1.1.
-    *   **Momentum King:** 3-month change $\ge$ 7.0%.
+`stock_sentiment/market/screener.py` filters a curated universe of **148 equities** down to the top 40 candidates each cycle using a two-pass adaptive system.
 
-The top 40 stocks (ranked by RVOL and 1-week performance) are passed to the Brain.
+**Hard gates (applied first):**
 
-### 1.2 The Predictor (The Brain)
-The `StockPredictor` calculates a normalized conviction score (0 to 100) using a dynamically weighted formula. A score $\ge$ 60 yields a **BULLISH** rating, while $\le$ 40 yields **BEARISH**. 
-The final score is composed of four pillars:
+- Relative Volume (RVOL) ≥ 1.0 — daily volume must exceed its 20-day average
+- Earnings blackout — rejects any stock reporting earnings within ≤ 3 days
+- Minimum 20 trading days of price history required
 
-*   **Sentiment (25% Weight):** Utilizes `ProsusAI/finbert` (HuggingFace) to analyze recent news headlines. Scores are normalized to -1.0 to +1.0 and scaled. A bonus of +15 points is awarded if a stock has $\ge$ 3 highly bullish headlines.
-*   **Technicals (25% Weight):** Context-aware RSI scoring. For example, a "Recovery" stock gets a 95% technical score if its 14-day RSI is < 35 (oversold), whereas a "Momentum" stock relies on RSI < 70 to confirm room to run.
-*   **Volume (20% Weight):** Direct scaling based on RVOL. 
-*   **Momentum (30% Weight):** Archetype-specific momentum grading (e.g., heavily weighting the 1-week change for Breakouts, and 3-month change for Momentum Kings).
+**Two-pass adaptive thresholds:**
 
-### 1.3 The Broker (Execution Layer & Smart Swapping)
-The `PaperBroker` integrates directly with the Alpaca API using `alpaca-py`.
+Pass 1 collects raw metrics across the live universe. Pass 2 classifies archetypes against live-universe percentiles — avoiding static cutoffs that get gamed by market conditions.
 
-*   **Portfolio Sizing:** Capped at exactly **10 active positions**. Each position is allocated a fixed **$1,000 slot**.
-*   **Order Execution:** Executes Market Orders using *whole shares* (derived from the $1,000 budget) rather than fractional notionals to ensure compatibility with advanced order types.
-*   **Risk Management:** Immediately wraps every new position in a **3.0% Trailing Stop Order** (GTC). 
-*   **Forced Liquidation:** If the AI downgrades an existing holding to "BEARISH", all open orders (stops) are canceled and the position is liquidated at market price.
-*   **Smart Conviction Swapping:** If the bot discovers a new BULLISH pick but the portfolio is full (or lacks cash), it checks the lowest-scoring asset currently held. If the new pick outscores the weakest link by **> 5 points**, the bot automatically sells the weak holding to fund the upgrade.
+**Archetypes (a stock must match one):**
+
+| Archetype | Criteria |
+| --- | --- |
+| **Breakout Star** | 1-week return ≥ 75th percentile OR 1-month return ≥ 75th percentile |
+| **Recovery Phoenix** | Drawdown ≤ 30th percentile AND bounce ≥ 65th percentile AND RVOL > 1.1 |
+| **Momentum King** | 3-month return ≥ 60th percentile |
+
+The top 40 stocks (ranked by RVOL and 1-week performance) advance to the Predictor.
 
 ---
 
-## 2. System Architecture & Operation
+### Layer 2: Predictor
 
-### 2.1 The Autonomous Scheduler
-The `Scheduler` module wakes up every 30 minutes, checks the Alpaca Market Clock, and only executes its cycle if the market is Open (or in extended hours, depending on config). It coordinates the ingestion, analysis, prediction, and execution phases entirely autonomously.
+`stock_sentiment/market/stock_predictor.py` generates a conviction score (0–100) per stock.
 
-### 2.2 Web Command Center (FastAPI)
-The project includes `web.py`, a FastAPI dashboard providing real-time oversight:
-*   **Background Execution:** The 30-minute scheduler runs continuously in a daemon background thread.
-*   **Authentication:** Secured via an `ADMIN_USERNAME` and `ADMIN_PASSWORD` (defaults to `admin` / `changeme`).
-*   **Capabilities:** View real-time Alpaca portfolio performance, equity curves, history, and trigger manual/forced screening cycles.
-*   **Dual-Backend Persistence:** Uses SQLite for local development and Amazon DynamoDB for cloud production (auto-migrating schemas).
+**Score formula:**
 
----
-
-## 3. Cloud Infrastructure (The AWS Stack)
-
-The entire platform is configured for zero-downtime, serverless deployment on AWS via `./deploy/deploy.sh`.
-
-### 3.1 Amazon ECS Fargate (Compute)
-*   **Deployment Model:** 1 vCPU and 4GB RAM to accommodate the FinBERT model's ~1.2GB memory footprint.
-*   **Concurrency:** Employs a `ThreadPoolExecutor` to handle API requests and background processes without CPU saturation.
-
-### 3.2 Networking (VPC & ALB)
-*   **Application Load Balancer (ALB):** Maps public HTTP traffic (Port 80) to the Fargate container (Port 8080).
-*   **Security Groups:** Strictly isolates the container, allowing inbound traffic *only* from the ALB security group.
-
-### 3.3 Amazon DynamoDB & S3 (Persistence & Reporting)
-*   **DynamoDB Tables:** Auto-provisioned tables including `PROD_StockScreenerRuns`, `PROD_StockScreenerPredictions`, and `PROD_StockScreenerStatus` (acting as a heartbeat monitor).
-*   **S3 Archival:** Automatically buckets HTML snapshots of every execution cycle, grouped by date prefixes (`/YYYY/MM/DD/`).
-*   **SES Alerts:** Sends critical trade executions and downgrades to verified email identities.
-
----
-
-## 4. Local Development
-
-### 4.1 Local Setup (DEV Mode)
-In local mode, the bot operates at zero-cost using SQLite.
-
-```bash
-# 1. Install dependencies
-pip install -r requirements.txt
-
-# 2. Configure environment (Create a .env file)
-# ALPACA_API_KEY=your_key
-# ALPACA_SECRET_KEY=your_secret
-# ADMIN_PASSWORD=your_secure_password
-
-# 3. Start the dashboard + bot locally
-uvicorn web:app --reload --port 8000
+```
+final_score = (formula_score × 0.70) + (llm_qualitative × 0.30)
 ```
 
-### 4.2 Production Deployment (PROD Mode)
-The entire AWS infrastructure is provisioned via the master deployment script.
+- **70% quantitative:** `momentum × w[0] + volume × w[1] + technical × w[2] + sentiment × w[3]`
+  Weights are **per-archetype and learned** from backtest outcomes via the Weight Optimizer — not hardcoded.
+- **30% qualitative:** A single Claude Haiku batch call scores all 40 stocks on news quality, catalyst strength, and risk narrative.
 
-**Workflow:**
-1.  **Refresh Login:** `aws sso login --profile your-sso-profile`
-2.  **Deploy:** `./run_aws_bot.sh`
+**Archetype-aware sub-scores:**
 
-*(The deployment script automatically reads your `.env` file, builds the Intel `linux/amd64` Docker image, pushes to ECR, and updates the ECS Service).*
+| Sub-score | MOMENTUM | BREAKOUT | RECOVERY |
+| --- | --- | --- | --- |
+| Momentum | `3m_change × 1.5` (max 100) | `1w × 4 + 1m` (max 100) | `60 + 1w × 5` (max 100) |
+| Technical (RSI) | 70 if RSI < 70, else 40 | 90 if RVOL > 2.0, else 60 | 95 if RSI < 35; 80 if < 45; else 50 |
+| Volume | `50 + min(50, (RVOL - 1.0) × 30)` — same for all archetypes | | |
+| Sentiment | `(avg_sentiment + 1) × 50 + 15 bonus if ≥ 3 bullish headlines` | | |
+
+**Thresholds:**
+
+- **BULLISH:** score ≥ regime-adjusted threshold (55–70, see Market Regime)
+- **BEARISH:** score ≤ 40
+- **NEUTRAL:** between thresholds
+- **Red-flag override:** if Claude Haiku returns `red_flag=true`, score is hard-capped at 35 regardless of formula output
 
 ---
 
-## 5. Disclaimer
-This tool is for educational and informational purposes only. It does NOT constitute financial advice. Algorithmic trading involves significant risk. Always use Paper Trading for testing before committing real capital.
+### Layer 3: Broker
+
+`stock_sentiment/market/broker.py` executes trades via the Alpaca API.
+
+**Position sizing:**
+
+- Max **10 simultaneous positions** (max 8 short, minimum 2 long slots preserved)
+- Each slot = **9% of current portfolio value** (minimum $50)
+- Whole shares only (fractional notionals are incompatible with trailing stop orders)
+
+**Risk management:**
+
+- Every new position receives a **3.0% GTC trailing stop** immediately on entry
+- Stops tighten automatically on profit tiers:
+  - Gain ≥ 15% → trailing stop tightens to **1.5%**
+  - Gain ≥ 30% → trailing stop tightens to **0.8%**
+- DAY-trade positions and **all short positions close at 3:45 PM ET** regardless of conviction
+- BEARISH downgrade → immediate liquidation of position + cancellation of stops
+- Earnings ≤ 3 days away → pre-emptive close
+- **1-hour re-entry cooldown** after a stop-out (tracked in `~/.stock_screener/cooldowns.json`)
+
+**Smart Conviction Swap:** When the portfolio is full and a new BULLISH pick emerges, it swaps the weakest same-direction holding if the new score exceeds the weakest by **> 5 points**.
+
+**Paper vs. live mode:**
+
+- Default: paper trading (`ALPACA_API_KEY` / `ALPACA_SECRET_KEY`)
+- Set `ALPACA_PAPER=false` to activate live trading (`ALPACA_LIVE_API_KEY` / `ALPACA_LIVE_SECRET_KEY`)
+
+---
+
+## Market Regime
+
+`stock_sentiment/market/market_regime.py` fetches SPY and ^VIX each cycle and adjusts buy thresholds and position sizing:
+
+| Regime | Condition | Buy Threshold | Position Sizing |
+| --- | --- | --- | --- |
+| **HIGH_VOL** | VIX > 30 | 70 | 70% of slot |
+| **BEAR** | SPY < 200-day SMA | 65 | 85% of slot |
+| **BULL** | SPY > 3% above SMA AND VIX < 20 | 55 | 100% of slot |
+| **NEUTRAL** | Everything else | 60 | 100% of slot |
+
+---
+
+## NLP / Bedrock Stack
+
+`stock_sentiment/nlp/sentiment.py` runs all NLP on **AWS Bedrock** — no local model files.
+
+**Article sentiment (bulk scoring):** Model fallback chain tried in order:
+
+1. **Amazon Nova Micro** (`amazon.nova-micro-v1:0`) — primary (cheapest)
+2. **Amazon Nova Lite** (`amazon.nova-lite-v1:0`) — fallback
+3. **Claude Haiku 4.5** (`us.anthropic.claude-haiku-4-5-20251001-v1:0`) — final fallback
+
+Batch size: 50 articles per call. Output: normalized score from -1.0 (bearish) to +1.0 (bullish).
+
+**Recency decay:** Article weight halves every 48 hours, so stale news contributes less to the sentiment sub-score.
+
+**Source quality tiers:** Reuters/Bloomberg articles are weighted 1.5× vs. generic sources.
+
+**Qualitative conviction (predictor LLM blend):** Claude Haiku (`us.anthropic.claude-haiku-4-5-20251001-v1:0`) receives all 40 screened stocks in a single batch call and returns per-stock scores plus a `red_flag` boolean.
+
+---
+
+## News Providers
+
+`stock_sentiment/market/news_providers.py` abstracts the real-time news feed. Provider is selected in the Settings tab of the dashboard and stored in `~/.stock_screener/settings.json`.
+
+| Provider | Type | Cost | Notes |
+| --- | --- | --- | --- |
+| **Google News RSS** | Polling (60s cycle) | Free | Default; no API key required |
+| **Polygon** | REST polling (60s) | Paid | Requires Polygon API key |
+| **Alpaca** | WebSocket stream | Paid subscription | Real-time; requires Alpaca paid data tier |
+
+Provider changes take effect on the next scheduler cycle without restart.
+
+---
+
+## Weight Optimizer
+
+`stock_sentiment/market/weight_optimizer.py` learns optimal `[momentum, volume, technical, sentiment]` weights per archetype from backtest history using **Nelder-Mead optimization** (falls back to random search if scipy is unavailable).
+
+- Requires ≥ 50 global scored outcomes and ≥ 20 per archetype to update weights
+- Weights are persisted to `~/.stock_screener/weights.json`
+- Run manually with `python run.py --optimize`
+
+---
+
+## Web Dashboard
+
+`web.py` (FastAPI) serves a four-tab dashboard:
+
+| Tab | Content |
+| --- | --- |
+| **Performance** | Alpaca portfolio equity curve, P&L, positions |
+| **Trade History** | Past executed trades with entry/exit prices |
+| **Screener** | Latest run results with conviction scores per stock |
+| **Settings** | News provider selection, Polygon API key |
+
+Auth: `ADMIN_USERNAME` / `ADMIN_PASSWORD` environment variables (session token-based, password never stored).
+
+---
+
+## Storage
+
+`stock_sentiment/history.py` abstracts the persistence backend:
+
+| Mode | Backend | Location |
+| --- | --- | --- |
+| Local dev | SQLite | `~/.stock_screener/local_history.db` |
+| Production (`ENV=PROD`) | DynamoDB | `PROD_StockScreenerRuns`, `PROD_StockScreenerPredictions`, `PROD_StockScreenerStatus` |
+
+Runtime state files in `~/.stock_screener/`: `cooldowns.json`, `held_cache.json`, `weights.json`, `settings.json`, `last_execution.json`.
+
+---
+
+## Commands
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run screener once
+python run.py
+
+# Run autonomous scheduler (every 15 min by default)
+python run.py --schedule
+
+# Run with custom interval (e.g., hourly)
+python run.py --schedule --every 1
+
+# Backtest predictions (evaluates ones 5+ days old)
+python run.py --backtest
+
+# Show recent alerts
+python run.py --alerts
+
+# Optimize per-archetype scoring weights from backtest history
+python run.py --optimize
+
+# Start web dashboard
+uvicorn web:app --reload --port 8000
+
+# Deploy to AWS (builds Docker image, pushes to ECR, updates ECS)
+aws sso login --profile vignesh-sso-profile
+./run_aws_bot.sh
+
+# Tail live ECS logs
+aws logs tail /ecs/stock-screener --region us-east-1 --follow --profile vignesh-sso-profile
+```
+
+---
+
+## Environment Variables
+
+```ini
+# Required (paper trading)
+ALPACA_API_KEY=...
+ALPACA_SECRET_KEY=...
+
+# Live trading (set ALPACA_PAPER=false to activate)
+ALPACA_PAPER=false
+ALPACA_LIVE_API_KEY=...
+ALPACA_LIVE_SECRET_KEY=...
+
+# AWS (local dev via SSO profile)
+AWS_PROFILE=vignesh-sso-profile
+AWS_REGION=us-east-1
+
+# Web dashboard auth
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=...
+
+# Production mode (switches SQLite → DynamoDB)
+ENV=PROD
+
+# Optional cloud features
+S3_BUCKET=...
+SES_FROM_EMAIL=...
+SES_TO_EMAIL=...
+```
+
+---
+
+## Cloud Infrastructure
+
+Deployed to **Amazon ECS Fargate** via `deploy/deploy.sh`:
+
+- **Compute:** 1 vCPU, 4GB RAM (NLP runs on Bedrock — no large model files in the image)
+- **Networking:** Application Load Balancer → Fargate container; security groups restrict inbound to ALB only
+- **Docker target:** `linux/amd64` — specify platform when building locally on Apple Silicon
+- **DynamoDB:** Three tables with `PROD_` prefix, auto-provisioned on first production run
+- **S3:** HTML execution snapshots archived by date prefix (`/YYYY/MM/DD/`)
+- **SES:** Trade execution and downgrade alerts to verified email identities
+
+---
+
+## Disclaimer
+
+This tool is for educational and informational purposes only. It does not constitute financial advice. Algorithmic trading involves significant risk of loss. Always use paper trading mode for validation before committing real capital.
