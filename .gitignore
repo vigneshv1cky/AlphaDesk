@@ -33,3 +33,9 @@ docker-compose.override.yml
 
 # Claude Code local settings (may contain personal overrides)
 .claude/settings.local.json
+
+# Runtime state / local DB (machine-specific, not source code)
+*.db
+*.sqlite
+*.log
+logs/
