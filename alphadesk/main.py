@@ -1,0 +1,118 @@
+"""AlphaDesk entrypoint.
+
+  python -m alphadesk.main run        # scheduler + dashboard (the live system)
+  python -m alphadesk.main backfill --hours 168
+  python -m alphadesk.main grade      # one grading pass
+  python -m alphadesk.main status     # ledger + graph summary
+"""
+
+import argparse
+import asyncio
+import logging
+import sys
+
+
+def _setup_logging() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname).1s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    for noisy in ("httpx", "neo4j.notifications", "claude_agent_sdk"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
+
+async def _run() -> None:
+    import os
+
+    import uvicorn
+
+    from alphadesk.app import scheduler
+    from alphadesk.app.dashboard import app as dashboard_app
+
+    server = uvicorn.Server(uvicorn.Config(
+        dashboard_app,
+        host=os.environ.get("DASHBOARD_HOST", "127.0.0.1"),  # VM sets 0.0.0.0
+        port=int(os.environ.get("DASHBOARD_PORT", "8000")),
+        log_level="warning",
+    ))
+    await asyncio.gather(scheduler.run_forever(), server.serve())
+
+
+def main() -> None:
+    _setup_logging()
+    parser = argparse.ArgumentParser(prog="alphadesk")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("run")
+    p_back = sub.add_parser("backfill")
+    p_back.add_argument("--hours", type=float, default=72)
+    p_desk = sub.add_parser("desk", help="convene the committee NOW on recent news")
+    p_desk.add_argument("--hours", type=float, default=8,
+                        help="news lookback for the candidate window")
+    p_world = sub.add_parser("world", help="one GDELT world-news tick (optionally to the desk)")
+    p_world.add_argument("--categories", type=int, default=3)
+    p_world.add_argument("--to-desk", action="store_true",
+                         help="send exposure candidates to the committee")
+    sub.add_parser("grade")
+    sub.add_parser("status")
+    args = parser.parse_args()
+
+    if args.cmd == "run":
+        from alphadesk.ledger import store
+        store.install_token_sink()
+        asyncio.run(_run())
+    elif args.cmd == "backfill":
+        from alphadesk.ingest.news import catch_up
+        from alphadesk.ledger import store
+        store.install_token_sink()
+        n = catch_up(args.hours)
+        print(f"backfilled {n} articles")
+    elif args.cmd == "desk":
+        from datetime import datetime, timedelta, timezone
+
+        from alphadesk.desk.workflow import research_run
+        from alphadesk.ingest import news
+        from alphadesk.ledger import store
+        store.install_token_sink()
+
+        async def _adhoc() -> None:
+            n, candidates = await asyncio.get_running_loop().run_in_executor(
+                None, news.poll,
+                datetime.now(timezone.utc) - timedelta(hours=args.hours),
+            )
+            print(f"{n} fresh articles, {len(candidates)} candidate symbols")
+            if candidates:
+                ids = await research_run(candidates, trigger_src="DEEP_RUN")
+                print(f"committee produced {len(ids)} decisions — see the dashboard")
+            else:
+                print("no fresh candidates in that window")
+
+        asyncio.run(_adhoc())
+    elif args.cmd == "world":
+        from alphadesk.ingest import world
+        from alphadesk.ledger import store
+        store.install_token_sink()
+        n, candidates = world.poll(categories_per_tick=args.categories)
+        print(f"{n} relevant world events → {len(candidates)} exposure candidates")
+        for sym, arts in candidates.items():
+            for a in arts:
+                print(f"  {sym}: {a['title'][:90]}")
+                print(f"     {a['summary'][:160]}")
+        if args.to_desk and candidates:
+            from alphadesk.desk.workflow import research_run
+            ids = asyncio.run(research_run(candidates, trigger_src="STREAM"))
+            print(f"committee produced {len(ids)} decisions")
+    elif args.cmd == "grade":
+        from alphadesk.ledger.grader import grade_due
+        print(f"graded {grade_due()} picks")
+    elif args.cmd == "status":
+        from alphadesk.knowledge.graph import Graph
+        from alphadesk.ledger import store
+        print("ledger:", store.stats()["total"])
+        print("graph: ", Graph.default().summary())
+        print("tokens:", store.token_summary(days=1))
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,160 @@
+"""AlphaDesk configuration — facts only: model map, caps, sessions, universe.
+
+Design law: code owns facts and safety rails; agents own judgment. Nothing in
+this module makes a judgment call — the universe is a factual screen (tradable
+at the broker), sessions are clock math, caps are resource physics.
+"""
+
+import json
+import logging
+import os
+import time
+from datetime import datetime, timedelta
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+log = logging.getLogger("alphadesk.config")
+
+ET = ZoneInfo("America/New_York")
+
+DATA_DIR = Path(os.environ.get("ALPHADESK_DATA", "~/.alphadesk")).expanduser()
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# ---------------------------------------------------------------------------
+# Model map — role → model alias. Every role overridable: MODEL_<ROLE>=...
+# Ladder tiers (for rate-limit downgrades) ordered strongest → cheapest.
+# ---------------------------------------------------------------------------
+
+TIERS = ["opus", "sonnet", "haiku"]
+
+MODEL_MAP: dict[str, str] = {
+    "enrichment": "haiku",     # sentiment + relation extraction, high volume
+    "brief": "haiku",          # specialist subagents (technical/news/graph)
+    "triage": "sonnet",        # attention desk
+    "analyst": "sonnet",       # thesis + rebuttal
+    "skeptic": "opus",         # adversarial challenge
+    "arbiter": "opus",         # final verdict
+    "solo": "opus",            # single-agent control arm
+    "synthesizer": "opus",     # daily Top-N ranking (Phase 2)
+}
+
+for _role in list(MODEL_MAP):
+    _override = os.environ.get(f"MODEL_{_role.upper()}")
+    if _override:
+        MODEL_MAP[_role] = _override
+
+# ---------------------------------------------------------------------------
+# Hard caps — resource physics, not judgment
+# ---------------------------------------------------------------------------
+
+MAX_PICKS_PER_WINDOW = 5
+MAX_DEBATES_PER_DAY = 40
+MAX_CONCURRENT_WORKFLOWS = 4
+SYMBOL_REPICK_COOLDOWN_MIN = 15
+SOLO_ARM_EVERY_N = 3            # every Nth pick also goes to the solo agent
+TRIAGE_WINDOW_S = 120
+NEWS_POLL_INTERVAL_S = 300
+LLM_TIMEOUT_S = 120
+FRICTION_BPS_PER_SIDE = 15      # grading haircut; doubled for LOW_LIQUIDITY
+LOW_LIQUIDITY_DOLLAR_VOL = 10_000_000  # avg daily dollar volume below this → tag
+
+# ---------------------------------------------------------------------------
+# Market sessions (ET clock math)
+# ---------------------------------------------------------------------------
+
+
+def now_et() -> datetime:
+    return datetime.now(ET)
+
+
+def session(dt: datetime | None = None) -> str:
+    """Return PRE | OPEN | AFTER | CLOSED for a given ET moment."""
+    dt = (dt or now_et()).astimezone(ET)
+    if dt.weekday() >= 5:
+        return "CLOSED"
+    minutes = dt.hour * 60 + dt.minute
+    if 4 * 60 <= minutes < 9 * 60 + 30:
+        return "PRE"
+    if 9 * 60 + 30 <= minutes < 16 * 60:
+        return "OPEN"
+    if 16 * 60 <= minutes < 20 * 60:
+        return "AFTER"
+    return "CLOSED"
+
+
+def is_market_open(dt: datetime | None = None) -> bool:
+    return session(dt) == "OPEN"
+
+
+def next_open(dt: datetime | None = None) -> datetime:
+    """Next regular-session open (9:30 ET) strictly after `dt`."""
+    dt = (dt or now_et()).astimezone(ET)
+    candidate = dt.replace(hour=9, minute=30, second=0, microsecond=0)
+    if dt >= candidate:
+        candidate += timedelta(days=1)
+    while candidate.weekday() >= 5:
+        candidate += timedelta(days=1)
+    return candidate
+
+
+# ---------------------------------------------------------------------------
+# Pick universe — ALL Alpaca-tradable active US equities. A factual screen,
+# auto-refreshed weekly; zero curation, zero liquidity judgment (liquidity is
+# evidence downstream, not a filter here).
+# ---------------------------------------------------------------------------
+
+_UNIVERSE_CACHE = DATA_DIR / "universe.json"
+_UNIVERSE_MAX_AGE_S = 7 * 24 * 3600
+_universe: set[str] | None = None
+
+
+def _fetch_universe_from_alpaca() -> list[str]:
+    from alpaca.trading.client import TradingClient
+    from alpaca.trading.enums import AssetClass, AssetStatus
+    from alpaca.trading.requests import GetAssetsRequest
+
+    client = TradingClient(
+        os.environ["ALPACA_API_KEY"], os.environ["ALPACA_SECRET_KEY"], paper=True
+    )
+    assets = client.get_all_assets(
+        GetAssetsRequest(status=AssetStatus.ACTIVE, asset_class=AssetClass.US_EQUITY)
+    )
+    return sorted({
+        a.symbol for a in assets
+        if not isinstance(a, str) and getattr(a, "tradable", False)
+    })
+
+
+def load_universe(refresh: bool = False) -> set[str]:
+    """Cached weekly; falls back to a stale cache if the broker is unreachable."""
+    global _universe
+    if _universe is not None and not refresh:
+        return _universe
+
+    cache_ok = _UNIVERSE_CACHE.exists() and (
+        time.time() - _UNIVERSE_CACHE.stat().st_mtime < _UNIVERSE_MAX_AGE_S
+    )
+    if cache_ok and not refresh:
+        _universe = set(json.loads(_UNIVERSE_CACHE.read_text()))
+        return _universe
+
+    try:
+        symbols = _fetch_universe_from_alpaca()
+        _UNIVERSE_CACHE.write_text(json.dumps(symbols))
+        _universe = set(symbols)
+        log.info("Universe refreshed from Alpaca: %d tradable symbols", len(symbols))
+    except Exception as exc:
+        if _UNIVERSE_CACHE.exists():
+            _universe = set(json.loads(_UNIVERSE_CACHE.read_text()))
+            log.warning("Universe refresh failed (%s) — using stale cache (%d)", exc, len(_universe))
+        else:
+            raise RuntimeError(f"No universe available: {exc}") from exc
+    return _universe
+
+
+def in_universe(symbol: str) -> bool:
+    return symbol.upper() in load_universe()

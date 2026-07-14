@@ -1,0 +1,10 @@
+# AlphaDesk runtime dependencies (self-contained — does not need the legacy bot's deps)
+claude-agent-sdk>=0.2.116
+neo4j>=5.0
+alpaca-py>=0.14.0
+polygon-api-client>=1.0
+yfinance>=0.2.31
+pandas>=2.0.0
+fastapi
+uvicorn
+python-dotenv

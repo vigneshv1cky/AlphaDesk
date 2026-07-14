@@ -1,0 +1,246 @@
+"""research_run() — THE pipeline. Pure composition; identical path for live
+windows, deep runs, and (later) replay.
+
+    candidates → TRIAGE → per pick (parallel, capped):
+        3 brief subagents (parallel) → ANALYST → SKEPTIC → fact-check →
+        ANALYST rebuttal → ARBITER → ledger row
+        (+ every Nth pick: SOLO arm, independent, same briefs)
+
+Fail-safe doctrine: any stage failure drops that candidate with a logged
+reason. Hard caps enforced in code. Every window writes funnel counters.
+"""
+
+import asyncio
+import logging
+import time
+import uuid
+from typing import Any
+
+from alphadesk.config import (
+    MAX_CONCURRENT_WORKFLOWS,
+    MAX_DEBATES_PER_DAY,
+    MODEL_MAP,
+    SOLO_ARM_EVERY_N,
+    SYMBOL_REPICK_COOLDOWN_MIN,
+    session,
+)
+from alphadesk.desk import briefs as briefs_mod
+from alphadesk.desk import committee, solo, triage
+from alphadesk.ingest import prices
+from alphadesk.knowledge.graph import Graph
+from alphadesk.ledger import store
+from alphadesk.llm import LLMError
+
+log = logging.getLogger("alphadesk.workflow")
+
+_repick_at: dict[str, float] = {}     # symbol → earliest next-pick monotonic time
+_pick_counter = 0                     # drives the solo arm cadence
+_cooldowns_seeded = False
+
+
+def _seed_cooldowns_from_ledger() -> None:
+    """Restart amnesia guard: rebuild re-pick cooldowns from recent ledger
+    rows so a process restart never re-debates what it just decided."""
+    global _cooldowns_seeded
+    _cooldowns_seeded = True
+    try:
+        import sqlite3
+        from datetime import datetime, timezone
+        from alphadesk.config import DATA_DIR
+        with sqlite3.connect(DATA_DIR / "ledger.db") as conn:
+            rows = conn.execute(
+                "SELECT symbol, max(ts) FROM picks WHERE arm='COMMITTEE'"
+                f" AND ts >= datetime('now', '-{SYMBOL_REPICK_COOLDOWN_MIN} minutes')"
+                " GROUP BY symbol"
+            ).fetchall()
+        now_mono, now_utc = time.monotonic(), datetime.now(timezone.utc)
+        for sym, ts in rows:
+            age_s = (now_utc - datetime.fromisoformat(ts)).total_seconds()
+            remaining = SYMBOL_REPICK_COOLDOWN_MIN * 60 - age_s
+            if remaining > 0:
+                _repick_at[sym] = now_mono + remaining
+        if rows:
+            log.info("Seeded %d re-pick cooldowns from ledger", len(rows))
+    except Exception as exc:
+        log.warning("Cooldown seeding failed: %s", exc)
+
+
+def _headline_rows(articles: list[dict]) -> list[str]:
+    return [
+        f"[{a.get('category', '?')}] {a.get('title','')[:120]} "
+        f"(sent={a['mentions'][0]['sentiment'] if a.get('mentions') else '?'})"
+        for a in articles[:4]
+    ]
+
+
+def _avg_sentiment(articles: list[dict]) -> float:
+    vals = [m["sentiment"] for a in articles for m in a.get("mentions", [])]
+    return round(sum(vals) / len(vals), 3) if vals else 0.0
+
+
+async def _gather_briefs(loop, sym: str, articles: list[dict], price_ctx: dict | None,
+                         decision_id: str) -> list[dict]:
+    graph = Graph.default()
+    neighborhood = await loop.run_in_executor(None, graph.neighborhood, sym)
+    # priced-check inputs: 5d moves of typed + top co-mentioned neighbors
+    neighbor_syms = {r["symbol"] for r in neighborhood.get("typed_relations", [])} | {
+        r["symbol"] for r in neighborhood.get("co_mentioned", [])[:4]
+    }
+    neighbor_moves: dict[str, float] = {}
+    for n_sym in list(neighbor_syms)[:6]:
+        ctx = await loop.run_in_executor(None, prices.get_context, n_sym)
+        if ctx:
+            neighbor_moves[n_sym] = ctx["change_5d_pct"]
+
+    return list(await asyncio.gather(
+        loop.run_in_executor(None, briefs_mod.technical_brief, sym, price_ctx, decision_id),
+        loop.run_in_executor(None, briefs_mod.news_brief, sym, articles, decision_id),
+        loop.run_in_executor(
+            None, briefs_mod.graph_brief, sym, neighborhood, neighbor_moves, decision_id
+        ),
+    ))
+
+
+async def _run_committee(loop, sym: str, pick: dict, articles: list[dict],
+                         price_ctx: dict | None, trigger_src: str) -> int | None:
+    decision_id = f"{sym}-{uuid.uuid4().hex[:8]}"
+    model_tags: dict[str, Any] = {}
+
+    def _tag(stage: str, result: dict) -> dict:
+        model_tags[stage] = result.pop("_downgraded_model", MODEL_MAP.get(stage.split("_")[0], "?"))
+        return result
+
+    try:
+        briefs = await _gather_briefs(loop, sym, articles, price_ctx, decision_id)
+        history = await loop.run_in_executor(None, store.symbol_history, sym)
+
+        thesis = _tag("analyst", await loop.run_in_executor(
+            None, lambda: committee.analyst_thesis(sym, pick["reason"], briefs, history, decision_id)))
+        concerns_out = _tag("skeptic", await loop.run_in_executor(
+            None, lambda: committee.skeptic_challenge(sym, thesis, briefs, decision_id)))
+        concerns = concerns_out.get("concerns", [])
+        fact_flags = committee.fact_check_concerns(concerns, price_ctx)
+        rebuttal = _tag("analyst_rebuttal", await loop.run_in_executor(
+            None, lambda: committee.analyst_rebuttal(sym, thesis, concerns, decision_id)))
+        verdict = _tag("arbiter", await loop.run_in_executor(
+            None, lambda: committee.arbiter_verdict(sym, thesis, concerns, rebuttal, fact_flags, decision_id)))
+    except LLMError as exc:
+        log.warning("Committee dropped %s: %s", sym, exc)
+        return None
+
+    sess = session()
+    pick_id = store.record_pick({
+        "symbol": sym, "arm": "COMMITTEE", "edge": pick.get("edge_hint"),
+        "trigger_src": trigger_src, "session": sess,
+        "direction": thesis["direction"],
+        # the arbiter owns the final horizon (falls back to analyst's proposal)
+        "horizon_days": int(verdict.get("adjusted_horizon_days") or thesis["horizon_days"]),
+        "score": thesis["score"], "adjusted_score": verdict["adjusted_score"],
+        "confidence": verdict["adjusted_confidence"],
+        "verdict": verdict["verdict"], "approved": int(bool(verdict["approved"])),
+        "triage_reason": pick["reason"], "thesis": thesis["thesis"],
+        "debate": {"concerns": concerns, "rebuttal": rebuttal,
+                   "fact_flags": fact_flags, "arbiter_summary": verdict["summary"]},
+        "briefs": briefs, "model_tags": model_tags,
+        "low_liquidity": int(bool(price_ctx and price_ctx.get("low_liquidity"))),
+        "skeptic_moved_score": round(float(rebuttal["revised_score"]) - float(thesis["score"]), 2),
+        "arbiter_overrode": int(
+            bool(verdict["approved"]) != (float(rebuttal["revised_score"]) > 50)
+        ),
+        "entry_price": (price_ctx or {}).get("last_price") if sess == "OPEN" else None,
+        "spy_price": ((prices.get_context("SPY") or {}).get("last_price")),
+    })
+    log.info(
+        "DECISION #%d %s %s %dd score %.0f→%.0f [%s] approved=%s (%s)",
+        pick_id, sym, thesis["direction"], thesis["horizon_days"],
+        thesis["score"], verdict["adjusted_score"], verdict["verdict"],
+        bool(verdict["approved"]), pick.get("edge_hint"),
+    )
+
+    # solo control arm on every Nth pick — independent, same evidence
+    global _pick_counter
+    _pick_counter += 1
+    if _pick_counter % SOLO_ARM_EVERY_N == 0:
+        try:
+            s = await loop.run_in_executor(
+                None, lambda: solo.solo_analysis(sym, pick["reason"], briefs, history,
+                                                 decision_id + "-solo"))
+            solo_model = s.pop("_downgraded_model", MODEL_MAP["solo"])
+            store.record_pick({
+                "symbol": sym, "arm": "SOLO", "edge": pick.get("edge_hint"),
+                "trigger_src": trigger_src, "session": sess,
+                "direction": s["direction"], "horizon_days": s["horizon_days"],
+                "score": s["score"], "confidence": s["confidence"],
+                "approved": int(bool(s["approved"])),  # the solo agent's own call
+                "triage_reason": pick["reason"], "thesis": s["thesis"],
+                "briefs": briefs, "model_tags": {"solo": solo_model},
+                "low_liquidity": int(bool(price_ctx and price_ctx.get("low_liquidity"))),
+                "entry_price": (price_ctx or {}).get("last_price") if sess == "OPEN" else None,
+                "spy_price": ((prices.get_context("SPY") or {}).get("last_price")),
+            })
+            log.info("SOLO arm: %s %s %dd score=%.0f", sym, s["direction"],
+                     s["horizon_days"], s["score"])
+        except LLMError as exc:
+            log.warning("Solo arm dropped %s: %s", sym, exc)
+
+    return pick_id
+
+
+async def research_run(candidates: dict[str, list[dict]], trigger_src: str = "STREAM") -> list[int]:
+    """One full pass: triage the candidate window, deliberate the picks.
+
+    candidates: symbol → fresh enriched articles. Returns ledger pick ids.
+    """
+    loop = asyncio.get_running_loop()
+    if not _cooldowns_seeded:
+        _seed_cooldowns_from_ledger()
+    now = time.monotonic()
+
+    eligible = {
+        sym: arts for sym, arts in candidates.items()
+        if _repick_at.get(sym, 0.0) <= now
+    }
+    if not eligible:
+        return []
+
+    if store.picks_today("COMMITTEE") >= MAX_DEBATES_PER_DAY:
+        log.warning("Daily debate cap reached (%d) — window skipped", MAX_DEBATES_PER_DAY)
+        return []
+
+    # window snapshot: headlines + price evidence per symbol
+    window: dict[str, dict] = {}
+    for sym, arts in list(eligible.items())[:40]:
+        price_ctx = await loop.run_in_executor(None, prices.get_context, sym)
+        window[sym] = {
+            "headlines": _headline_rows(arts),
+            "avg_sentiment": _avg_sentiment(arts),
+            "price": price_ctx,
+        }
+    movers = await loop.run_in_executor(None, prices.movers)
+
+    try:
+        result = await loop.run_in_executor(None, triage.run_triage, window, movers)
+    except LLMError as exc:
+        log.warning("Triage failed — window dropped: %s", exc)
+        store.funnel_add(len(candidates), len(window), 0, len(window),
+                         [{"symbol": "*", "reason": f"triage failed: {exc}"}])
+        return []
+
+    picks = result.get("picks", [])
+    skips = result.get("skips", []) or []
+    store.funnel_add(len(candidates), len(window), len(picks), len(skips),
+                     [{"symbol": s.get("symbol", "?"), "reason": s.get("reason", "")} for s in skips])
+    for p in picks:
+        log.info("TRIAGE PICK %s [%s]: %s", p["symbol"], p["edge_hint"], p["reason"])
+
+    sem = asyncio.Semaphore(MAX_CONCURRENT_WORKFLOWS)
+
+    async def _guarded(p: dict) -> int | None:
+        async with sem:
+            sym = p["symbol"]
+            _repick_at[sym] = time.monotonic() + SYMBOL_REPICK_COOLDOWN_MIN * 60
+            price_ctx = window.get(sym, {}).get("price")
+            return await _run_committee(loop, sym, p, eligible.get(sym, []), price_ctx, trigger_src)
+
+    ids = await asyncio.gather(*(_guarded(p) for p in picks))
+    return [i for i in ids if i is not None]

@@ -1,0 +1,18 @@
+[Unit]
+Description=AlphaDesk — predictive multi-agent stock research engine
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/Stock-trading-agent
+EnvironmentFile=/home/ubuntu/Stock-trading-agent/.env
+Environment=PYTHONPATH=/home/ubuntu/Stock-trading-agent
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/ubuntu/Stock-trading-agent/.venv/bin/python -m alphadesk.main run
+Restart=always
+RestartSec=15
+# journalctl -u alphadesk -f   ← live logs
+
+[Install]
+WantedBy=multi-user.target
