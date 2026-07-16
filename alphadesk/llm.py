@@ -23,7 +23,9 @@ from typing import Any, Callable, Optional
 
 from alphadesk.config import (
     LLM_MAX_CONCURRENCY,
+    LLM_MAX_INPUT_CHARS,
     LLM_TIMEOUT_S,
+    LLM_TOOL_BUDGET_USD,
     LLM_TOOL_TIMEOUT_S,
     MODEL_MAP,
     TIERS,
@@ -200,12 +202,21 @@ def _one_shot(model: str, system: str, user: str,
 
     timeout = timeout or (LLM_TOOL_TIMEOUT_S if tools else LLM_TIMEOUT_S)
 
+    # hard input-size cap (cost + DoS/injection surface from oversized upstream data)
+    if len(user) > LLM_MAX_INPUT_CHARS:
+        user = user[:LLM_MAX_INPUT_CHARS] + "\n[…truncated at input-size limit]"
+
+    opt_kwargs: dict = {}
+    if tools:  # hard dollar ceiling on runaway web-search loops
+        opt_kwargs["max_budget_usd"] = LLM_TOOL_BUDGET_USD
+
     async def _run() -> tuple[str, int, int]:
         options = ClaudeAgentOptions(
             system_prompt=system + _INJECTION_GUARD,
             model=model,
             max_turns=max_turns,
             allowed_tools=tools or [],
+            **opt_kwargs,
         )
         text, tin, tout = "", 0, 0
         async for msg in query(prompt=user, options=options):

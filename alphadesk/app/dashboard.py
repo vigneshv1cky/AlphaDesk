@@ -109,6 +109,25 @@ def api_graph():
     return Graph.default().summary()
 
 
+_run_day = ""
+_run_count = 0
+
+
+def _within_daily_cap() -> bool:
+    """Runaway guard: cap Find Trades runs per calendar day."""
+    global _run_day, _run_count
+    from datetime import date
+
+    from alphadesk.config import MAX_RUNS_PER_DAY
+    today = date.today().isoformat()
+    if today != _run_day:
+        _run_day, _run_count = today, 0
+    if _run_count >= MAX_RUNS_PER_DAY:
+        return False
+    _run_count += 1
+    return True
+
+
 @app.get("/api/find-trades")
 async def api_find_trades(request: Request, hours: float = 48.0,
                           max_debates: int = 6, expose: bool = False):
@@ -123,6 +142,11 @@ async def api_find_trades(request: Request, hours: float = 48.0,
     from alphadesk.desk.stream import stream_find_trades
 
     async def gen():
+        if not _within_daily_cap():
+            from alphadesk.config import MAX_RUNS_PER_DAY
+            yield f"data: {_json.dumps({'type': 'status', 'msg': f'daily run cap reached ({MAX_RUNS_PER_DAY}/day) — try again tomorrow'})}\n\n"
+            yield f"data: {_json.dumps({'type': 'done', 'board': []})}\n\n"
+            return
         try:
             async for event in stream_find_trades(
                 hours=hours, max_debates=max_debates, expose=expose,
