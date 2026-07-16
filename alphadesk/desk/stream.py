@@ -91,10 +91,22 @@ async def stream_find_trades(hours: float = 48.0, max_debates: int = 6,
     # most intense shocks for cost. Set expose=False for a light run.
     if expose and candidates and not await _gone():
         shocks = sorted(candidates.items(), key=lambda kv: -_intensity(kv[1]))
-        shock_inputs = [
-            (sym, " | ".join(a.get("title", "")[:120] for a in arts[:3]))
-            for sym, arts in shocks[:EXPOSURE_MAX_SHOCKS] if _intensity(arts) > 0.1
-        ]
+        # Dedupe shocks that are the SAME underlying event: Polygon tags one story
+        # with several ticker variants (GOOG/GOOGM/GOOGN), which would otherwise
+        # burn the top-N slots web-mapping the same company. Skip a shock whose
+        # headlines overlap one already chosen.
+        shock_inputs: list[tuple[str, str]] = []
+        seen_events: list[set] = []
+        for sym, arts in shocks:
+            if _intensity(arts) <= 0.1:
+                continue
+            key = {a.get("id") or a.get("title", "") for a in arts[:3]}
+            if any(key & prev for prev in seen_events):
+                continue
+            seen_events.append(key)
+            shock_inputs.append((sym, " | ".join(a.get("title", "")[:120] for a in arts[:3])))
+            if len(shock_inputs) >= EXPOSURE_MAX_SHOCKS:
+                break
         if shock_inputs:
             yield _ev("status",
                       msg=f"Exposure Desk mapping supply-chain ripples from "
