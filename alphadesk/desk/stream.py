@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 
 from alphadesk.config import EXPOSURE_MAX_SHOCKS, MODEL_MAP, SOLO_ARM_EVERY_N, session
 from alphadesk.desk import briefs as briefs_mod
-from alphadesk.desk import committee, exposure, solo, triage
+from alphadesk.desk import committee, debate, exposure, solo, triage
 from alphadesk.ingest import news, prices
 from alphadesk.ledger import store
 from alphadesk.llm import LLMError
@@ -195,60 +195,22 @@ async def stream_find_trades(hours: float = 48.0, max_debates: int = 6,
                 yield _ev("brief", symbol=sym, **b)
 
             history = await loop.run_in_executor(None, store.symbol_history, sym)
-            thesis = await loop.run_in_executor(
-                None, lambda: committee.analyst_thesis(sym, pick["reason"], briefs, history, decision_id, calibration))
-            model_tags = {"analyst": thesis.pop("_downgraded_model", MODEL_MAP["analyst"])}
-            yield _ev("thesis", symbol=sym, **thesis)
-
-            concerns_out = await loop.run_in_executor(
-                None, lambda: committee.skeptic_challenge(sym, thesis, briefs, decision_id))
-            model_tags["skeptic"] = concerns_out.pop("_downgraded_model", MODEL_MAP["skeptic"])
-            concerns = concerns_out.get("concerns", [])
-            for c in concerns:
-                yield _ev("concern", symbol=sym, **c)
-
-            flags = committee.fact_check_concerns(concerns, price_ctx)
-            for f in flags:
-                yield _ev("fact_flag", symbol=sym, text=f)
-
-            rebuttal = await loop.run_in_executor(
-                None, lambda: committee.analyst_rebuttal(sym, thesis, concerns, decision_id))
-            rebuttal.pop("_downgraded_model", None)
-            yield _ev("rebuttal", symbol=sym, **rebuttal)
-
-            verdict = await loop.run_in_executor(
-                None, lambda: committee.arbiter_verdict(sym, thesis, concerns, rebuttal, flags, decision_id))
-            model_tags["arbiter"] = verdict.pop("_downgraded_model", MODEL_MAP["arbiter"])
+            # shared committee core — yields thesis/concern/fact_flag/rebuttal to
+            # stream live, writes the ledger row, and returns it via "_result"
+            row = None
+            async for ev in debate.deliberate(sym, pick, briefs, price_ctx, history,
+                                              calibration, "FIND_TRADES", decision_id):
+                if ev["type"] == "_result":
+                    row = ev["row"]
+                else:
+                    yield ev
         except LLMError as exc:
             yield _ev("status", msg=f"{sym}: dropped ({exc})")
             continue
 
-        sess = session()
-        horizon = int(verdict.get("adjusted_horizon_days") or thesis["horizon_days"])
-        pick_id = store.record_pick({
-            "symbol": sym, "arm": "COMMITTEE", "edge": pick.get("edge_hint"),
-            "trigger_src": "FIND_TRADES", "session": sess,
-            "direction": thesis["direction"], "horizon_days": horizon,
-            "score": thesis["score"], "adjusted_score": verdict["adjusted_score"],
-            "confidence": verdict["adjusted_confidence"], "verdict": verdict["verdict"],
-            "approved": int(bool(verdict["approved"])),
-            "triage_reason": pick["reason"], "thesis": thesis["thesis"],
-            "debate": {"concerns": concerns, "rebuttal": rebuttal,
-                       "fact_flags": flags, "arbiter_summary": verdict["summary"]},
-            "briefs": briefs, "model_tags": model_tags,
-            "low_liquidity": int(bool(price_ctx and price_ctx.get("low_liquidity"))),
-            "skeptic_moved_score": round(float(rebuttal["revised_score"]) - float(thesis["score"]), 2),
-            "arbiter_overrode": int(bool(verdict["approved"]) != (float(rebuttal["revised_score"]) > 50)),
-            "entry_price": (price_ctx or {}).get("last_price") if sess == "OPEN" else None,
-            "spy_price": (prices.get_context("SPY") or {}).get("last_price"),
-        })
-        row = {
-            "id": pick_id, "symbol": sym, "direction": thesis["direction"],
-            "horizon_days": horizon, "edge": pick.get("edge_hint"),
-            "conviction": verdict["adjusted_score"], "confidence": verdict["adjusted_confidence"],
-            "verdict": verdict["verdict"], "approved": bool(verdict["approved"]),
-            "summary": verdict["summary"],
-        }
+        if row is None:   # core yielded no result (shouldn't happen) — book nothing
+            continue
+        sess = session()   # for the solo arm's entry-price stamp below
         board.append(row)
         yield _ev("decision", **row)
 

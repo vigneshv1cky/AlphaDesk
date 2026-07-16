@@ -14,7 +14,6 @@ import asyncio
 import logging
 import time
 import uuid
-from typing import Any
 
 from alphadesk.config import (
     MAX_CONCURRENT_WORKFLOWS,
@@ -25,7 +24,7 @@ from alphadesk.config import (
     session,
 )
 from alphadesk.desk import briefs as briefs_mod
-from alphadesk.desk import committee, solo, triage
+from alphadesk.desk import committee, debate, solo, triage
 from alphadesk.ingest import prices
 from alphadesk.knowledge.graph import Graph
 from alphadesk.ledger import store
@@ -104,54 +103,25 @@ async def _gather_briefs(loop, sym: str, articles: list[dict], price_ctx: dict |
 async def _run_committee(loop, sym: str, pick: dict, articles: list[dict],
                          price_ctx: dict | None, trigger_src: str) -> int | None:
     decision_id = f"{sym}-{uuid.uuid4().hex[:8]}"
-    model_tags: dict[str, Any] = {}
-
-    def _tag(stage: str, result: dict) -> dict:
-        model_tags[stage] = result.pop("_downgraded_model", MODEL_MAP.get(stage.split("_")[0], "?"))
-        return result
-
     try:
         briefs = await _gather_briefs(loop, sym, articles, price_ctx, decision_id)
         history = await loop.run_in_executor(None, store.symbol_history, sym)
         calibration = committee.calibration_block(
             await loop.run_in_executor(None, store.stats))
-
-        thesis = _tag("analyst", await loop.run_in_executor(
-            None, lambda: committee.analyst_thesis(sym, pick["reason"], briefs, history, decision_id, calibration)))
-        concerns_out = _tag("skeptic", await loop.run_in_executor(
-            None, lambda: committee.skeptic_challenge(sym, thesis, briefs, decision_id)))
-        concerns = concerns_out.get("concerns", [])
-        fact_flags = committee.fact_check_concerns(concerns, price_ctx)
-        rebuttal = _tag("analyst_rebuttal", await loop.run_in_executor(
-            None, lambda: committee.analyst_rebuttal(sym, thesis, concerns, decision_id)))
-        verdict = _tag("arbiter", await loop.run_in_executor(
-            None, lambda: committee.arbiter_verdict(sym, thesis, concerns, rebuttal, fact_flags, decision_id)))
+        # shared committee core — same debate + ledger write as the streaming path
+        result = None
+        async for ev in debate.deliberate(sym, pick, briefs, price_ctx, history,
+                                          calibration, trigger_src, decision_id):
+            if ev["type"] == "_result":
+                result = ev
     except LLMError as exc:
         log.warning("Committee dropped %s: %s", sym, exc)
         return None
+    if result is None:
+        return None
 
-    sess = session()
-    pick_id = store.record_pick({
-        "symbol": sym, "arm": "COMMITTEE", "edge": pick.get("edge_hint"),
-        "trigger_src": trigger_src, "session": sess,
-        "direction": thesis["direction"],
-        # the arbiter owns the final horizon (falls back to analyst's proposal)
-        "horizon_days": int(verdict.get("adjusted_horizon_days") or thesis["horizon_days"]),
-        "score": thesis["score"], "adjusted_score": verdict["adjusted_score"],
-        "confidence": verdict["adjusted_confidence"],
-        "verdict": verdict["verdict"], "approved": int(bool(verdict["approved"])),
-        "triage_reason": pick["reason"], "thesis": thesis["thesis"],
-        "debate": {"concerns": concerns, "rebuttal": rebuttal,
-                   "fact_flags": fact_flags, "arbiter_summary": verdict["summary"]},
-        "briefs": briefs, "model_tags": model_tags,
-        "low_liquidity": int(bool(price_ctx and price_ctx.get("low_liquidity"))),
-        "skeptic_moved_score": round(float(rebuttal["revised_score"]) - float(thesis["score"]), 2),
-        "arbiter_overrode": int(
-            bool(verdict["approved"]) != (float(rebuttal["revised_score"]) > 50)
-        ),
-        "entry_price": (price_ctx or {}).get("last_price") if sess == "OPEN" else None,
-        "spy_price": ((prices.get_context("SPY") or {}).get("last_price")),
-    })
+    pick_id = result["pick_id"]
+    thesis, verdict = result["thesis"], result["verdict"]
     log.info(
         "DECISION #%d %s %s %dd score %.0f→%.0f [%s] approved=%s (%s)",
         pick_id, sym, thesis["direction"], thesis["horizon_days"],
@@ -160,6 +130,7 @@ async def _run_committee(loop, sym: str, pick: dict, articles: list[dict],
     )
 
     # solo control arm on every Nth pick — independent, same evidence
+    sess = session()
     global _pick_counter
     _pick_counter += 1
     if _pick_counter % SOLO_ARM_EVERY_N == 0:
