@@ -181,6 +181,41 @@ def picks_today(arm: str | None = None) -> int:
         return int(conn.execute(query, args).fetchone()[0])
 
 
+def symbol_traces(symbol: str, days: int = 21) -> list[dict]:
+    """Miss post-mortem: every committee/solo evaluation of this symbol in the
+    last `days` — whether it was approved or rejected, with the full transcript.
+    Tells us the desk DID look at it and what it concluded."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, ts, arm, edge, direction, horizon_days, score, adjusted_score,"
+            " confidence, verdict, approved, triage_reason, thesis, debate, alpha_net"
+            " FROM picks WHERE symbol = ? AND ts >= datetime('now', ?) ORDER BY id DESC",
+            (symbol.upper(), f"-{int(days)} days"),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def symbol_skips(symbol: str, days: int = 21, scan: int = 500) -> list[dict]:
+    """Miss post-mortem: triage skips that NAMED this symbol in the last `days`,
+    with the stated reason — the desk saw it as a candidate and passed."""
+    sym = symbol.upper()
+    out: list[dict] = []
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT window_ts, skip_reasons FROM funnel WHERE window_ts >= datetime('now', ?)"
+            " ORDER BY id DESC LIMIT ?",
+            (f"-{int(days)} days", scan),
+        ).fetchall()
+    for r in rows:
+        try:
+            for s in json.loads(r["skip_reasons"] or "[]"):
+                if (s.get("symbol") or "").upper() == sym:
+                    out.append({"window_ts": r["window_ts"], "reason": s.get("reason", "")})
+        except Exception:
+            continue
+    return out
+
+
 def symbol_history(symbol: str, limit: int = 5) -> list[dict]:
     """Episodic memory: this symbol's graded track record."""
     with _connect() as conn:

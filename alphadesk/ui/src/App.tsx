@@ -9,6 +9,7 @@ import {
   type TokenRow,
 } from "@/lib/api"
 import { FindTrades } from "@/components/FindTrades"
+import { MissPostmortem } from "@/components/MissPostmortem"
 import { PickSheet } from "@/components/PickSheet"
 import {
   Accordion,
@@ -90,6 +91,8 @@ export default function App() {
       </header>
 
       <FindTrades onDone={refresh} />
+
+      <MissPostmortem />
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <StatCard
