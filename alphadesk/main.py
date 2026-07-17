@@ -61,7 +61,18 @@ async def _serve() -> None:
                 log.error("grader error: %s", exc)
             await asyncio.sleep(3600)
 
-    await asyncio.gather(_grader_loop(), _web_server().serve())
+    async def _earnings_loop():
+        from alphadesk.ingest import earnings
+        loop = asyncio.get_running_loop()
+        log = logging.getLogger("alphadesk.earnings")
+        while True:
+            try:
+                await loop.run_in_executor(None, earnings.refresh_calendar)
+            except Exception as exc:
+                log.error("earnings refresh error: %s", exc)
+            await asyncio.sleep(6 * 3600)   # 4×/day keeps upcoming + recent fresh
+
+    await asyncio.gather(_grader_loop(), _earnings_loop(), _web_server().serve())
 
 
 def main() -> None:

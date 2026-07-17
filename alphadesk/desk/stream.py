@@ -24,7 +24,13 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from alphadesk.config import EXPOSURE_MAX_SHOCKS, MODEL_MAP, SOLO_ARM_EVERY_N, session
+from alphadesk.config import (
+    EARNINGS_DRIFT_DAYS,
+    EXPOSURE_MAX_SHOCKS,
+    MODEL_MAP,
+    SOLO_ARM_EVERY_N,
+    session,
+)
 from alphadesk.desk import briefs as briefs_mod
 from alphadesk.desk import committee, debate, exposure, reeval, solo, triage
 from alphadesk.ingest import news, prices
@@ -76,6 +82,30 @@ async def stream_find_trades(hours: float = 48.0, max_debates: int = 6,
         yield _ev("status", msg=f"News scan failed: {exc}")
         yield _ev("done", board=[])
         return
+
+    # Earnings drift — names that reported in the last few days are first-class
+    # candidates (the desk's cleanest DRIFT edge). Injected as synthetic EARNINGS
+    # "articles" so they flow through the same triage → committee pipeline; the
+    # committee judges whether the post-earnings move continues.
+    reported = await loop.run_in_executor(None, store.recently_reported, EARNINGS_DRIFT_DAYS)
+    for e in reported:
+        esym, surp = e["symbol"], (e.get("surprise_pct") or 0.0)
+        beat = "beat" if surp > 0 else ("miss" if surp < 0 else "in-line")
+        candidates.setdefault(esym, []).insert(0, {
+            "id": f"earnings-{esym}-{e['report_date'][:10]}",
+            "title": f"[EARNINGS] {esym} reported {e['report_date'][:10]} {e.get('session') or ''}: "
+                     f"EPS {e.get('eps_actual')} vs est {e.get('eps_estimate')} — {beat} {surp}%",
+            "summary": f"Post-earnings-drift setup: {esym} {beat} consensus by {surp}%.",
+            "source": "EarningsCalendar", "url": "", "published_at": e["report_date"],
+            "category": "EARNINGS", "tickers": [esym],
+            "mentions": [{"symbol": esym, "sentiment": round(max(-1.0, min(1.0, surp / 10.0)), 3),
+                          "label": ("positive" if surp > 0 else "negative" if surp < 0 else "neutral"),
+                          "category": "EARNINGS"}],
+            "relations": [],
+        })
+    if reported:
+        yield _ev("status", msg=f"{len(reported)} name(s) reported in the last "
+                                f"{EARNINGS_DRIFT_DAYS}d — added as post-earnings-drift candidates.")
 
     # Position review — BEFORE hunting new trades (and even in a quiet window),
     # re-check every still-open TAKE from earlier runs against current price +
