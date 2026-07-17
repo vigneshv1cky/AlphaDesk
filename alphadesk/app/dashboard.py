@@ -129,7 +129,7 @@ def _within_daily_cap() -> bool:
 
 
 @app.get("/api/find-trades")
-async def api_find_trades(request: Request, hours: float = 48.0,
+async def api_find_trades(request: Request, hours: float = 24.0,
                           max_debates: int = 6, expose: bool = False):
     """Server-Sent Events stream of a live 'Find Trades' run — the committee
     scanning news and debating opportunities in real time. expose=true runs the

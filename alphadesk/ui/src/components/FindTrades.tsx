@@ -186,7 +186,7 @@ export function FindTrades({ onDone }: { onDone: () => void }) {
     setChief("")
     setPositions([])
     setStatus("Starting…")
-    const es = new EventSource(`/api/find-trades?hours=48&max_debates=6&expose=${deep}`)
+    const es = new EventSource(`/api/find-trades?hours=24&max_debates=6&expose=${deep}`)
     esRef.current = es
     es.onmessage = (e) => {
       const ev: Ev = JSON.parse(e.data)

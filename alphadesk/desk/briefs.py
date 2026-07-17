@@ -65,46 +65,26 @@ def news_brief(symbol: str, articles: list[dict], decision_id: str | None = None
     )
 
 
-def fundamentals_brief(symbol: str, fundamentals: dict | None,
-                       decision_id: str | None = None) -> dict:
-    if not fundamentals:
-        return {"kind": "fundamentals", "summary": "(no fundamentals data)", "key_facts": []}
-    return _brief(
-        "fundamentals",
-        f"Give the fundamental backdrop for {symbol}: is it richly or cheaply "
-        "valued, is it profitable and growing, and does the valuation leave room "
-        "for the catalyst to move it — or is it already priced for perfection? "
-        "Be factual about the numbers given; do not invent any.",
-        "Fundamentals:\n" + wrap_data("fundamentals", json.dumps(fundamentals, default=str)),
-        decision_id,
-    )
-
-
-def freshness_brief(symbol: str, price_ctx: dict | None, articles: list[dict],
-                    decision_id: str | None = None) -> dict:
-    """The 'already-priced?' check — the crux of every drift/ripple thesis."""
-    ages = [a.get("published_at", "")[:16] for a in articles[:6]]
+def market_brief(symbol: str, price_ctx: dict | None, fundamentals: dict | None,
+                 articles: list[dict], decision_id: str | None = None) -> dict:
+    """One call covering the three code-fact dimensions that used to be three
+    briefs: technicals, valuation, and the priced-in / still-developing read."""
     payload = {
-        "catalyst_timestamps": ages,
-        "move_today_pct": (price_ctx or {}).get("change_today_pct"),
-        "move_5d_pct": (price_ctx or {}).get("change_5d_pct"),
-        "move_20d_pct": (price_ctx or {}).get("change_20d_pct"),
-        "vs_90d_high": (price_ctx or {}).get("high_90d"),
-        "vs_90d_low": (price_ctx or {}).get("low_90d"),
-        "last_price": (price_ctx or {}).get("last_price"),
+        "price": price_ctx or "none",
+        "fundamentals": fundamentals or "none",
+        "catalyst_timestamps": [a.get("published_at", "")[:16] for a in articles[:6]],
     }
     return _brief(
-        "freshness",
-        f"Judge two things about {symbol}'s catalyst. (1) PRICED-IN: compare the "
-        "catalyst timing to the price move — if the stock already moved hard in the "
-        "catalyst's direction the edge may be gone (fade risk); if it barely moved, "
-        "the repricing may still be ahead. (2) LEGS: is this a POINT event that's "
-        "essentially over, or a STILL-DEVELOPING story likely to keep generating "
-        "moves over the coming days/weeks (earnings→estimate revisions, policy→"
-        "phased rollout, M&A→regulatory steps)? A developing story can carry a "
-        "multi-day drift even if the first move is priced. State plainly whether "
-        "there's room left to run and whether the story still has legs.",
-        "Timing & move data:\n" + wrap_data("freshness", json.dumps(payload, default=str)),
+        "market",
+        f"Give the market backdrop for {symbol} in three tight parts, using ONLY "
+        "the numbers provided (invent nothing). (1) TECHNICALS: trend, where price "
+        "sits in its range, extended vs quiet, liquidity. (2) VALUATION: cheap or "
+        "rich, profitable/growing, whether the valuation leaves room for the "
+        "catalyst or is priced for perfection. (3) PRICED-IN & LEGS: compare "
+        "catalyst timing to the move — already moved hard (fade risk) vs barely "
+        "moved (repricing may be ahead); and is this a spent POINT event or a "
+        "STILL-DEVELOPING story with multi-day drift left.",
+        "Data:\n" + wrap_data("market", json.dumps(payload, default=str)),
         decision_id,
     )
 

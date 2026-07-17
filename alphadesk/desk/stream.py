@@ -223,10 +223,8 @@ async def stream_find_trades(hours: float = 48.0, max_debates: int = 6,
             # freshness) — each a bounded Haiku research task feeding the analyst
             fundamentals = await loop.run_in_executor(None, prices.get_fundamentals, sym)
             briefs = list(await asyncio.gather(
-                loop.run_in_executor(None, briefs_mod.technical_brief, sym, price_ctx, decision_id),
+                loop.run_in_executor(None, briefs_mod.market_brief, sym, price_ctx, fundamentals, arts, decision_id),
                 loop.run_in_executor(None, briefs_mod.news_brief, sym, arts, decision_id),
-                loop.run_in_executor(None, briefs_mod.fundamentals_brief, sym, fundamentals, decision_id),
-                loop.run_in_executor(None, briefs_mod.freshness_brief, sym, price_ctx, arts, decision_id),
             ))
             for b in briefs:
                 yield _ev("brief", symbol=sym, **b)
