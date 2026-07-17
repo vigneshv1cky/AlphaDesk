@@ -31,6 +31,8 @@ interface Ev {
   shock?: string
   strength?: string
   chain?: string
+  entry?: number
+  now?: number
 }
 
 interface BoardRow {
@@ -173,6 +175,7 @@ export function FindTrades({ onDone }: { onDone: () => void }) {
   const [feed, setFeed] = useState<Ev[]>([])
   const [board, setBoard] = useState<BoardRow[] | null>(null)
   const [chief, setChief] = useState<string>("")
+  const [positions, setPositions] = useState<Ev[]>([])
   const [deep, setDeep] = useState(false)
   const esRef = useRef<EventSource | null>(null)
 
@@ -181,6 +184,7 @@ export function FindTrades({ onDone }: { onDone: () => void }) {
     setFeed([])
     setBoard(null)
     setChief("")
+    setPositions([])
     setStatus("Starting…")
     const es = new EventSource(`/api/find-trades?hours=48&max_debates=6&expose=${deep}`)
     esRef.current = es
@@ -195,6 +199,8 @@ export function FindTrades({ onDone }: { onDone: () => void }) {
         setRunning(false)
         es.close()
         onDone()
+      } else if (ev.type === "position_exit" || ev.type === "position_hold") {
+        setPositions((p) => [...p, ev])
       } else {
         setFeed((f) => [...f, ev])
       }
@@ -235,6 +241,46 @@ export function FindTrades({ onDone }: { onDone: () => void }) {
       </CardHeader>
       <CardContent>
         {status && <p className="mb-3 text-sm text-muted-foreground">{status}</p>}
+
+        {positions.length > 0 && (
+          <div className="mb-4 space-y-2">
+            <div className="text-sm font-semibold">
+              Position review ({positions.filter((p) => p.type === "position_exit").length} exit
+              {positions.filter((p) => p.type === "position_exit").length === 1 ? "" : "s"})
+              <span className="ml-1 font-normal text-muted-foreground">
+                — your open picks from earlier runs
+              </span>
+            </div>
+            {positions.map((p, i) => {
+              const exit = p.type === "position_exit"
+              return (
+                <div
+                  key={i}
+                  className={`rounded-md border border-l-4 p-2.5 text-sm ${
+                    exit ? "border-l-red-500 bg-red-950/20" : "border-l-emerald-600"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Badge className={exit ? "bg-red-600" : "bg-emerald-700"}>
+                      {exit ? "EXIT" : "HOLD"}
+                    </Badge>
+                    <span className={p.direction === "LONG" ? "text-green-500" : "text-red-500"}>
+                      {p.direction}
+                    </span>
+                    <span className="font-bold">{p.symbol}</span>
+                    <span className="text-muted-foreground">{p.horizon_days}d call</span>
+                    {exit && p.entry != null && p.now != null && (
+                      <span className="text-muted-foreground">
+                        · {p.entry} → {p.now}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-muted-foreground">{p.reason}</p>
+                </div>
+              )
+            })}
+          </div>
+        )}
 
         {board && (
           <div className="mb-4 space-y-2">

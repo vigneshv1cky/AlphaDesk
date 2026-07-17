@@ -161,6 +161,11 @@ ALPHADESK_GRAPH=off           # set on/1/true to enable the Neo4j graph
   ledger says they don't pay). No free-form "lessons" memory (persistent injection risk).
 - **Miss diagnosis is conversational** — ask Claude "why did we miss X?"; it traces
   `store.symbol_traces` / `symbol_skips` and fixes data/prompt/bug. No UI tool for it.
+- **Position review (exits)** — each run, BEFORE hunting new trades, re-checks every
+  still-open TAKE (`store.open_taken_picks`) against current price + fresh news via the
+  opus `reeval` agent → HOLD or EXIT with a reason, surfaced first (you may have traded
+  it). Exits are stamped (`exit_ts`/`exit_reason`); HOLD is the fail-safe default. The
+  committee opens positions; `desk/reeval.py` is the only thing that closes them early.
 
 ## Tech debt / honest status
 

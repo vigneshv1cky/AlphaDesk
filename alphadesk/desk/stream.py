@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 
 from alphadesk.config import EXPOSURE_MAX_SHOCKS, MODEL_MAP, SOLO_ARM_EVERY_N, session
 from alphadesk.desk import briefs as briefs_mod
-from alphadesk.desk import committee, debate, exposure, solo, triage
+from alphadesk.desk import committee, debate, exposure, reeval, solo, triage
 from alphadesk.ingest import news, prices
 from alphadesk.ledger import store
 from alphadesk.llm import LLMError
@@ -76,6 +76,30 @@ async def stream_find_trades(hours: float = 48.0, max_debates: int = 6,
         yield _ev("status", msg=f"News scan failed: {exc}")
         yield _ev("done", board=[])
         return
+
+    # Position review — BEFORE hunting new trades (and even in a quiet window),
+    # re-check every still-open TAKE from earlier runs against current price +
+    # fresh news, and issue HOLD/EXIT with a reason. You may have traded the
+    # original call, so exits are surfaced first and stamped in the ledger.
+    open_positions = await loop.run_in_executor(None, store.open_taken_picks)
+    if open_positions:
+        yield _ev("status", msg=f"Reviewing {len(open_positions)} open position(s) from earlier runs…")
+        for pos in open_positions:
+            if await _gone():
+                return
+            psym = pos["symbol"]
+            pctx = await loop.run_in_executor(None, prices.get_context, psym)
+            fresh = candidates.get(psym, [])
+            verdict = await loop.run_in_executor(
+                None, reeval.reevaluate, pos, pctx, fresh, f"reeval-{pos['id']}")
+            if verdict["decision"] == "EXIT":
+                await loop.run_in_executor(None, store.record_exit, pos["id"], verdict["reason"])
+                yield _ev("position_exit", id=pos["id"], symbol=psym, direction=pos["direction"],
+                          horizon_days=pos["horizon_days"], entry=pos.get("entry_price"),
+                          now=(pctx or {}).get("last_price"), reason=verdict["reason"])
+            else:
+                yield _ev("position_hold", id=pos["id"], symbol=psym, direction=pos["direction"],
+                          horizon_days=pos["horizon_days"], reason=verdict["reason"])
 
     if not candidates:
         yield _ev("status", msg="No fresh catalysts found in that window.")
@@ -266,6 +290,7 @@ async def stream_find_trades(hours: float = 48.0, max_debates: int = 6,
                 row["chief_reason"] = cr["reason"] if cr else ""
             board.sort(key=lambda r: order.get(r["symbol"].upper(), 999))
             store.add_run("FIND_TRADES", board)
+            store.mark_taken([r["id"] for r in board if r.get("take")])  # open positions to review next run
             yield _ev("chief", board=board, summary=chief.get("summary", ""))
             yield _ev("done", board=board)
             return
@@ -277,4 +302,5 @@ async def stream_find_trades(hours: float = 48.0, max_debates: int = 6,
         row["take"] = row["approved"]
         row["chief_reason"] = ""
     board.sort(key=lambda r: (not r["approved"], -abs(r["conviction"] - 50)))
+    store.mark_taken([r["id"] for r in board if r.get("take")])
     yield _ev("done", board=board)

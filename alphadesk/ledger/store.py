@@ -51,7 +51,11 @@ CREATE TABLE IF NOT EXISTS picks (
     ret_horizon     REAL,
     spy_ret_horizon REAL,
     alpha_net       REAL,
-    graded_at       TEXT
+    graded_at       TEXT,
+    -- position lifecycle: set when the Chief marks TAKE; re-evaluated on later runs
+    taken           INTEGER NOT NULL DEFAULT 0,
+    exit_ts         TEXT,                          -- early exit stamped by a re-eval
+    exit_reason     TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_picks_ts ON picks (ts);
 CREATE INDEX IF NOT EXISTS idx_picks_symbol ON picks (symbol);
@@ -106,6 +110,13 @@ def _connect() -> sqlite3.Connection:
 def init() -> None:
     with _lock, _connect() as conn:
         conn.executescript(_SCHEMA)
+        # idempotent migrations for pre-existing DBs (no-op once the column exists)
+        for col, decl in (("taken", "INTEGER NOT NULL DEFAULT 0"),
+                          ("exit_ts", "TEXT"), ("exit_reason", "TEXT")):
+            try:
+                conn.execute(f"ALTER TABLE picks ADD COLUMN {col} {decl}")
+            except sqlite3.OperationalError:
+                pass  # already migrated
 
 
 def _now() -> str:
@@ -329,6 +340,35 @@ def get_relationships(from_sym: str, days: int = 7) -> list[dict]:
             (from_sym.upper(), f"-{int(days)} days"),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def mark_taken(pick_ids: list[int]) -> None:
+    """Flag the picks the Chief chose to TAKE — the open positions later runs re-check."""
+    if not pick_ids:
+        return
+    with _lock, _connect() as conn:
+        conn.executemany("UPDATE picks SET taken=1 WHERE id=?", [(int(i),) for i in pick_ids])
+
+
+def open_taken_picks() -> list[dict]:
+    """TAKE picks still within their horizon, not exited, not yet graded — the
+    open positions a fresh run should re-evaluate ('are you still in this trade?')."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, ts, symbol, direction, horizon_days, adjusted_score, confidence,"
+            " edge, thesis, entry_price, triage_reason FROM picks"
+            " WHERE taken=1 AND exit_ts IS NULL AND graded_at IS NULL"
+            "   AND datetime(ts, '+' || (horizon_days + 3) || ' days') >= datetime('now')"
+            " ORDER BY id DESC",
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def record_exit(pick_id: int, reason: str) -> None:
+    """Stamp an early exit issued by a position re-evaluation."""
+    with _lock, _connect() as conn:
+        conn.execute("UPDATE picks SET exit_ts=?, exit_reason=? WHERE id=?",
+                     (_now(), reason, int(pick_id)))
 
 
 def add_run(kind: str, top_picks: list[dict]) -> None:

@@ -39,6 +39,7 @@ MODEL_MAP: dict[str, str] = {
     "skeptic": "opus",         # adversarial challenge
     "arbiter": "opus",         # final verdict
     "solo": "opus",            # single-agent control arm
+    "reeval": "opus",          # position review — HOLD/EXIT on still-open TAKEs
     "chief": "opus",           # comparative head-to-head selection across debated ideas
     "exposure_specialist": "sonnet",  # supplier/customer/competitor mapping (web-grounded)
     "exposure_synth": "opus",         # assembles ripple candidates from the mapped neighborhood
