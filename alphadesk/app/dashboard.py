@@ -106,6 +106,9 @@ def api_tokens(days: int = 1):
 
 @app.get("/api/graph")
 def api_graph():
+    from alphadesk.config import USE_GRAPH
+    if not USE_GRAPH:  # graph off in v2 — don't probe Neo4j (silences the connect warning)
+        return {"articles": 0, "companies": 0, "mentions": 0, "relations": 0}
     return Graph.default().summary()
 
 
