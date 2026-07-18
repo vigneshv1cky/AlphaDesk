@@ -48,32 +48,52 @@ async def deliberate(sym: str, pick: dict, briefs: list[dict], price_ctx: dict |
     concerns = concerns_out.get("concerns", [])
     for c in concerns:
         yield {"type": "concern", "symbol": sym, **c}
+    # The critic may now REVERSE the call (FLIP → opposite side) or STAND_ASIDE.
+    counter = {
+        "stance": concerns_out.get("stance", "SUPPORT"),
+        "counter_direction": concerns_out.get("counter_direction", "NONE"),
+        "counter": concerns_out.get("counter", ""),
+    }
+    if counter["stance"] != "SUPPORT":
+        yield {"type": "counter", "symbol": sym, **counter,
+               "proposed_from": thesis["direction"]}
 
     flags = team.fact_check_concerns(concerns, price_ctx)
     for f in flags:
         yield {"type": "fact_flag", "symbol": sym, "text": f}
 
     rebuttal = await loop.run_in_executor(
-        None, lambda: team.researcher_reply(sym, thesis, concerns, decision_id))
+        None, lambda: team.researcher_reply(sym, thesis, concerns, counter, decision_id))
     rebuttal.pop("_downgraded_model", None)
     yield {"type": "rebuttal", "symbol": sym, **rebuttal}
 
     verdict = await loop.run_in_executor(
-        None, lambda: team.judge_verdict(sym, thesis, concerns, rebuttal, flags, decision_id))
+        None, lambda: team.judge_verdict(sym, thesis, concerns, counter, rebuttal, flags, decision_id))
     model_tags["judge"] = verdict.pop("_downgraded_model", MODEL_MAP["judge"])
+
+    # The judge issues the FINAL direction — it may adopt the critic's flip. NONE
+    # means stand aside (recorded against the researcher's side as a counterfactual).
+    final_dir = verdict.get("final_direction") or thesis["direction"]
+    booked_dir = final_dir if final_dir in ("LONG", "SHORT") else thesis["direction"]
+    flipped = booked_dir != thesis["direction"] and final_dir in ("LONG", "SHORT")
 
     sess = session()
     horizon = int(verdict.get("adjusted_horizon_days") or thesis["horizon_days"])
     pick_id = store.record_pick({
         "symbol": sym, "arm": "TEAM", "edge": pick.get("edge_hint"),
         "trigger_src": trigger_src, "session": sess,
-        "direction": thesis["direction"], "horizon_days": horizon,
+        "direction": booked_dir, "horizon_days": horizon,
         "score": thesis["score"], "adjusted_score": verdict["adjusted_score"],
         "confidence": verdict["adjusted_confidence"], "verdict": verdict["verdict"],
         "approved": int(bool(verdict["approved"])),
         "triage_reason": pick["reason"], "thesis": thesis["thesis"],
         "debate": {"concerns": concerns, "rebuttal": rebuttal,
-                   "fact_flags": flags, "arbiter_summary": verdict["summary"]},
+                   "fact_flags": flags, "arbiter_summary": verdict["summary"],
+                   "critic_stance": counter["stance"],
+                   "counter_direction": counter["counter_direction"],
+                   "counter": counter["counter"],
+                   "proposed_direction": thesis["direction"],
+                   "final_direction": final_dir, "flipped": flipped},
         "briefs": briefs, "model_tags": model_tags,
         "low_liquidity": int(bool(price_ctx and price_ctx.get("low_liquidity"))),
         "skeptic_moved_score": round(float(rebuttal["revised_score"]) - float(thesis["score"]), 2),
@@ -82,11 +102,11 @@ async def deliberate(sym: str, pick: dict, briefs: list[dict], price_ctx: dict |
         "spy_price": (prices.get_context("SPY") or {}).get("last_price"),
     })
     row = {
-        "id": pick_id, "symbol": sym, "direction": thesis["direction"],
+        "id": pick_id, "symbol": sym, "direction": booked_dir,
         "horizon_days": horizon, "edge": pick.get("edge_hint"),
         "conviction": verdict["adjusted_score"], "confidence": verdict["adjusted_confidence"],
         "verdict": verdict["verdict"], "approved": bool(verdict["approved"]),
-        "summary": verdict["summary"],
+        "flipped": flipped, "summary": verdict["summary"],
     }
     yield {"type": "_result", "row": row, "pick_id": pick_id,
            "thesis": thesis, "verdict": verdict}

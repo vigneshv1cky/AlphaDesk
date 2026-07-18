@@ -192,6 +192,24 @@ export function PickSheet({
                 </Bubble>
               ))}
 
+              {pick.debate?.critic_stance && pick.debate.critic_stance !== "SUPPORT" && (
+                <Bubble role="critic" who="Critic's counter-call">
+                  {pick.debate.critic_stance === "FLIP" ? (
+                    <p className="font-medium">
+                      Reverse: {dirWord(pick.debate.proposed_direction)} →{" "}
+                      <span className={pick.debate.counter_direction === "LONG" ? "text-green-500" : "text-red-500"}>
+                        {dirWord(pick.debate.counter_direction)}
+                      </span>
+                    </p>
+                  ) : (
+                    <p className="font-medium">Stand aside — no edge either way</p>
+                  )}
+                  {pick.debate.counter && (
+                    <p className="mt-1 text-muted-foreground">{pick.debate.counter}</p>
+                  )}
+                </Bubble>
+              )}
+
               {(pick.debate?.fact_flags ?? []).map((f, i) => (
                 <Bubble key={i} role="flag" who="Fact-check">
                   {f}

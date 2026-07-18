@@ -73,7 +73,20 @@ _SKEPTIC_SYSTEM = (
     "inside the horizon, data quality, and liquidity. Every concern must cite "
     "specific evidence from the briefs — no generic worries. Exactly 3 concerns, "
     "strongest first.\n"
-    'Return ONLY JSON: {"concerns": [{"claim": "...", "evidence": "..."}]}'
+    "You have the POWER TO REVERSE THE CALL, not just poke holes — set stance:\n"
+    "  • SUPPORT — the direction is right; your concerns are risks to size around.\n"
+    "  • FLIP — the evidence points the OTHER way. Set counter_direction to the "
+    "opposite side and, in `counter`, make the affirmative case for it. The "
+    "classic case: a momentum/post-earnings LONG into a NEGATIVE price reaction — "
+    "drift continues in the direction of the REACTION, so the real trade is SHORT "
+    "(and vice-versa). Only FLIP when you can state the mechanism for the other "
+    "side, not merely doubt this one.\n"
+    "  • STAND_ASIDE — no tradable edge in EITHER direction; counter_direction=NONE.\n"
+    "When stance is SUPPORT or STAND_ASIDE, counter_direction=NONE.\n"
+    'Return ONLY JSON: {"concerns": [{"claim": "...", "evidence": "..."}], '
+    '"stance": "SUPPORT|FLIP|STAND_ASIDE", "counter_direction": "LONG|SHORT|NONE", '
+    '"counter": "<if FLIP: the affirmative case for the other side; else why the '
+    'edge is absent or the direction holds, 2 sentences max>"}'
 )
 
 _SKEPTIC_SCHEMA = {
@@ -84,6 +97,9 @@ _SKEPTIC_SCHEMA = {
             "evidence": {"type": str, "maxlen": 300},
         },
     },
+    "stance": {"type": str, "enum": ["SUPPORT", "FLIP", "STAND_ASIDE"]},
+    "counter_direction": {"type": str, "enum": ["LONG", "SHORT", "NONE"]},
+    "counter": {"type": str, "maxlen": 400, "optional": True},
 }
 
 _REBUTTAL_SYSTEM = (
@@ -92,6 +108,11 @@ _REBUTTAL_SYSTEM = (
     "Address each concern honestly: rebut with evidence where you can, CONCEDE "
     "where the critic is right. Update your score accordingly — meaningful "
     "concessions must move the number.\n"
+    "If the critic proposes a FLIP (that the trade is the OPPOSITE direction), "
+    "engage it head-on: if their mechanism for the other side is stronger than "
+    "yours, say so plainly — conceding a reversal is honest, not a loss. Move "
+    "revised_score to the side you now believe (remember >50 favors LONG, <50 "
+    "favors SHORT), so a conceded flip lands your score on the other side of 50.\n"
     'Return ONLY JSON: {"rebuttal": "<4 sentences max>", '
     '"revised_score": <0-100>, "concede": <true|false>}'
 )
@@ -104,26 +125,35 @@ _REBUTTAL_SCHEMA = {
 
 _ARBITER_SYSTEM = (
     "You are the Judge — the final judgment on the desk. " + _PREDICTIVE_FRAME + "\n"
-    "Read the full transcript (thesis, concerns, rebuttal, any fact-check flags). "
-    "Decide whether this prediction goes on the book. Weigh argument QUALITY: "
-    "did the critic land real hits? did the researcher answer them or dodge? "
-    "verdict: STRONG (thesis stands), SOFT (stands but softer), PASS (rejected).\n"
-    "COHERENCE RULE: adjusted_score must agree with the direction — for a LONG "
-    "it must be ABOVE 50, for a SHORT BELOW 50. If your honest view puts the "
-    "score on the wrong side of 50, the trade does not belong on the book: set "
-    "approved=false and PASS. Weak-but-real conviction in a LONG is 52-58, "
-    "not 43.\n"
+    "Read the full transcript (thesis, concerns, the critic's stance/counter, "
+    "rebuttal, any fact-check flags). Weigh argument QUALITY: did the critic land "
+    "real hits? did the researcher answer them or dodge?\n"
+    "YOU ISSUE THE FINAL DIRECTION — you are NOT limited to approve-or-reject the "
+    "researcher's side. final_direction ∈ LONG | SHORT | NONE:\n"
+    "  • If the researcher's side holds → final_direction = that side, approved=true.\n"
+    "  • If the CRITIC's flip is better supported than the original (the mechanism "
+    "actually points the other way, e.g. momentum drift following a negative "
+    "reaction) → ADOPT it: final_direction = the flipped side, approved=true. A "
+    "reversed trade the desk backs is a real position, not a rejection.\n"
+    "  • If neither side has a tradable edge → final_direction = NONE, "
+    "approved=false, PASS.\n"
+    "verdict: STRONG (final call is high-conviction), SOFT (real but softer), "
+    "PASS (stand aside). STRONG/SOFT apply to a FLIPPED call too.\n"
+    "COHERENCE RULE: adjusted_score must agree with final_direction — ABOVE 50 for "
+    "LONG, BELOW 50 for SHORT. For NONE, approved=false. A weak-but-real long is "
+    "52-58, a weak-but-real short 42-48; do not sit at 50.\n"
     "adjusted_horizon_days: you own the horizon too — if the surviving edge is "
-    "shorter or longer than the researcher's proposal (e.g. 'only a 1-2 day "
-    "momentum edge survives'), SAY SO in this field; the book records YOUR "
-    "horizon.\n"
-    'Return ONLY JSON: {"approved": <true|false>, "adjusted_score": <0-100>, '
-    '"adjusted_confidence": <0-100>, "adjusted_horizon_days": <1-10>, '
-    '"verdict": "STRONG|SOFT|PASS", "summary": "<3 sentences max>"}'
+    "shorter or longer than the researcher's proposal, SAY SO; the book records "
+    "YOUR horizon.\n"
+    'Return ONLY JSON: {"approved": <true|false>, "final_direction": '
+    '"LONG|SHORT|NONE", "adjusted_score": <0-100>, "adjusted_confidence": <0-100>, '
+    '"adjusted_horizon_days": <1-10>, "verdict": "STRONG|SOFT|PASS", '
+    '"summary": "<3 sentences max; if you flipped the call, say so and why>"}'
 )
 
 _ARBITER_SCHEMA = {
     "approved": {"type": bool},
+    "final_direction": {"type": str, "enum": ["LONG", "SHORT", "NONE"]},
     "adjusted_score": {"type": (int, float), "min": 0, "max": 100},
     "adjusted_confidence": {"type": (int, float), "min": 0, "max": 100},
     "adjusted_horizon_days": {"type": int, "min": 1, "max": 10, "optional": True},
@@ -208,10 +238,15 @@ def critic_challenge(symbol: str, thesis: dict, briefs: list[dict],
 
 
 def researcher_reply(symbol: str, thesis: dict, concerns: list[dict],
-                     decision_id: str | None) -> dict:
+                     counter: dict, decision_id: str | None) -> dict:
+    stance = counter.get("stance", "SUPPORT")
+    cdir = counter.get("counter_direction", "NONE")
+    ctext = counter.get("counter", "")
     user = (
         f"Symbol: {symbol}\nYour thesis: {json.dumps(thesis)}\n"
-        f"Critic's concerns: {json.dumps(concerns)}"
+        f"Critic's concerns: {json.dumps(concerns)}\n"
+        f"Critic's stance: {stance}"
+        + (f" (proposes {cdir}: {ctext})" if stance == "FLIP" else "")
     )
     return call_role("researcher", _REBUTTAL_SYSTEM, user, schema=_REBUTTAL_SCHEMA,
                      decision_id=decision_id)
@@ -272,14 +307,21 @@ def head_ranking(opportunities: list[dict], decision_id: str | None) -> dict:
                      decision_id=decision_id)
 
 
-def judge_verdict(symbol: str, thesis: dict, concerns: list[dict], rebuttal: dict,
-                    fact_flags: list[str], decision_id: str | None) -> dict:
+def judge_verdict(symbol: str, thesis: dict, concerns: list[dict], counter: dict,
+                    rebuttal: dict, fact_flags: list[str],
+                    decision_id: str | None) -> dict:
     fn = false_negative_block()
+    critic_call = {
+        "stance": counter.get("stance", "SUPPORT"),
+        "counter_direction": counter.get("counter_direction", "NONE"),
+        "counter": counter.get("counter", ""),
+    }
     user = (
         (f"{fn}\n\n" if fn else "")
         + f"Symbol: {symbol}\n"
         f"THESIS: {json.dumps(thesis)}\n"
         f"CRITIC CONCERNS: {json.dumps(concerns)}\n"
+        f"CRITIC STANCE: {json.dumps(critic_call)}\n"
         f"RESEARCHER REBUTTAL: {json.dumps(rebuttal)}\n"
         f"FACT-CHECK FLAGS: {json.dumps(fact_flags) if fact_flags else 'none'}"
     )

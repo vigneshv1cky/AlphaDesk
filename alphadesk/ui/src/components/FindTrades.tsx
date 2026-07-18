@@ -34,6 +34,11 @@ interface Ev {
   chain?: string
   entry?: number
   now?: number
+  stance?: string
+  counter_direction?: string
+  counter?: string
+  proposed_from?: string
+  flipped?: boolean
 }
 
 interface BoardRow {
@@ -49,6 +54,7 @@ interface BoardRow {
   summary: string
   take?: boolean
   chief_reason?: string
+  flipped?: boolean
 }
 
 const ACCENT: Record<string, string> = {
@@ -58,6 +64,7 @@ const ACCENT: Record<string, string> = {
   brief: "border-l-zinc-400 dark:border-l-zinc-500",
   thesis: "border-l-blue-500",
   concern: "border-l-red-500",
+  counter: "border-l-fuchsia-500",
   fact_flag: "border-l-orange-500",
   rebuttal: "border-l-blue-500",
   decision: "border-l-emerald-500",
@@ -132,6 +139,24 @@ function Line({ ev }: { ev: Ev }) {
           <p className="text-muted-foreground">{ev.evidence}</p>
         </div>
       )
+    case "counter":
+      return (
+        <div className={cls}>
+          <Tag className="text-fuchsia-500">
+            {ev.stance === "FLIP" ? `Critic reverses the call · ${ev.symbol}` : `Critic: stand aside · ${ev.symbol}`}
+          </Tag>
+          {ev.stance === "FLIP" && (
+            <p className="mt-1">
+              <span className="text-muted-foreground line-through">{dirWord(ev.proposed_from)}</span>{" "}
+              →{" "}
+              <b className={dirUp(ev.counter_direction) ? "text-emerald-500" : "text-red-500"}>
+                {dirWord(ev.counter_direction)}
+              </b>
+            </p>
+          )}
+          <p className="mt-1 text-muted-foreground">{ev.counter}</p>
+        </div>
+      )
     case "fact_flag":
       return (
         <div className={cls}>
@@ -156,6 +181,7 @@ function Line({ ev }: { ev: Ev }) {
           <p className="mt-1">
             {ev.approved ? "✅ Worth acting on" : "❌ Skipped"} · {plainVerdict(ev.verdict)} ·
             confidence {ev.conviction}/100
+            {ev.flipped && <span className="text-fuchsia-500"> · reversed by critic</span>}
           </p>
           <p className="text-muted-foreground">{ev.summary}</p>
         </div>
@@ -365,6 +391,9 @@ export function FindTrades({
                     {dirWord(r.direction)}
                   </span>
                   <span className="font-bold">{r.symbol}</span>
+                  {r.flipped && (
+                    <Badge className="bg-fuchsia-600 text-white">reversed</Badge>
+                  )}
                   <Badge variant="secondary">{plainEdge(r.edge)}</Badge>
                   <span className="text-muted-foreground">hold ~{r.horizon_days}d</span>
                   <span className="text-muted-foreground">conf {r.conviction}</span>

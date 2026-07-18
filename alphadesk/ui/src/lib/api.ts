@@ -16,6 +16,12 @@ export interface Debate {
   rebuttal?: Rebuttal
   fact_flags?: string[]
   arbiter_summary?: string
+  critic_stance?: string
+  counter_direction?: string
+  counter?: string
+  proposed_direction?: string
+  final_direction?: string
+  flipped?: boolean
 }
 
 export interface Brief {

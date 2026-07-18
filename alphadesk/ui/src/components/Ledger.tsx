@@ -94,6 +94,7 @@ function IdeaRow({ n, p, onSelect }: { n: number; p: Pick; onSelect: (id: number
         )}
         <span>· conf {Math.round(p.adjusted_score ?? p.score)}</span>
         <span>· {p.approved ? "acted ✓" : "skipped"}</span>
+        {p.debate?.flipped && <span className="font-medium text-fuchsia-500">· reversed</span>}
         <span>· {p.arm === "LONER" ? "Solo" : "Team"}</span>
         <span className="font-mono tabular-nums text-muted-foreground/70">
           · {etDateTime(p.ts)} ET
