@@ -39,12 +39,12 @@ async def deliberate(sym: str, pick: dict, briefs: list[dict], price_ctx: dict |
     thesis = await loop.run_in_executor(
         None, lambda: committee.analyst_thesis(
             sym, pick["reason"], briefs, history, decision_id, calibration))
-    model_tags = {"analyst": thesis.pop("_downgraded_model", MODEL_MAP["analyst"])}
+    model_tags = {"researcher": thesis.pop("_downgraded_model", MODEL_MAP["researcher"])}
     yield {"type": "thesis", "symbol": sym, **thesis}
 
     concerns_out = await loop.run_in_executor(
         None, lambda: committee.skeptic_challenge(sym, thesis, briefs, decision_id))
-    model_tags["skeptic"] = concerns_out.pop("_downgraded_model", MODEL_MAP["skeptic"])
+    model_tags["critic"] = concerns_out.pop("_downgraded_model", MODEL_MAP["critic"])
     concerns = concerns_out.get("concerns", [])
     for c in concerns:
         yield {"type": "concern", "symbol": sym, **c}
@@ -60,7 +60,7 @@ async def deliberate(sym: str, pick: dict, briefs: list[dict], price_ctx: dict |
 
     verdict = await loop.run_in_executor(
         None, lambda: committee.arbiter_verdict(sym, thesis, concerns, rebuttal, flags, decision_id))
-    model_tags["arbiter"] = verdict.pop("_downgraded_model", MODEL_MAP["arbiter"])
+    model_tags["judge"] = verdict.pop("_downgraded_model", MODEL_MAP["judge"])
 
     sess = session()
     horizon = int(verdict.get("adjusted_horizon_days") or thesis["horizon_days"])

@@ -42,7 +42,7 @@ def fresh_catalyst(symbol: str, last: dict | None, new_articles: list[dict],
         + wrap_data("news", heads)
     )
     try:
-        out = call_role("materiality", _SYSTEM, user, schema=_SCHEMA, decision_id=decision_id)
+        out = call_role("news_check", _SYSTEM, user, schema=_SCHEMA, decision_id=decision_id)
         out.pop("_downgraded_model", None)
         return out
     except Exception as exc:  # fail open — don't let a check error hide a real catalyst

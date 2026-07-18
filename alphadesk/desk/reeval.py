@@ -53,7 +53,7 @@ def reevaluate(pick: dict, price_ctx: dict | None, articles: list[dict],
         f"Fresh news on {pick['symbol']}:\n" + wrap_data("news", "\n".join(headlines))
     )
     try:
-        out = call_role("reeval", _SYSTEM, user, schema=_SCHEMA, decision_id=decision_id)
+        out = call_role("review", _SYSTEM, user, schema=_SCHEMA, decision_id=decision_id)
         out.pop("_downgraded_model", None)
         return out
     except Exception as exc:  # never auto-exit on a system failure

@@ -33,18 +33,18 @@ TIERS = ["opus", "sonnet", "haiku"]
 
 MODEL_MAP: dict[str, str] = {
     "enrichment": "haiku",     # sentiment + relation extraction, high volume
-    "materiality": "haiku",    # same-story vs new-catalyst check on a recently-debated name
+    "news_check": "haiku",    # same-story vs new-catalyst check on a recently-debated name
     "brief": "haiku",          # specialist subagents (technical/news/graph)
-    "triage": "sonnet",        # attention desk
-    "analyst": "sonnet",       # thesis + rebuttal
-    "skeptic": "opus",         # adversarial challenge
-    "arbiter": "opus",         # final verdict
-    "solo": "opus",            # single-agent control arm
-    "reeval": "opus",          # position review — HOLD/EXIT on still-open TAKEs
-    "chief": "opus",           # comparative head-to-head selection across debated ideas
+    "scout": "sonnet",        # attention desk
+    "researcher": "sonnet",       # thesis + rebuttal
+    "critic": "opus",         # adversarial challenge
+    "judge": "opus",         # final verdict
+    "loner": "opus",            # single-agent control arm
+    "review": "opus",          # position review — HOLD/EXIT on still-open TAKEs
+    "head": "opus",            # comparative head-to-head selection across debated ideas
     "earnings_reader": "sonnet",      # web-grounded read of an actual earnings report
-    "exposure_specialist": "sonnet",  # supplier/customer/competitor mapping (web-grounded)
-    "exposure_synth": "opus",         # assembles ripple candidates from the mapped neighborhood
+    "connections": "sonnet",  # supplier/customer/competitor mapping (web-grounded)
+    "connections_summary": "opus",         # assembles ripple candidates from the mapped neighborhood
 }
 
 # Exposure Desk fires only on the top-N most material shocks per run (cost gate)

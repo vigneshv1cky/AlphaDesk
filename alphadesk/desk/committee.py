@@ -193,7 +193,7 @@ def analyst_thesis(symbol: str, triage_reason: str, briefs: list[dict],
         f"Symbol: {symbol}\nTriage rationale: {triage_reason}\n\n"
         f"{calib}{_memory_block(history)}\n\nSpecialist briefs:\n{_briefs_block(briefs)}"
     )
-    return call_role("analyst", _ANALYST_SYSTEM, user, schema=_THESIS_SCHEMA,
+    return call_role("researcher", _ANALYST_SYSTEM, user, schema=_THESIS_SCHEMA,
                      decision_id=decision_id)
 
 
@@ -203,7 +203,7 @@ def skeptic_challenge(symbol: str, thesis: dict, briefs: list[dict],
         f"Symbol: {symbol}\nAnalyst thesis: {json.dumps(thesis)}\n\n"
         f"Specialist briefs:\n{_briefs_block(briefs)}"
     )
-    return call_role("skeptic", _SKEPTIC_SYSTEM, user, schema=_SKEPTIC_SCHEMA,
+    return call_role("critic", _SKEPTIC_SYSTEM, user, schema=_SKEPTIC_SCHEMA,
                      decision_id=decision_id)
 
 
@@ -213,7 +213,7 @@ def analyst_rebuttal(symbol: str, thesis: dict, concerns: list[dict],
         f"Symbol: {symbol}\nYour thesis: {json.dumps(thesis)}\n"
         f"Skeptic's concerns: {json.dumps(concerns)}"
     )
-    return call_role("analyst", _REBUTTAL_SYSTEM, user, schema=_REBUTTAL_SCHEMA,
+    return call_role("researcher", _REBUTTAL_SYSTEM, user, schema=_REBUTTAL_SCHEMA,
                      decision_id=decision_id)
 
 
@@ -268,7 +268,7 @@ def chief_synthesis(opportunities: list[dict], decision_id: str | None) -> dict:
             "note": (o.get("summary") or "")[:300],
         }))
     user = "Debated opportunities to compare:\n" + wrap_data("ideas", "\n".join(lines))
-    return call_role("chief", _CHIEF_SYSTEM, user, schema=_CHIEF_SCHEMA,
+    return call_role("head", _CHIEF_SYSTEM, user, schema=_CHIEF_SCHEMA,
                      decision_id=decision_id)
 
 
@@ -283,7 +283,7 @@ def arbiter_verdict(symbol: str, thesis: dict, concerns: list[dict], rebuttal: d
         f"ANALYST REBUTTAL: {json.dumps(rebuttal)}\n"
         f"FACT-CHECK FLAGS: {json.dumps(fact_flags) if fact_flags else 'none'}"
     )
-    return call_role("arbiter", _ARBITER_SYSTEM, user, schema=_ARBITER_SCHEMA,
+    return call_role("judge", _ARBITER_SYSTEM, user, schema=_ARBITER_SCHEMA,
                      decision_id=decision_id)
 
 

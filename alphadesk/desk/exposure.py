@@ -72,7 +72,7 @@ def _specialist(angle: str, instruction: str, shock: str, event: str,
         + f"\n\nSearch and identify {angle} companies affected."
     )
     try:
-        out = call_role("exposure_specialist", system, user, schema=_SPECIALIST_SCHEMA,
+        out = call_role("connections", system, user, schema=_SPECIALIST_SCHEMA,
                         decision_id=decision_id, tools=_WEB, max_turns=_WEB_TURNS)
         return out.get("related") or []
     except LLMError as exc:
@@ -136,7 +136,7 @@ def map_exposure(shock: str, event: str, decision_id: str | None = None) -> dict
         + "\nMapped neighborhood:\n" + wrap_data("neighborhood", str(combined))
     )
     try:
-        out = call_role("exposure_synth", synth_system, synth_user, schema=_SYNTH_SCHEMA,
+        out = call_role("connections_summary", synth_system, synth_user, schema=_SYNTH_SCHEMA,
                         decision_id=did)
         candidates = [c for c in (out.get("candidates") or []) if in_universe(c["symbol"])]
     except LLMError as exc:

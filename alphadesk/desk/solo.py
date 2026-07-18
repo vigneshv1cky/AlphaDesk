@@ -53,4 +53,4 @@ def solo_analysis(symbol: str, triage_reason: str, briefs: list[dict],
         f"Past graded calls on this symbol: {memory}\n\n"
         f"{calib}Specialist briefs:\n" + wrap_data("briefs", json.dumps(briefs, default=str))
     )
-    return call_role("solo", _SYSTEM, user, schema=_SCHEMA, decision_id=decision_id)
+    return call_role("loner", _SYSTEM, user, schema=_SCHEMA, decision_id=decision_id)

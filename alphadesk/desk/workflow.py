@@ -123,7 +123,7 @@ async def _run_committee(loop, sym: str, pick: dict, articles: list[dict],
             s = await loop.run_in_executor(
                 None, lambda: solo.solo_analysis(sym, pick["reason"], briefs, history,
                                                  decision_id + "-solo", calibration))
-            solo_model = s.pop("_downgraded_model", MODEL_MAP["solo"])
+            solo_model = s.pop("_downgraded_model", MODEL_MAP["loner"])
             store.record_pick({
                 "symbol": sym, "arm": "SOLO", "edge": pick.get("edge_hint"),
                 "trigger_src": trigger_src, "session": sess,
@@ -131,7 +131,7 @@ async def _run_committee(loop, sym: str, pick: dict, articles: list[dict],
                 "score": s["score"], "confidence": s["confidence"],
                 "approved": int(bool(s["approved"])),  # the solo agent's own call
                 "triage_reason": pick["reason"], "thesis": s["thesis"],
-                "briefs": briefs, "model_tags": {"solo": solo_model},
+                "briefs": briefs, "model_tags": {"loner": solo_model},
                 "low_liquidity": int(bool(price_ctx and price_ctx.get("low_liquidity"))),
                 "entry_price": (price_ctx or {}).get("last_price") if sess == "OPEN" else None,
                 "spy_price": ((prices.get_context("SPY") or {}).get("last_price")),

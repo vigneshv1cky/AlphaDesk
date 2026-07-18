@@ -86,5 +86,5 @@ def run_triage(window: dict[str, dict], movers: list[dict]) -> dict:
         + wrap_data("movers", json.dumps(movers) if movers else "unavailable")
     )
     return call_role(
-        "triage", _SYSTEM.format(max_picks=MAX_PICKS_PER_WINDOW), user, schema=_SCHEMA
+        "scout", _SYSTEM.format(max_picks=MAX_PICKS_PER_WINDOW), user, schema=_SCHEMA
     )

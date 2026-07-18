@@ -353,19 +353,19 @@ async def stream_find_trades(hours: float = 48.0, max_debates: int = 6,
                 s = await loop.run_in_executor(
                     None, lambda: solo.solo_analysis(
                         sym, pick["reason"], briefs, history, decision_id + "-solo", calibration))
-                s_model = s.pop("_downgraded_model", MODEL_MAP["solo"])
+                s_model = s.pop("_downgraded_model", MODEL_MAP["loner"])
                 store.record_pick({
                     "symbol": sym, "arm": "SOLO", "edge": pick.get("edge_hint"),
                     "trigger_src": "FIND_TRADES", "session": sess,
                     "direction": s["direction"], "horizon_days": s["horizon_days"],
                     "score": s["score"], "confidence": s["confidence"],
                     "approved": int(bool(s["approved"])), "triage_reason": pick["reason"],
-                    "thesis": s["thesis"], "briefs": briefs, "model_tags": {"solo": s_model},
+                    "thesis": s["thesis"], "briefs": briefs, "model_tags": {"loner": s_model},
                     "low_liquidity": int(bool(price_ctx and price_ctx.get("low_liquidity"))),
                     "entry_price": (price_ctx or {}).get("last_price") if sess == "OPEN" else None,
                     "spy_price": (prices.get_context("SPY") or {}).get("last_price"),
                 })
-                yield _ev("solo", symbol=sym, direction=s["direction"],
+                yield _ev("loner", symbol=sym, direction=s["direction"],
                           horizon_days=s["horizon_days"], score=s["score"])
             except LLMError as exc:
                 log.warning("Solo arm dropped %s: %s", sym, exc)
