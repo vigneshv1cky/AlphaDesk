@@ -104,3 +104,31 @@ def refresh_calendar(symbols: list[str] | None = None, limit: int = 8) -> int:
     store.upsert_earnings(rows)
     log.info("earnings calendar refreshed: %d rows across %d tickers", len(rows), len(watch))
     return len(rows)
+
+
+def drift_candidates(days: int) -> dict[str, list[dict]]:
+    """Recently-reported names → synthetic [EARNINGS] candidate articles, keyed by
+    symbol. A CANDIDATE SOURCE, parallel to news.poll: it lets post-earnings drift
+    flow through the SAME scout → team pipeline as news. The yfinance fetch already
+    ran (refresh_calendar, on the 6h loop); this just reads the calendar rows the
+    run needs and shapes them as candidates — the caller merges them into the pool.
+    """
+    out: dict[str, list[dict]] = {}
+    for e in store.recently_reported(days):
+        esym = e["symbol"]
+        surp = e.get("surprise_pct") or 0.0
+        beat = "beat" if surp > 0 else ("miss" if surp < 0 else "in-line")
+        out[esym] = [{
+            "id": f"earnings-{esym}-{e['report_date'][:10]}",
+            "title": f"[EARNINGS] {esym} reported {e['report_date'][:10]} {e.get('session') or ''}: "
+                     f"EPS {e.get('eps_actual')} vs est {e.get('eps_estimate')} — {beat} {surp}%",
+            "summary": f"Post-earnings-drift setup: {esym} {beat} consensus by {surp}%.",
+            "source": "EarningsCalendar", "url": "", "published_at": e["report_date"],
+            "category": "EARNINGS", "tickers": [esym],
+            "mentions": [{"symbol": esym,
+                          "sentiment": round(max(-1.0, min(1.0, surp / 10.0)), 3),
+                          "label": ("positive" if surp > 0 else "negative" if surp < 0 else "neutral"),
+                          "category": "EARNINGS"}],
+            "relations": [],
+        }]
+    return out

@@ -43,7 +43,7 @@ from alphadesk.desk import (
     scout,
     team,
 )
-from alphadesk.ingest import news, prices
+from alphadesk.ingest import earnings, news, prices
 from alphadesk.ledger import store
 from alphadesk.llm import LLMError
 
@@ -93,41 +93,31 @@ async def stream_find_trades(hours: float = 48.0, max_debates: int = 6,
         yield _ev("done", board=[])
         return
 
-    # Earnings drift — names that reported in the last few days are first-class
-    # candidates (the desk's cleanest MOMENTUM edge). Injected as synthetic EARNINGS
-    # "articles" so they flow through the same scout → team pipeline; the
-    # team judges whether the post-earnings move continues.
-    reported = await loop.run_in_executor(None, store.recently_reported, EARNINGS_DRIFT_DAYS)
-    for e in reported:
-        if await _gone():
-            return
-        esym, surp = e["symbol"], (e.get("surprise_pct") or 0.0)
-        beat = "beat" if surp > 0 else ("miss" if surp < 0 else "in-line")
-        arts = candidates.setdefault(esym, [])
-        arts.insert(0, {
-            "id": f"earnings-{esym}-{e['report_date'][:10]}",
-            "title": f"[EARNINGS] {esym} reported {e['report_date'][:10]} {e.get('session') or ''}: "
-                     f"EPS {e.get('eps_actual')} vs est {e.get('eps_estimate')} — {beat} {surp}%",
-            "summary": f"Post-earnings-drift setup: {esym} {beat} consensus by {surp}%.",
-            "source": "EarningsCalendar", "url": "", "published_at": e["report_date"],
-            "category": "EARNINGS", "tickers": [esym],
-            "mentions": [{"symbol": esym, "sentiment": round(max(-1.0, min(1.0, surp / 10.0)), 3),
-                          "label": ("positive" if surp > 0 else "negative" if surp < 0 else "neutral"),
-                          "category": "EARNINGS"}],
-            "relations": [],
-        })
+    # Earnings drift — a CANDIDATE SOURCE parallel to the news scan: names that
+    # reported in the last few days are first-class candidates (the desk's cleanest
+    # MOMENTUM edge). ingest/earnings shapes the calendar rows into synthetic
+    # [EARNINGS] articles; we merge them into the SAME pool so they flow through the
+    # same scout → team pipeline. Tracked in earnings_syms so the flagship signal
+    # gets front-of-line priority against the scout-window cap below.
+    earnings_syms: set[str] = set()
+    if await _gone():
+        return
+    drift = await loop.run_in_executor(None, earnings.drift_candidates, EARNINGS_DRIFT_DAYS)
+    for esym, e_arts in drift.items():
+        earnings_syms.add(esym.upper())
+        bucket = candidates.setdefault(esym, [])
+        bucket[:0] = e_arts        # earnings article first
         # Anti-double-dip: the name may also have surfaced in the news scan on the
-        # SAME earnings story — merge (one candidate per symbol) and dedup articles
-        # by id so the same story is never counted twice.
+        # SAME earnings story — dedup by id so it's never counted twice.
         seen: set = set()
         deduped = []
-        for a in arts:
+        for a in bucket:
             if a.get("id") not in seen:
                 seen.add(a.get("id"))
                 deduped.append(a)
-        arts[:] = deduped
-    if reported:
-        yield _ev("status", msg=f"{len(reported)} name(s) reported in the last "
+        bucket[:] = deduped
+    if drift:
+        yield _ev("status", msg=f"{len(drift)} name(s) reported in the last "
                                 f"{EARNINGS_DRIFT_DAYS}d — added as post-earnings-drift candidates.")
 
     # Position review — BEFORE hunting new trades (and even in a quiet window),
@@ -252,11 +242,16 @@ async def stream_find_trades(hours: float = 48.0, max_debates: int = 6,
 
     yield _ev("status", msg="Triaging…")
 
-    # Build the scout window (price context per symbol). Ripple candidates are
-    # prioritized so the Connections desk's web-grounded work is never truncated out.
+    # Build the scout window (price context per symbol). Reported names go FIRST
+    # (post-earnings drift is the most-favored signal — never let the window cap
+    # starve it), then ripple candidates (so the Connections desk's web-grounded
+    # work is never truncated out), then everything else.
     ordered = (
-        [kv for kv in candidates.items() if kv[0] in ripple_syms]
-        + [kv for kv in candidates.items() if kv[0] not in ripple_syms]
+        [kv for kv in candidates.items() if kv[0] in earnings_syms]
+        + [kv for kv in candidates.items()
+           if kv[0] in ripple_syms and kv[0] not in earnings_syms]
+        + [kv for kv in candidates.items()
+           if kv[0] not in ripple_syms and kv[0] not in earnings_syms]
     )
     window: dict[str, dict] = {}
     for sym, arts in ordered[:80]:
