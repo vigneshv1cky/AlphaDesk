@@ -1,11 +1,11 @@
 import { useRef, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { ArrowDown, ArrowUp, Loader2, Search } from "lucide-react"
 import { dirUp, dirWord, plainEdge, plainVerdict } from "@/lib/plain"
 
-// Streamed events (loosely typed — they come as JSON off the SSE feed)
+// Streamed events (loosely typed — they arrive as JSON off the SSE feed).
 interface Ev {
   type: string
   msg?: string
@@ -51,36 +51,42 @@ interface BoardRow {
   chief_reason?: string
 }
 
-const BUBBLE: Record<string, string> = {
-  exposure_shock: "border-l-cyan-500 bg-muted/40",
+const ACCENT: Record<string, string> = {
+  exposure_shock: "border-l-cyan-500",
   exposure_candidate: "border-l-cyan-500",
   triage_pick: "border-l-yellow-500",
-  brief: "border-l-zinc-500 bg-muted/40",
+  brief: "border-l-zinc-400 dark:border-l-zinc-500",
   thesis: "border-l-blue-500",
   concern: "border-l-red-500",
-  fact_flag: "border-l-orange-500 bg-muted/40",
+  fact_flag: "border-l-orange-500",
   rebuttal: "border-l-blue-500",
-  decision: "border-l-green-500",
+  decision: "border-l-emerald-500",
+}
+
+function Tag({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return (
+    <span className={`text-[10px] font-semibold uppercase tracking-wider ${className}`}>
+      {children}
+    </span>
+  )
 }
 
 function Line({ ev }: { ev: Ev }) {
-  const cls = `rounded-md border border-l-4 ${BUBBLE[ev.type] ?? "border-l-border"} p-2.5 text-sm`
+  const cls = `rounded-md border border-l-4 ${ACCENT[ev.type] ?? "border-l-border"} bg-card p-2.5 text-sm`
   switch (ev.type) {
     case "exposure_shock":
       return (
         <div className={cls}>
-          <span className="text-xs font-semibold uppercase tracking-wider text-cyan-500">
-            Looking for companies affected by {ev.symbol}
-          </span>
+          <Tag className="text-cyan-500">Looking for companies affected by {ev.symbol}</Tag>
         </div>
       )
     case "exposure_candidate":
       return (
         <div className={cls}>
-          <span className="text-xs font-semibold uppercase tracking-wider text-cyan-500">
-            Knock-on effect: {ev.shock} → {ev.symbol}
-          </span>{" "}
-          <span className={dirUp(ev.direction) ? "text-green-500" : "text-red-500"}>
+          <Tag className="text-cyan-500">
+            Knock-on: {ev.shock} → {ev.symbol}
+          </Tag>{" "}
+          <span className={dirUp(ev.direction) ? "text-emerald-500" : "text-red-500"}>
             {dirWord(ev.direction)}
           </span>{" "}
           <Badge variant="secondary">{ev.strength}</Badge>
@@ -90,9 +96,7 @@ function Line({ ev }: { ev: Ev }) {
     case "triage_pick":
       return (
         <div className={cls}>
-          <span className="text-xs font-semibold uppercase tracking-wider text-yellow-500">
-            Shortlisted {ev.symbol}
-          </span>{" "}
+          <Tag className="text-yellow-500">Shortlisted {ev.symbol}</Tag>{" "}
           <Badge variant="secondary" className="ml-1">
             {plainEdge(ev.edge)}
           </Badge>
@@ -102,20 +106,18 @@ function Line({ ev }: { ev: Ev }) {
     case "brief":
       return (
         <div className={cls}>
-          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          <Tag className="text-muted-foreground">
             {ev.kind} note · {ev.symbol}
-          </span>
+          </Tag>
           <p className="mt-1">{ev.summary}</p>
         </div>
       )
     case "thesis":
       return (
         <div className={cls}>
-          <span className="text-xs font-semibold uppercase tracking-wider text-blue-500">
-            The case for {ev.symbol}
-          </span>
+          <Tag className="text-blue-500">The case for {ev.symbol}</Tag>
           <p className="mt-1">
-            <b className={dirUp(ev.direction) ? "text-green-500" : "text-red-500"}>
+            <b className={dirUp(ev.direction) ? "text-emerald-500" : "text-red-500"}>
               {dirWord(ev.direction)}
             </b>{" "}
             · hold ~{ev.horizon_days} days · confidence {ev.score}/100
@@ -125,9 +127,7 @@ function Line({ ev }: { ev: Ev }) {
     case "concern":
       return (
         <div className={cls}>
-          <span className="text-xs font-semibold uppercase tracking-wider text-red-500">
-            The pushback · {ev.symbol}
-          </span>
+          <Tag className="text-red-500">The pushback · {ev.symbol}</Tag>
           <p className="mt-1 font-medium">{ev.claim}</p>
           <p className="text-muted-foreground">{ev.evidence}</p>
         </div>
@@ -135,18 +135,14 @@ function Line({ ev }: { ev: Ev }) {
     case "fact_flag":
       return (
         <div className={cls}>
-          <span className="text-xs font-semibold uppercase tracking-wider text-orange-500">
-            Fact-check
-          </span>
+          <Tag className="text-orange-500">Fact-check</Tag>
           <p className="mt-1">{ev.text}</p>
         </div>
       )
     case "rebuttal":
       return (
         <div className={cls}>
-          <span className="text-xs font-semibold uppercase tracking-wider text-blue-500">
-            Researcher's reply · {ev.symbol}
-          </span>
+          <Tag className="text-blue-500">Researcher's reply · {ev.symbol}</Tag>
           <p className="mt-1">
             updated confidence {ev.revised_score}/100 · agreed with the pushback:{" "}
             {ev.concede ? "yes" : "no"}
@@ -156,9 +152,7 @@ function Line({ ev }: { ev: Ev }) {
     case "decision":
       return (
         <div className={cls}>
-          <span className="text-xs font-semibold uppercase tracking-wider text-green-500">
-            Decision · {ev.symbol}
-          </span>
+          <Tag className="text-emerald-500">Decision · {ev.symbol}</Tag>
           <p className="mt-1">
             {ev.approved ? "✅ Worth acting on" : "❌ Skipped"} · {plainVerdict(ev.verdict)} ·
             confidence {ev.conviction}/100
@@ -171,18 +165,29 @@ function Line({ ev }: { ev: Ev }) {
   }
 }
 
-export function FindTrades({ onDone }: { onDone: () => void }) {
+export function FindTrades({
+  onDone,
+  onRunningChange,
+}: {
+  onDone: () => void
+  onRunningChange?: (running: boolean) => void
+}) {
   const [running, setRunning] = useState(false)
   const [status, setStatus] = useState("")
   const [feed, setFeed] = useState<Ev[]>([])
   const [board, setBoard] = useState<BoardRow[] | null>(null)
-  const [chief, setChief] = useState<string>("")
+  const [chief, setChief] = useState("")
   const [positions, setPositions] = useState<Ev[]>([])
   const [deep, setDeep] = useState(false)
   const esRef = useRef<EventSource | null>(null)
 
+  function setRun(b: boolean) {
+    setRunning(b)
+    onRunningChange?.(b)
+  }
+
   function run() {
-    setRunning(true)
+    setRun(true)
     setFeed([])
     setBoard(null)
     setChief("")
@@ -198,7 +203,7 @@ export function FindTrades({ onDone }: { onDone: () => void }) {
         setBoard(ev.board ?? [])
       } else if (ev.type === "done") {
         setBoard(ev.board ?? [])
-        setRunning(false)
+        setRun(false)
         es.close()
         onDone()
       } else if (ev.type === "position_exit" || ev.type === "position_hold") {
@@ -209,47 +214,88 @@ export function FindTrades({ onDone }: { onDone: () => void }) {
     }
     es.onerror = () => {
       setStatus("stream closed")
-      setRunning(false)
+      setRun(false)
       es.close()
     }
   }
 
+  const takes = board?.filter((b) => b.take).length ?? 0
+
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="text-lg">Find Trades</CardTitle>
-        <div className="flex items-center gap-3">
-          <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={deep}
-              disabled={running}
-              onChange={(e) => setDeep(e.target.checked)}
-            />
-            Deep scan (also check related companies)
-          </label>
-          <Button onClick={run} disabled={running}>
-          {running ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Scanning…
-            </>
-          ) : (
-            <>
-              <Search className="mr-2 h-4 w-4" /> Find Trades
-            </>
-          )}
+    <Card className="overflow-hidden">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-semibold tracking-tight">Find Trades</h2>
+              {running && (
+                <span className="flex items-center gap-1 text-[11px] font-medium text-emerald-500">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" /> live
+                </span>
+              )}
+            </div>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Your research team scans the news and debates the best ideas, live.
+            </p>
+          </div>
+          <Button
+            onClick={run}
+            disabled={running}
+            size="lg"
+            className="h-9 bg-indigo-600 px-4 text-sm text-white hover:bg-indigo-500"
+          >
+            {running ? (
+              <>
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Scanning…
+              </>
+            ) : (
+              <>
+                <Search className="mr-1.5 h-4 w-4" /> Run
+              </>
+            )}
           </Button>
         </div>
-      </CardHeader>
-      <CardContent>
-        {status && <p className="mb-3 text-sm text-muted-foreground">{status}</p>}
+
+        <label className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={deep}
+            disabled={running}
+            onChange={(e) => setDeep(e.target.checked)}
+            className="accent-indigo-500"
+          />
+          Deep scan — also map supply-chain ripples (slower, uses more)
+        </label>
+
+        <details className="mt-3 text-xs text-muted-foreground">
+          <summary className="cursor-pointer select-none">How this works</summary>
+          <div className="mt-1.5 space-y-1 border-l-2 border-border pl-3">
+            <p>
+              A <b className="text-foreground">researcher</b> argues the case, a{" "}
+              <b className="text-foreground">critic</b> pushes back, a{" "}
+              <b className="text-foreground">judge</b> rules, and a{" "}
+              <b className="text-foreground">head</b> ranks the survivors.
+            </p>
+            <p>
+              These are <b className="text-foreground">research ideas, not trades</b> — nothing is
+              bought. Every idea is later scored against the S&amp;P 500.
+            </p>
+          </div>
+        </details>
+
+        {status && (
+          <div className="mt-3 flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+            {running && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />}
+            <span>{status}</span>
+          </div>
+        )}
 
         {positions.length > 0 && (
-          <div className="mb-4 space-y-2">
+          <div className="mt-4 space-y-2">
             <div className="text-sm font-semibold">
               Your open picks
               <span className="ml-1 font-normal text-muted-foreground">
-                — re-checked against today's news ({positions.filter((p) => p.type === "position_exit").length} to sell)
+                — re-checked ({positions.filter((p) => p.type === "position_exit").length} to sell)
               </span>
             </div>
             {positions.map((p, i) => {
@@ -257,15 +303,15 @@ export function FindTrades({ onDone }: { onDone: () => void }) {
               return (
                 <div
                   key={i}
-                  className={`rounded-md border border-l-4 p-2.5 text-sm ${
-                    exit ? "border-l-red-500 bg-red-950/20" : "border-l-emerald-600"
+                  className={`rounded-md border border-l-4 bg-card p-2.5 text-sm ${
+                    exit ? "border-l-red-500" : "border-l-emerald-600"
                   }`}
                 >
-                  <div className="flex items-center gap-2">
-                    <Badge className={exit ? "bg-red-600" : "bg-emerald-700"}>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge className={exit ? "bg-red-600 text-white" : "bg-emerald-600 text-white"}>
                       {exit ? "Sell now" : "Keep"}
                     </Badge>
-                    <span className={dirUp(p.direction) ? "text-green-500" : "text-red-500"}>
+                    <span className={dirUp(p.direction) ? "text-emerald-500" : "text-red-500"}>
                       {dirWord(p.direction)}
                     </span>
                     <span className="font-bold">{p.symbol}</span>
@@ -284,70 +330,68 @@ export function FindTrades({ onDone }: { onDone: () => void }) {
         )}
 
         {board && (
-          <div className="mb-4 space-y-2">
+          <div className="mt-4 space-y-2">
             {chief && (
-              <div className="rounded-md border-l-4 border-l-amber-500 bg-muted/40 p-3">
-                <div className="text-xs font-semibold uppercase tracking-wider text-amber-500">
-                  Final call — comparing all the ideas
-                </div>
+              <div className="rounded-md border border-l-4 border-l-amber-500 bg-amber-500/5 p-3">
+                <Tag className="text-amber-500">Final call — comparing all the ideas</Tag>
                 <p className="mt-1 text-sm">{chief}</p>
               </div>
             )}
             <div className="text-sm font-semibold">
-              Best ideas ({board.filter((b) => b.take).length} worth acting on)
+              Best ideas{" "}
+              <span className="font-normal text-muted-foreground">
+                ({takes} worth acting on)
+              </span>
             </div>
             {board.map((r, i) => (
               <div
                 key={r.id}
-                className={`rounded-md border p-2.5 text-sm ${r.take ? "border-green-700 bg-green-950/20" : "opacity-70"}`}
+                className={`rounded-md border p-2.5 text-sm ${
+                  r.take ? "border-emerald-600/60 bg-emerald-500/5" : "opacity-70"
+                }`}
               >
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="text-muted-foreground">#{i + 1}</span>
                   {r.direction === "LONG" ? (
-                    <ArrowUp className="h-4 w-4 text-green-500" />
+                    <ArrowUp className="h-4 w-4 text-emerald-500" />
                   ) : (
                     <ArrowDown className="h-4 w-4 text-red-500" />
                   )}
                   <span
-                    className={`font-bold ${dirUp(r.direction) ? "text-green-500" : "text-red-500"}`}
+                    className={`font-bold ${
+                      dirUp(r.direction) ? "text-emerald-500" : "text-red-500"
+                    }`}
                   >
                     {dirWord(r.direction)}
                   </span>
                   <span className="font-bold">{r.symbol}</span>
                   <Badge variant="secondary">{plainEdge(r.edge)}</Badge>
                   <span className="text-muted-foreground">hold ~{r.horizon_days}d</span>
-                  <span className="text-muted-foreground">confidence {r.conviction}</span>
+                  <span className="text-muted-foreground">conf {r.conviction}</span>
                   {r.take ? (
-                    <Badge className="ml-auto bg-green-600">Suggested</Badge>
+                    <Badge className="ml-auto bg-emerald-600 text-white">Suggested</Badge>
                   ) : (
                     <Badge variant="outline" className="ml-auto">
                       Skip
                     </Badge>
                   )}
                 </div>
-                <p className="mt-1 pl-8 text-xs text-muted-foreground">
-                  <span className="text-foreground/70">
-                    {dirWord(r.direction)} · hold ~{r.horizon_days} days.
-                  </span>{" "}
-                  {r.summary}
-                </p>
+                <p className="mt-1 text-xs text-muted-foreground">{r.summary}</p>
                 {r.chief_reason && (
-                  <p className="mt-1 pl-8 text-amber-500/90">
+                  <p className="mt-1 text-xs text-amber-600 dark:text-amber-500/90">
                     <span className="font-medium">Final call:</span> {r.chief_reason}
                   </p>
                 )}
               </div>
             ))}
             {board.length === 0 && (
-              <p className="text-sm text-muted-foreground">
-                Nothing worth acting on this time.
-              </p>
+              <p className="text-sm text-muted-foreground">Nothing worth acting on this time.</p>
             )}
           </div>
         )}
 
         {feed.length > 0 && (
-          <div className="max-h-[28rem] space-y-2 overflow-y-auto">
+          <div className="mt-4 max-h-[30rem] space-y-2 overflow-y-auto pr-1">
             {feed.map((ev, i) => (
               <Line key={i} ev={ev} />
             ))}

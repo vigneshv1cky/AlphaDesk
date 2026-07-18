@@ -1,11 +1,22 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AlphaDesk</title>
-    <script type="module" crossorigin src="/assets/index-GfMozFu1.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-bcdZfwhL.css">
+    <script>
+      // Apply the saved theme before paint to avoid a flash. Default: dark.
+      (function () {
+        try {
+          if ((localStorage.getItem("theme") || "dark") === "dark")
+            document.documentElement.classList.add("dark");
+        } catch (e) {
+          document.documentElement.classList.add("dark");
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-C5EaQZDf.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-7rqGSbWA.css">
   </head>
   <body>
     <div id="root"></div>

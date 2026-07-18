@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import {
   api,
   fmtAlpha,
@@ -8,51 +8,20 @@ import {
   type Stats,
   type TokenRow,
 } from "@/lib/api"
+import { useTheme } from "@/lib/theme"
 import { FindTrades } from "@/components/FindTrades"
 import { PickSheet } from "@/components/PickSheet"
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion"
+import { RightRail } from "@/components/RightRail"
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import { ArrowDown, ArrowUp, Brain, Landmark, Zap } from "lucide-react"
-import { dirWord, plainEdge, plainVerdict } from "@/lib/plain"
+import { Moon, Sun } from "lucide-react"
 
-function StatCard({
-  icon,
-  label,
-  value,
-  sub,
-}: {
-  icon: React.ReactNode
-  label: string
-  value: string
-  sub?: string
-}) {
+function Kpi({ label, value, tone }: { label: string; value: string; tone?: number | null }) {
+  const color = tone == null ? "" : tone > 0 ? "text-emerald-500" : tone < 0 ? "text-red-500" : ""
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between pb-1">
-        <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          {label}
-        </CardTitle>
-        {icon}
-      </CardHeader>
-      <CardContent>
-        <div className="text-2xl font-bold">{value}</div>
-        {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
-      </CardContent>
-    </Card>
+    <div className="hidden text-right sm:block">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className={`text-sm font-semibold tabular-nums ${color}`}>{value}</div>
+    </div>
   )
 }
 
@@ -61,9 +30,10 @@ export default function App() {
   const [stats, setStats] = useState<Stats | null>(null)
   const [funnel, setFunnel] = useState<{ paused: string | null; windows: FunnelWindow[] }>()
   const [tokens, setTokens] = useState<TokenRow[]>([])
-  const [earnings, setEarnings] =
-    useState<{ upcoming: EarningsRow[]; reported: EarningsRow[] }>()
+  const [earnings, setEarnings] = useState<{ upcoming: EarningsRow[]; reported: EarningsRow[] }>()
   const [selected, setSelected] = useState<number | null>(null)
+  const [live, setLive] = useState(false)
+  const [theme, toggleTheme] = useTheme()
 
   const refresh = useCallback(() => {
     api.picks().then((d) => setPicks(d.picks)).catch(console.error)
@@ -80,283 +50,66 @@ export default function App() {
   }, [refresh])
 
   const burn = tokens.reduce((a, t) => a + t.input_tok + t.output_tok, 0)
-  const topRoles = [...tokens].sort(
-    (a, b) => b.input_tok + b.output_tok - (a.input_tok + a.output_tok),
-  )
+  const graded = stats?.total.graded ?? 0
+  const winRate =
+    graded > 0 && stats?.total.wins != null ? Math.round((stats.total.wins / graded) * 100) : null
+  const avg = stats?.total.avg_alpha_net ?? null
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-6">
-      <header className="flex items-baseline justify-between">
-        <h1 className="text-2xl font-bold tracking-tight">
-          AlphaDesk{" "}
-          <span className="text-sm font-normal text-muted-foreground">
-            your AI stock-research team
-          </span>
-        </h1>
-        {funnel?.paused && <Badge variant="destructive">PAUSED: {funnel.paused}</Badge>}
+    <div className="min-h-screen bg-background text-foreground">
+      <header className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur">
+        <div className="mx-auto flex max-w-[1400px] items-center gap-4 px-5 py-3">
+          <div className="flex items-center gap-2.5">
+            <span className="h-3.5 w-3.5 rotate-45 rounded-[3px] bg-indigo-500" />
+            <div className="leading-none">
+              <div className="text-sm font-semibold tracking-tight">AlphaDesk</div>
+              <div className="mt-0.5 text-[11px] text-muted-foreground">AI stock-research desk</div>
+            </div>
+          </div>
+
+          <div
+            className={`ml-2 flex items-center gap-1.5 text-xs font-medium ${
+              live ? "text-emerald-500" : "text-muted-foreground"
+            }`}
+          >
+            <span
+              className={`h-2 w-2 rounded-full ${
+                live ? "animate-pulse bg-emerald-500" : "bg-muted-foreground/40"
+              }`}
+            />
+            {live ? "running" : "idle"}
+          </div>
+
+          <div className="ml-auto flex items-center gap-5">
+            <Kpi label="Ideas" value={String(stats?.total.picks ?? "—")} />
+            <Kpi label="Beat S&P" value={winRate != null ? `${winRate}%` : "—"} />
+            <Kpi label="Avg vs S&P" value={avg != null ? fmtAlpha(avg) : "—"} tone={avg} />
+            <Kpi label="AI today" value={burn > 0 ? `${Math.round(burn / 1000)}k` : "0"} />
+            {funnel?.paused && <Badge variant="destructive">PAUSED</Badge>}
+            <button
+              onClick={toggleTheme}
+              aria-label="Toggle light / dark"
+              className="grid h-8 w-8 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:text-foreground"
+            >
+              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
       </header>
 
-      <Card className="px-4 py-1">
-        <Accordion multiple={false}>
-          <AccordionItem value="how">
-            <AccordionTrigger className="text-sm text-muted-foreground">
-              How this works
-            </AccordionTrigger>
-            <AccordionContent className="space-y-2 text-sm text-muted-foreground">
-              <p>
-                Click <b>Find Trades</b>. The AI reads today's news and earnings, shortlists a few
-                stocks worth a closer look, then a small team debates each one:
-              </p>
-              <ul className="list-disc space-y-0.5 pl-5">
-                <li>
-                  <b className="text-foreground">The case</b> — a researcher argues why to buy it
-                  (expecting it to rise) or short it (betting it falls)
-                </li>
-                <li>
-                  <b className="text-foreground">The pushback</b> — a critic argues why that's wrong
-                </li>
-                <li>
-                  <b className="text-foreground">The decision</b> — a judge weighs both and rules
-                </li>
-                <li>
-                  <b className="text-foreground">Final call</b> — a head strategist compares the
-                  survivors and marks the best ones
-                </li>
-              </ul>
-              <p>
-                These are <b>research ideas, not trades</b> — the app never buys anything. Every pick
-                is later scored against the S&P 500 so you can see if it was right.
-              </p>
-            </AccordionContent>
-          </AccordionItem>
-        </Accordion>
-      </Card>
-
-      <FindTrades onDone={refresh} />
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard
-          icon={<Landmark className="h-4 w-4 text-muted-foreground" />}
-          label="Ideas checked"
-          value={String(stats?.total.picks ?? "…")}
-          sub={`${stats?.total.graded ?? 0} scored so far`}
+      <main className="mx-auto grid max-w-[1400px] grid-cols-1 gap-5 px-5 py-5 lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)]">
+        <div className="lg:sticky lg:top-[73px] lg:self-start">
+          <FindTrades onDone={refresh} onRunningChange={setLive} />
+        </div>
+        <RightRail
+          picks={picks}
+          stats={stats}
+          funnel={funnel}
+          tokens={tokens}
+          earnings={earnings}
+          onSelect={setSelected}
         />
-        <StatCard
-          icon={<Zap className="h-4 w-4 text-muted-foreground" />}
-          label="Avg vs S&P 500"
-          value={stats?.total.avg_alpha_net != null ? fmtAlpha(stats.total.avg_alpha_net) : "—"}
-          sub={stats?.total.wins != null ? `${stats.total.wins} winners` : "waiting for results"}
-        />
-        <StatCard
-          icon={<Brain className="h-4 w-4 text-muted-foreground" />}
-          label="AI usage today"
-          value={burn > 0 ? `${Math.round(burn / 1000)}k` : "0"}
-          sub={topRoles
-            .slice(0, 3)
-            .map((t) => `${t.role} ${Math.round((t.input_tok + t.output_tok) / 1000)}k`)
-            .join(" · ")}
-        />
-      </div>
-
-      {earnings && (earnings.reported.length > 0 || earnings.upcoming.length > 0) && (
-        <Card className="py-3">
-          <CardContent className="space-y-2 py-2 text-sm">
-            {earnings.reported.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Just reported
-                </span>
-                {earnings.reported.map((e) => (
-                  <Badge
-                    key={e.symbol}
-                    variant="secondary"
-                    className={(e.surprise_pct ?? 0) >= 0 ? "text-green-500" : "text-red-500"}
-                  >
-                    {e.symbol} {(e.surprise_pct ?? 0) >= 0 ? "+" : ""}
-                    {e.surprise_pct}%
-                  </Badge>
-                ))}
-              </div>
-            )}
-            {earnings.upcoming.length > 0 && (
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Reporting soon
-                </span>
-                {earnings.upcoming.slice(0, 12).map((e) => (
-                  <span key={e.symbol + e.report_date} className="text-muted-foreground">
-                    <span className="font-medium text-foreground">{e.symbol}</span>{" "}
-                    {e.report_date.slice(5, 10)} {e.session}
-                    {e.run_at && (
-                      <span className="text-emerald-500"> → run {e.run_at.slice(5, 10)} 9:30 ET</span>
-                    )}
-                  </span>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      <section>
-        <h2 className="mb-2 text-lg font-semibold">
-          Ideas{" "}
-          <span className="text-sm font-normal text-muted-foreground">
-            click any row to see the reasoning behind it
-          </span>
-        </h2>
-        <Card className="py-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>#</TableHead>
-                <TableHead>when</TableHead>
-                <TableHead>stock</TableHead>
-                <TableHead>call</TableHead>
-                <TableHead>confidence</TableHead>
-                <TableHead>decision</TableHead>
-                <TableHead>by</TableHead>
-                <TableHead>why</TableHead>
-                <TableHead>acted?</TableHead>
-                <TableHead className="text-right">vs S&P</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {picks.map((p) => {
-                const why = p.debate?.arbiter_summary ?? p.thesis
-                return (
-                <Fragment key={p.id}>
-                <TableRow className="cursor-pointer border-0" onClick={() => setSelected(p.id)}>
-                  <TableCell className="text-muted-foreground">#{p.id}</TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {p.ts.slice(5, 16).replace("T", " ")}
-                  </TableCell>
-                  <TableCell className="font-bold">{p.symbol}</TableCell>
-                  <TableCell>
-                    <span
-                      className={`inline-flex items-center gap-1 font-medium ${
-                        p.direction === "LONG" ? "text-green-500" : "text-red-500"
-                      }`}
-                    >
-                      {p.direction === "LONG" ? (
-                        <ArrowUp className="h-3.5 w-3.5" />
-                      ) : (
-                        <ArrowDown className="h-3.5 w-3.5" />
-                      )}
-                      {dirWord(p.direction)}
-                    </span>{" "}
-                    <span className="text-muted-foreground">· hold ~{p.horizon_days}d</span>
-                  </TableCell>
-                  <TableCell>
-                    {Math.round(p.adjusted_score ?? p.score)}/100
-                  </TableCell>
-                  <TableCell>
-                    {p.verdict && (
-                      <Badge
-                        variant={p.verdict === "PASS" ? "destructive" : "secondary"}
-                        className="font-normal"
-                      >
-                        {plainVerdict(p.verdict)}
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {p.arm === "LONER" ? "Solo" : "Team"}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">{plainEdge(p.edge)}</TableCell>
-                  <TableCell>{p.approved ? "✅" : "❌"}</TableCell>
-                  <TableCell
-                    className={`text-right font-medium ${
-                      p.alpha_net == null
-                        ? "text-muted-foreground"
-                        : p.alpha_net > 0
-                          ? "text-green-500"
-                          : "text-red-500"
-                    }`}
-                  >
-                    {fmtAlpha(p.alpha_net)}
-                  </TableCell>
-                </TableRow>
-                {(p.triage_reason || why) && (
-                  <TableRow
-                    className="cursor-pointer hover:bg-muted/30"
-                    onClick={() => setSelected(p.id)}
-                  >
-                    <TableCell />
-                    <TableCell colSpan={9} className="pt-0 align-top text-xs leading-snug text-muted-foreground">
-                      <span className="font-medium text-foreground">
-                        {dirWord(p.direction)} · hold ~{p.horizon_days} days
-                      </span>
-                      {p.triage_reason && (
-                        <>
-                          {" · "}
-                          <span className="text-foreground/70">Why:</span> {p.triage_reason}
-                        </>
-                      )}
-                      {why && (
-                        <>
-                          {" · "}
-                          <span className="text-foreground/70">Takeaway:</span> {why}
-                        </>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                )}
-                </Fragment>
-                )
-              })}
-              {picks.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={10} className="py-8 text-center text-muted-foreground">
-                    No ideas yet — click "Find Trades" to scan the market.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </Card>
-      </section>
-
-      <section>
-        <h2 className="mb-2 text-lg font-semibold">
-          What it looked at{" "}
-          <span className="text-sm font-normal text-muted-foreground">
-            the stocks it considered and skipped each scan — with reasons
-          </span>
-        </h2>
-        <Card className="px-4 py-1">
-          <Accordion multiple={false}>
-            {(funnel?.windows ?? []).map((w) => {
-              let skips: { symbol: string; reason: string }[] = []
-              try {
-                skips = JSON.parse(w.skip_reasons ?? "[]")
-              } catch {
-                /* ignore */
-              }
-              return (
-                <AccordionItem key={w.id} value={String(w.id)}>
-                  <AccordionTrigger className="text-sm">
-                    <span>
-                      {w.window_ts.slice(5, 16).replace("T", " ")} — <b>{w.picked} looked into</b> of{" "}
-                      {w.candidates} stocks, {w.skipped} skipped
-                    </span>
-                  </AccordionTrigger>
-                  <AccordionContent>
-                    <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-                      {skips.map((s, i) => (
-                        <li key={i}>
-                          <b className="text-foreground">{s.symbol}</b>: {s.reason}
-                        </li>
-                      ))}
-                      {skips.length === 0 && <li>no skips recorded</li>}
-                    </ul>
-                  </AccordionContent>
-                </AccordionItem>
-              )
-            })}
-          </Accordion>
-        </Card>
-      </section>
+      </main>
 
       <PickSheet pickId={selected} onClose={() => setSelected(null)} />
     </div>
