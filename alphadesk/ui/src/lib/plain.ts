@@ -9,10 +9,10 @@ export const plainEdge = (e?: string | null): string =>
     WORLD: "World event",
   })[e ?? ""] ?? e ?? ""
 
+// Verdict is now a CONVICTION tier — every debated name commits to a direction,
+// so PASS is a thin lean the desk tracks but won't size up, not a rejection.
 export const plainVerdict = (v?: string | null): string =>
-  ({ STRONG: "Approved", SOFT: "Approved (cautious)", PASS: "Rejected" })[v ?? ""] ??
-  v ??
-  ""
+  ({ STRONG: "High conviction", SOFT: "Moderate", PASS: "Thin lean" })[v ?? ""] ?? v ?? ""
 
 // LONG = buy, expecting the price to RISE. SHORT = bet the price FALLS.
 export const dirWord = (d?: string): string => (d === "LONG" ? "Buy" : "Short")

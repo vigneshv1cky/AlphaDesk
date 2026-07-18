@@ -71,11 +71,12 @@ async def deliberate(sym: str, pick: dict, briefs: list[dict], price_ctx: dict |
         None, lambda: team.judge_verdict(sym, thesis, concerns, counter, rebuttal, flags, decision_id))
     model_tags["judge"] = verdict.pop("_downgraded_model", MODEL_MAP["judge"])
 
-    # The judge issues the FINAL direction — it may adopt the critic's flip. NONE
-    # means stand aside (recorded against the researcher's side as a counterfactual).
+    # The judge always commits to a direction (LONG/SHORT) — it may adopt the
+    # critic's flip. There is no stand-aside: every debated name is a graded
+    # directional call; `approved` marks conviction (size up) vs a thin lean.
     final_dir = verdict.get("final_direction") or thesis["direction"]
     booked_dir = final_dir if final_dir in ("LONG", "SHORT") else thesis["direction"]
-    flipped = booked_dir != thesis["direction"] and final_dir in ("LONG", "SHORT")
+    flipped = booked_dir != thesis["direction"]
 
     sess = session()
     horizon = int(verdict.get("adjusted_horizon_days") or thesis["horizon_days"])

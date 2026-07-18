@@ -179,8 +179,8 @@ function Line({ ev }: { ev: Ev }) {
         <div className={cls}>
           <Tag className="text-emerald-500">Decision · {ev.symbol}</Tag>
           <p className="mt-1">
-            {ev.approved ? "✅ Worth acting on" : "❌ Skipped"} · {plainVerdict(ev.verdict)} ·
-            confidence {ev.conviction}/100
+            {ev.approved ? "✅ Conviction call" : "◦ Thin lean (tracked)"} ·{" "}
+            {plainVerdict(ev.verdict)} · confidence {ev.conviction}/100
             {ev.flipped && <span className="text-fuchsia-500"> · reversed by critic</span>}
           </p>
           <p className="text-muted-foreground">{ev.summary}</p>

@@ -60,9 +60,9 @@ function TheCall({ pick }: { pick: Pick }) {
         </div>
         <div className="text-sm">
           {pick.approved ? (
-            <Badge className="bg-green-600">Suggested</Badge>
+            <Badge className="bg-green-600">Conviction call</Badge>
           ) : (
-            <Badge variant="destructive">Skipped (tracked anyway)</Badge>
+            <Badge variant="secondary">Thin lean (tracked)</Badge>
           )}{" "}
           {pick.alpha_net !== null && (
             <Badge variant="outline" className={pick.alpha_net > 0 ? "text-green-500" : "text-red-500"}>

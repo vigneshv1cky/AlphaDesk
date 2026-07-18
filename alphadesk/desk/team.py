@@ -128,32 +128,34 @@ _ARBITER_SYSTEM = (
     "Read the full transcript (thesis, concerns, the critic's stance/counter, "
     "rebuttal, any fact-check flags). Weigh argument QUALITY: did the critic land "
     "real hits? did the researcher answer them or dodge?\n"
-    "YOU ISSUE THE FINAL DIRECTION — you are NOT limited to approve-or-reject the "
-    "researcher's side. final_direction ∈ LONG | SHORT | NONE:\n"
-    "  • If the researcher's side holds → final_direction = that side, approved=true.\n"
-    "  • If the CRITIC's flip is better supported than the original (the mechanism "
-    "actually points the other way, e.g. momentum drift following a negative "
-    "reaction) → ADOPT it: final_direction = the flipped side, approved=true. A "
-    "reversed trade the desk backs is a real position, not a rejection.\n"
-    "  • If neither side has a tradable edge → final_direction = NONE, "
-    "approved=false, PASS.\n"
-    "verdict: STRONG (final call is high-conviction), SOFT (real but softer), "
-    "PASS (stand aside). STRONG/SOFT apply to a FLIPPED call too.\n"
+    "YOU ALWAYS COMMIT TO A DIRECTION — final_direction is LONG or SHORT, never "
+    "neutral. A debated name is a graded prediction either way, so a weak setup is "
+    "a LOW-CONVICTION call, not a non-call. Pick the more-likely side:\n"
+    "  • Researcher's side holds → final_direction = that side.\n"
+    "  • The CRITIC's flip is better supported (the mechanism points the other "
+    "way, e.g. momentum drift following a negative reaction) → ADOPT it: "
+    "final_direction = the flipped side.\n"
+    "  • Genuine coin flip → still pick the marginally-favored side, at low "
+    "conviction. Never abstain.\n"
+    "approved = true ONLY if this is a conviction call you would actually SIZE UP; "
+    "false = a thin directional lean the desk tracks but does not act on hard "
+    "(still a real, graded LONG/SHORT — not a rejection).\n"
+    "verdict: STRONG (high conviction), SOFT (real but modest), PASS (thin lean).\n"
     "COHERENCE RULE: adjusted_score must agree with final_direction — ABOVE 50 for "
-    "LONG, BELOW 50 for SHORT. For NONE, approved=false. A weak-but-real long is "
-    "52-58, a weak-but-real short 42-48; do not sit at 50.\n"
+    "LONG, BELOW 50 for SHORT. NEVER sit exactly at 50; commit to a side. A "
+    "weak-but-real long is 52-58, a thin short 44-49.\n"
     "adjusted_horizon_days: you own the horizon too — if the surviving edge is "
     "shorter or longer than the researcher's proposal, SAY SO; the book records "
     "YOUR horizon.\n"
     'Return ONLY JSON: {"approved": <true|false>, "final_direction": '
-    '"LONG|SHORT|NONE", "adjusted_score": <0-100>, "adjusted_confidence": <0-100>, '
+    '"LONG|SHORT", "adjusted_score": <0-100>, "adjusted_confidence": <0-100>, '
     '"adjusted_horizon_days": <1-10>, "verdict": "STRONG|SOFT|PASS", '
     '"summary": "<3 sentences max; if you flipped the call, say so and why>"}'
 )
 
 _ARBITER_SCHEMA = {
     "approved": {"type": bool},
-    "final_direction": {"type": str, "enum": ["LONG", "SHORT", "NONE"]},
+    "final_direction": {"type": str, "enum": ["LONG", "SHORT"]},
     "adjusted_score": {"type": (int, float), "min": 0, "max": 100},
     "adjusted_confidence": {"type": (int, float), "min": 0, "max": 100},
     "adjusted_horizon_days": {"type": int, "min": 1, "max": 10, "optional": True},

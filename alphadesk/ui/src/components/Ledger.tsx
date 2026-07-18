@@ -88,12 +88,12 @@ function IdeaRow({ n, p, onSelect }: { n: number; p: Pick; onSelect: (id: number
       </div>
       <div className="mt-1.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
         {p.verdict && (
-          <span className={p.verdict === "PASS" ? "text-red-500" : "text-foreground"}>
+          <span className={p.verdict === "PASS" ? "text-muted-foreground" : "text-foreground"}>
             {plainVerdict(p.verdict)}
           </span>
         )}
         <span>· conf {Math.round(p.adjusted_score ?? p.score)}</span>
-        <span>· {p.approved ? "acted ✓" : "skipped"}</span>
+        <span>· {p.approved ? "conviction ✓" : "thin lean"}</span>
         {p.debate?.flipped && <span className="font-medium text-fuchsia-500">· reversed</span>}
         <span>· {p.arm === "LONER" ? "Solo" : "Team"}</span>
         <span className="font-mono tabular-nums text-muted-foreground/70">
