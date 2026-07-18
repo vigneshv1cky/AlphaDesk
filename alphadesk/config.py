@@ -41,6 +41,7 @@ MODEL_MAP: dict[str, str] = {
     "solo": "opus",            # single-agent control arm
     "reeval": "opus",          # position review — HOLD/EXIT on still-open TAKEs
     "chief": "opus",           # comparative head-to-head selection across debated ideas
+    "earnings_reader": "sonnet",      # web-grounded read of an actual earnings report
     "exposure_specialist": "sonnet",  # supplier/customer/competitor mapping (web-grounded)
     "exposure_synth": "opus",         # assembles ripple candidates from the mapped neighborhood
 }

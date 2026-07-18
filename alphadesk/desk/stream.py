@@ -32,7 +32,7 @@ from alphadesk.config import (
     session,
 )
 from alphadesk.desk import briefs as briefs_mod
-from alphadesk.desk import committee, debate, exposure, reeval, solo, triage
+from alphadesk.desk import committee, debate, earnings_reader, exposure, reeval, solo, triage
 from alphadesk.ingest import news, prices
 from alphadesk.ledger import store
 from alphadesk.llm import LLMError
@@ -106,11 +106,19 @@ async def stream_find_trades(hours: float = 48.0, max_debates: int = 6,
                           "category": "EARNINGS"}],
             "relations": [],
         })
-        # read the actual reporting — revenue, guidance, tone — not just the EPS number
-        arts.extend(await loop.run_in_executor(None, news.fetch_ticker_news, esym, EARNINGS_DRIFT_DAYS + 1))
+        # Anti-double-dip: the name may also have surfaced in the news scan on the
+        # SAME earnings story — merge (one candidate per symbol) and dedup articles
+        # by id so the same story is never counted twice.
+        seen: set = set()
+        deduped = []
+        for a in arts:
+            if a.get("id") not in seen:
+                seen.add(a.get("id"))
+                deduped.append(a)
+        arts[:] = deduped
     if reported:
         yield _ev("status", msg=f"{len(reported)} name(s) reported in the last "
-                                f"{EARNINGS_DRIFT_DAYS}d — read their coverage, added as drift candidates.")
+                                f"{EARNINGS_DRIFT_DAYS}d — added as post-earnings-drift candidates.")
 
     # Position review — BEFORE hunting new trades (and even in a quiet window),
     # re-check every still-open TAKE from earlier runs against current price +
@@ -261,6 +269,14 @@ async def stream_find_trades(hours: float = 48.0, max_debates: int = 6,
                 loop.run_in_executor(None, briefs_mod.market_brief, sym, price_ctx, fundamentals, arts, decision_id),
                 loop.run_in_executor(None, briefs_mod.news_brief, sym, arts, decision_id),
             ))
+            # If this pick just reported, read the ACTUAL report (web-grounded,
+            # cached per event) — guidance/tone drive the drift, so it gets its own
+            # evidence block. Only fires for names triage actually picked (lean).
+            erow = await loop.run_in_executor(None, store.earnings_row, sym, EARNINGS_DRIFT_DAYS)
+            if erow:
+                read = await loop.run_in_executor(None, earnings_reader.get_or_read, erow, f"eread-{sym}")
+                if read:
+                    briefs.append({"kind": "earnings", "summary": read, "key_facts": []})
             for b in briefs:
                 yield _ev("brief", symbol=sym, **b)
 

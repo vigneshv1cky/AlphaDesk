@@ -125,6 +125,17 @@ CREATE TABLE IF NOT EXISTS earnings (
 );
 CREATE INDEX IF NOT EXISTS idx_earnings_date ON earnings (report_date);
 
+-- One web-grounded read per earnings event (results/guidance/reaction), cached so
+-- we never re-web-search the same report across runs. Separate from `earnings` so
+-- calendar refreshes (ON CONFLICT REPLACE) don't wipe the read.
+CREATE TABLE IF NOT EXISTS earnings_reads (
+    symbol      TEXT NOT NULL,
+    report_date TEXT NOT NULL,
+    report_read TEXT,
+    ts          TEXT,
+    UNIQUE(symbol, report_date) ON CONFLICT REPLACE
+);
+
 -- Persistent enrichment cache: an article's sentiment/category never changes, so
 -- enrich it once and reuse forever. Kills the biggest recurring token cost —
 -- re-enriching the same overlapping news on every run/restart.
@@ -519,6 +530,36 @@ def upcoming_earnings(days: int = 7) -> list[dict]:
             "   AND report_date <= datetime('now', ?) ORDER BY report_date", (f"+{int(days)} days",),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def earnings_row(symbol: str, days: int = 4) -> dict | None:
+    """The most recent report for `symbol` within `days` (if it has one) — used at
+    brief time to decide whether to web-read the report."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT symbol, report_date, session, eps_estimate, eps_actual, surprise_pct"
+            " FROM earnings WHERE symbol=? AND eps_actual IS NOT NULL"
+            "   AND report_date >= datetime('now', ?) AND report_date <= datetime('now')"
+            " ORDER BY report_date DESC LIMIT 1", (symbol.upper(), f"-{int(days)} days"),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_earnings_read(symbol: str, report_date: str) -> str | None:
+    """Cached web-grounded read for one earnings event (None if not yet read)."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT report_read FROM earnings_reads WHERE symbol=? AND report_date=?",
+            (symbol.upper(), report_date),
+        ).fetchone()
+    return row["report_read"] if row else None
+
+
+def save_earnings_read(symbol: str, report_date: str, read: str) -> None:
+    with _lock, _connect() as conn:
+        conn.execute(
+            "INSERT INTO earnings_reads (symbol, report_date, report_read, ts) VALUES (?,?,?,?)",
+            (symbol.upper(), report_date, read, _now()))
 
 
 def add_run(kind: str, top_picks: list[dict]) -> None:
