@@ -29,7 +29,7 @@ exactly that horizon vs SPY, net of friction.
 ```
 Polygon (financial) + GDELT (world news) + Alpaca/yfinance (price context)
         │  candidates (symbol → enriched articles)
-   [Connections desk]  shock → 3 web-grounded specialists → synth → spillover candidates
+   [Connections desk]  shock → 1 web-grounded opus call → spillover candidates
         │
    SCOUT ── picks ≤5, with a reason for every pick AND skip
         │  per pick, in parallel:

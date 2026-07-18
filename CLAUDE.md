@@ -84,7 +84,7 @@ Tech debt):
 ```
 Polygon (financial) + GDELT (world, 11-cat) + Alpaca/yfinance (price context)
         │  candidates (symbol → enriched articles)
-   [Connections desk]  (expose=true) shock → 3 web-grounded specialists → synth → spillover candidates
+   [Connections desk]  (expose=true) shock → 1 web-grounded opus call → spillover candidates
         │
    SCOUT (sonnet)  ── picks ≤5, reasons for every pick AND skip
         │  per pick, in parallel:
@@ -102,8 +102,8 @@ Polygon (financial) + GDELT (world, 11-cat) + Alpaca/yfinance (price context)
 ### Model tiering (`config.MODEL_MAP`, every role env-overridable `MODEL_<ROLE>`)
 
 - **haiku**: enrichment, notes/briefs, news_check (high-volume extraction)
-- **sonnet**: scout, researcher, connections, earnings_reader
-- **opus**: critic, judge, loner, head, review, connections_summary
+- **sonnet**: scout, researcher, earnings_reader
+- **opus**: critic, judge, loner, head, review, connections (web-grounded)
 
 Researcher is sonnet, Critic is opus **on purpose** — different models between debate
 roles decorrelate errors. On rate-limit each role steps down opus→sonnet→haiku (tagged

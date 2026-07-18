@@ -43,8 +43,7 @@ MODEL_MAP: dict[str, str] = {
     "review": "opus",          # position review — HOLD/EXIT on still-open TAKEs
     "head": "opus",            # comparative head-to-head selection across debated ideas
     "earnings_reader": "sonnet",      # web-grounded read of an actual earnings report
-    "connections": "sonnet",  # supplier/customer/competitor mapping (web-grounded)
-    "connections_summary": "opus",         # assembles ripple candidates from the mapped neighborhood
+    "connections": "opus",     # one web-grounded call: supplier/customer/competitor map → spillover candidates
 }
 
 # Connections desk fires only on the top-N most material shocks per run (cost gate)
