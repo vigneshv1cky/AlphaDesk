@@ -23,7 +23,7 @@ from alphadesk.config import (
     SYMBOL_REPICK_COOLDOWN_MIN,
     session,
 )
-from alphadesk.desk import debate, loner, notes, scout, team
+from alphadesk.desk import debate, gate, loner, notes, scout, team
 from alphadesk.ingest import prices
 from alphadesk.ledger import store
 from alphadesk.llm import LLMError
@@ -190,6 +190,26 @@ async def research_run(candidates: dict[str, list[dict]], trigger_src: str = "ST
     store.record_skips(skips)  # grade forward: did we skip a mover? (anti-survivorship)
     for p in picks:
         log.info("SCOUT PICK %s [%s]: %s", p["symbol"], p["edge_hint"], p["reason"])
+
+    # Pre-debate catalyst gate — drop phantom setups before the expensive debate
+    # (cheap haiku, fail-open). Parity with the streaming path.
+    verdicts = await asyncio.gather(*[
+        loop.run_in_executor(None, gate.screen_catalyst, p["symbol"], p.get("reason", ""),
+                             p.get("edge_hint"), eligible.get(p["symbol"], []), f"gate-{p['symbol']}")
+        for p in picks
+    ])
+    gate_drops, kept = [], []
+    for p, v in zip(picks, verdicts):
+        if v["tradeable"]:
+            kept.append(p)
+        else:
+            gate_drops.append({"symbol": p["symbol"], "reason": f"gated: {v['reason']}"})
+            log.info("GATE drop %s: %s", p["symbol"], v["reason"])
+    if gate_drops:
+        store.record_skips(gate_drops)
+    picks = kept
+    if not picks:
+        return []
 
     sem = asyncio.Semaphore(MAX_CONCURRENT_WORKFLOWS)
 

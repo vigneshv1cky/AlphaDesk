@@ -61,6 +61,7 @@ const ACCENT: Record<string, string> = {
   exposure_shock: "border-l-cyan-500",
   exposure_candidate: "border-l-cyan-500",
   triage_pick: "border-l-yellow-500",
+  gate: "border-l-zinc-400 opacity-70",
   brief: "border-l-zinc-400 dark:border-l-zinc-500",
   thesis: "border-l-blue-500",
   concern: "border-l-red-500",
@@ -108,6 +109,15 @@ function Line({ ev }: { ev: Ev }) {
             {plainEdge(ev.edge)}
           </Badge>
           <p className="mt-1 text-muted-foreground">{ev.reason}</p>
+        </div>
+      )
+    case "gate":
+      return (
+        <div className={cls}>
+          <Tag className="text-muted-foreground">Gated out · {ev.symbol}</Tag>
+          <p className="mt-1 text-muted-foreground">
+            no verifiable catalyst — skipped before the debate. {ev.reason}
+          </p>
         </div>
       )
     case "brief":

@@ -36,6 +36,7 @@ from alphadesk.desk import (
     connections,
     debate,
     earnings_reader,
+    gate,
     loner,
     news_check,
     notes,
@@ -280,6 +281,28 @@ async def stream_find_trades(hours: float = 48.0, max_debates: int = 6,
 
     if not picks:
         yield _ev("status", msg="Scout found no opportunities worth full analysis right now.")
+        yield _ev("done", board=[])
+        return
+
+    # Pre-debate catalyst gate — drop picks with no real external catalyst BEFORE
+    # the expensive debate (cheap haiku, fail-open). Runs in parallel across picks.
+    verdicts = await asyncio.gather(*[
+        loop.run_in_executor(None, gate.screen_catalyst, p["symbol"], p.get("reason", ""),
+                             p.get("edge_hint"), candidates.get(p["symbol"], []), f"gate-{p['symbol']}")
+        for p in picks
+    ])
+    kept, gate_drops = [], []
+    for p, v in zip(picks, verdicts):
+        if v["tradeable"]:
+            kept.append(p)
+        else:
+            gate_drops.append({"symbol": p["symbol"], "reason": f"gated: {v['reason']}"})
+            yield _ev("gate", symbol=p["symbol"], reason=v["reason"])
+    if gate_drops:
+        await loop.run_in_executor(None, store.record_skips, gate_drops)  # graded forward
+    picks = kept
+    if not picks:
+        yield _ev("status", msg="All picks gated out — no verifiable catalyst this scan.")
         yield _ev("done", board=[])
         return
 

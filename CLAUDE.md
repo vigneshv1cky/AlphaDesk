@@ -87,7 +87,9 @@ Polygon (financial) + GDELT (world, 11-cat) + Alpaca/yfinance (price context)
    [Connections desk]  (expose=true) shock → 1 web-grounded opus call → spillover candidates
         │
    SCOUT (sonnet)  ── picks ≤5, reasons for every pick AND skip
-        │  per pick, in parallel:
+        │
+   GATE (haiku)  ── drop picks with no real external catalyst BEFORE the debate (fail-open)
+        │  per surviving pick, in parallel:
    2 NOTES (haiku): market (price+valuation+priced-in) · news
    + calibration prior (the desk's own graded scorecard, sample-gated at 8 trades)
         │
@@ -101,7 +103,7 @@ Polygon (financial) + GDELT (world, 11-cat) + Alpaca/yfinance (price context)
 
 ### Model tiering (`config.MODEL_MAP`, every role env-overridable `MODEL_<ROLE>`)
 
-- **haiku**: enrichment, notes/briefs, news_check (high-volume extraction)
+- **haiku**: enrichment, notes/briefs, news_check, gate (high-volume extraction)
 - **sonnet**: scout, researcher, earnings_reader
 - **opus**: critic, judge, loner, head, review, connections (web-grounded)
 
@@ -133,6 +135,7 @@ alphadesk/
     workflow.py        research_run() — batch pipeline (desk CLI, scheduler, replay)
     debate.py          deliberate() — the shared Researcher→Critic→Judge core
     scout.py           all attention judgment, in one prompt (was triage.py)
+    gate.py            pre-debate catalyst screen — drop phantom setups (haiku, fail-open)
     notes.py           2 parallel haiku note subagents: market, news (was briefs.py)
     connections.py     the Connections desk (web-grounded spillover mapping; was exposure.py)
     team.py            Researcher ⇄ Critic → Judge, + calibration_block, + head_ranking (was committee.py)

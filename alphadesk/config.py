@@ -34,6 +34,7 @@ TIERS = ["opus", "sonnet", "haiku"]
 MODEL_MAP: dict[str, str] = {
     "enrichment": "haiku",     # sentiment + relation extraction, high volume
     "news_check": "haiku",    # same-story vs new-catalyst check on a recently-debated name
+    "gate": "haiku",           # pre-debate catalyst screen — drop phantom setups before the debate
     "brief": "haiku",          # specialist subagents (technical/news/graph)
     "scout": "sonnet",        # attention desk
     "researcher": "sonnet",       # thesis + rebuttal

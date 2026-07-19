@@ -167,6 +167,8 @@ def _log_run_event(ev: dict) -> None:
         _run_log.info("EXIT    %-6s %s", sym, _clip(ev.get("reason", ""), 100))
     elif t == "triage_pick":
         _run_log.info("SCOUT ▸ %-6s [%s] %s", sym, ev.get("edge") or "?", _clip(ev.get("reason", ""), 90))
+    elif t == "gate":
+        _run_log.info("  ✗ gated %-6s %s", sym, _clip(ev.get("reason", ""), 100))
     elif t == "brief":
         _run_log.info("  note   %-6s [%s] %s", sym, ev.get("kind", ""), _clip(ev.get("summary", ""), 100))
     elif t == "thesis":
