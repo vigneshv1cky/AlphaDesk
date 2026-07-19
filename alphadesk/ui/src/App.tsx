@@ -99,12 +99,12 @@ export default function App() {
 
       {/* App shell: on desktop the two columns each scroll independently and the
           window itself doesn't scroll; on mobile they stack and scroll normally. */}
-      <main className="min-h-0 flex-1 overflow-y-auto lg:overflow-hidden">
+      <main className="no-scrollbar min-h-0 flex-1 overflow-y-auto lg:overflow-hidden">
         <div className="mx-auto grid max-w-[1400px] grid-cols-1 gap-5 px-5 py-5 lg:h-full lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)] lg:py-0">
-          <div className="min-w-0 lg:min-h-0 lg:overflow-y-auto lg:py-5 lg:pr-2">
+          <div className="no-scrollbar min-w-0 lg:min-h-0 lg:overflow-y-auto lg:py-5 lg:pr-2">
             <FindTrades onDone={refresh} onRunningChange={setLive} />
           </div>
-          <div className="min-w-0 lg:min-h-0 lg:overflow-y-auto lg:py-5 lg:pr-2">
+          <div className="no-scrollbar min-w-0 lg:min-h-0 lg:overflow-y-auto lg:py-5 lg:pr-2">
             <RightRail
               picks={picks}
               stats={stats}

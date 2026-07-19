@@ -130,3 +130,12 @@
     @apply font-sans;
     }
 }
+
+/* Hidden scrollbars — scrolling still works, the bar just isn't drawn. */
+.no-scrollbar {
+  scrollbar-width: none;          /* Firefox */
+  -ms-overflow-style: none;       /* old Edge/IE */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;                  /* Chrome / Safari */
+}

@@ -141,7 +141,7 @@ export function PickSheet({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto p-4">
           {!pick ? (
             <div className="space-y-3">
               <Skeleton className="h-24 w-full" />
