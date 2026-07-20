@@ -63,9 +63,12 @@ function Outcome({ e }: { e: TimelineEvent }) {
           {e.pnl_pct}%)
         </span>
         {e.alpha_so_far != null && (
-          <span className={`ml-1 text-[10px] ${aPos ? "text-emerald-500" : "text-red-500"}`}>
-            S&P {aPos ? "+" : ""}
-            {e.alpha_so_far}%
+          <span
+            className={`ml-1 text-[10px] ${aPos ? "text-emerald-500" : "text-red-500"}`}
+            title="How much it's beating the S&P 500 so far, net of friction — a live mark, not the official grade"
+          >
+            vs S&P {aPos ? "+" : ""}
+            {e.alpha_so_far}% so far
           </span>
         )}
       </span>
