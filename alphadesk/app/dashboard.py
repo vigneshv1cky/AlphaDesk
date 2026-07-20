@@ -1,7 +1,9 @@
 """Dashboard — FastAPI serving the shadcn/ui SPA + JSON API.
 
-Auth: HTTP Basic enforced by middleware on EVERY route (API, SPA, assets) —
-fail-closed if ADMIN_USERNAME/ADMIN_PASSWORD are unset.
+Auth: HTTP Basic — enforced ONLY when the server is bound to a non-loopback host
+(the public GCP VM sets DASHBOARD_HOST=0.0.0.0). A local 127.0.0.1 run needs no
+password (we're not live); a public bind still fail-closes if ADMIN_USERNAME/
+ADMIN_PASSWORD are unset.
 Frontend: built by `pnpm build` in alphadesk/ui → alphadesk/app/static/.
 """
 
@@ -21,11 +23,22 @@ _STATIC = Path(__file__).parent / "static"
 app = FastAPI(title="AlphaDesk")
 
 
+def _auth_required() -> bool:
+    """Auth is enforced ONLY when bound to a non-loopback host — i.e. reachable
+    off-box (the GCP VM sets DASHBOARD_HOST=0.0.0.0). A local 127.0.0.1 run is not
+    exposed, so it needs no password: no auth wall while we're not live."""
+    host = os.environ.get("DASHBOARD_HOST", "127.0.0.1").strip().lower()
+    return host not in ("", "127.0.0.1", "localhost", "::1")
+
+
 @app.middleware("http")
 async def _basic_auth(request: Request, call_next):
     # /healthz is the ONLY unauthenticated path — the external watchdog's probe.
     # It exposes liveness only, never data.
     if request.url.path == "/healthz":
+        return await call_next(request)
+    # Local (loopback) run — open, no password.
+    if not _auth_required():
         return await call_next(request)
     user = os.environ.get("ADMIN_USERNAME", "")
     password = os.environ.get("ADMIN_PASSWORD", "")
