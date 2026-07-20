@@ -4,7 +4,6 @@ import {
   fmtAlpha,
   type EarningsRow,
   type FunnelWindow,
-  type Pick,
   type Stats,
   type TokenRow,
 } from "@/lib/api"
@@ -26,7 +25,6 @@ function Kpi({ label, value, tone }: { label: string; value: string; tone?: numb
 }
 
 export default function App() {
-  const [picks, setPicks] = useState<Pick[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
   const [funnel, setFunnel] = useState<{ paused: string | null; windows: FunnelWindow[] }>()
   const [tokens, setTokens] = useState<TokenRow[]>([])
@@ -36,7 +34,6 @@ export default function App() {
   const [theme, toggleTheme] = useTheme()
 
   const refresh = useCallback(() => {
-    api.picks().then((d) => setPicks(d.picks)).catch(console.error)
     api.stats().then(setStats).catch(console.error)
     api.funnel().then(setFunnel).catch(console.error)
     api.tokens().then((d) => setTokens(d.usage)).catch(console.error)
@@ -106,7 +103,6 @@ export default function App() {
           </div>
           <div className="no-scrollbar min-w-0 lg:min-h-0 lg:overflow-y-auto lg:py-5 lg:pr-2">
             <RightRail
-              picks={picks}
               stats={stats}
               tokens={tokens}
               earnings={earnings}

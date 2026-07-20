@@ -452,6 +452,20 @@ def open_taken_picks() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def recent_team_picks(days: int = 30) -> list[dict]:
+    """All TEAM picks in the window, for per-symbol timelines (stance changes +
+    outcomes). Ordered so grouping keeps each symbol's events in time order."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, ts, symbol, direction, horizon_days, edge, verdict, approved,"
+            " adjusted_score, confidence, plan_entry, plan_target, plan_stop, plan_note,"
+            " entry_price, alpha_net, ret_horizon, graded_at, exit_ts, exit_reason"
+            " FROM picks WHERE arm='TEAM' AND ts >= datetime('now', ?)"
+            " ORDER BY symbol, id", (f"-{int(days)} days",),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def live_picks() -> list[dict]:
     """Open picks carrying a trade plan, still inside their horizon window (not
     graded, not exited) — the set to track live against the current price."""

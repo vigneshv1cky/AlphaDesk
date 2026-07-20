@@ -1,18 +1,9 @@
-import { etDateKey, etDateTime, fmtAlpha, type Pick, type Stats } from "@/lib/api"
-import { dirWord, plainEdge, plainVerdict } from "@/lib/plain"
-import { ArrowDown, ArrowUp } from "lucide-react"
+import { useEffect, useState } from "react"
+import { api, etDateTime, fmtAlpha, type SymbolTimeline, type TimelineEvent, type Stats } from "@/lib/api"
+import { dirUp, dirWord, plainEdge } from "@/lib/plain"
+import { ArrowDown, ArrowUp, RotateCcw } from "lucide-react"
 
-function Stat({
-  label,
-  value,
-  sub,
-  tone,
-}: {
-  label: string
-  value: string
-  sub?: string
-  tone?: number | null
-}) {
+function Stat({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: number | null }) {
   const color = tone == null ? "" : tone > 0 ? "text-emerald-500" : tone < 0 ? "text-red-500" : ""
   return (
     <div className="rounded-lg border border-border bg-card p-3">
@@ -31,155 +22,143 @@ function PerfStrip({ stats }: { stats: Stats | null }) {
   return (
     <div className="grid grid-cols-3 gap-2">
       <Stat label="Ideas logged" value={String(stats?.total.picks ?? 0)} />
-      <Stat
-        label="Scored"
-        value={String(graded)}
-        sub={winRate != null ? `${winRate}% beat S&P` : "grading forward"}
-      />
+      <Stat label="Scored" value={String(graded)} sub={winRate != null ? `${winRate}% beat S&P` : "grading forward"} />
       <Stat label="Avg vs S&P" value={avg != null ? fmtAlpha(avg) : "—"} tone={avg} />
     </div>
   )
 }
 
-function IdeaRow({ n, p, onSelect }: { n: number; p: Pick; onSelect: (id: number) => void }) {
-  const long = p.direction === "LONG"
-  const why = p.debate?.arbiter_summary ?? p.thesis ?? p.triage_reason ?? ""
-  const graded = p.alpha_net != null
+// The desk's current stance on a stock — the headline of its timeline card.
+function StanceBadge({ current }: { current: string }) {
+  const map: Record<string, { label: string; cls: string }> = {
+    LONG: { label: "Buy", cls: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" },
+    SHORT: { label: "Short", cls: "bg-red-500/15 text-red-600 dark:text-red-400" },
+    EXITED: { label: "Exited", cls: "bg-amber-500/15 text-amber-600 dark:text-amber-400" },
+    CLOSED: { label: "Closed", cls: "bg-muted text-muted-foreground" },
+  }
+  const s = map[current] ?? map.CLOSED
+  return <span className={`rounded px-1.5 py-0.5 text-[11px] font-semibold ${s.cls}`}>{s.label}</span>
+}
+
+// What happened with one call: vs S&P (graded), exited, or live P&L (open).
+function Outcome({ e }: { e: TimelineEvent }) {
+  if (e.state === "graded" && e.alpha_net != null) {
+    return (
+      <span className={`font-mono text-sm font-semibold tabular-nums ${e.alpha_net > 0 ? "text-emerald-500" : "text-red-500"}`}>
+        {fmtAlpha(e.alpha_net)} <span className="text-[10px] font-normal text-muted-foreground">vs S&P</span>
+      </span>
+    )
+  }
+  if (e.state === "exited") {
+    return <span className="text-xs font-medium text-amber-600 dark:text-amber-400">Exited</span>
+  }
+  if (e.pnl_pct != null) {
+    const pos = e.pnl_pct >= 0
+    return (
+      <span className="text-right">
+        <span className="font-mono text-sm tabular-nums">${e.current}</span>{" "}
+        <span className={`font-mono text-xs tabular-nums ${pos ? "text-emerald-500" : "text-red-500"}`}>
+          ({pos ? "+" : ""}
+          {e.pnl_pct}%)
+        </span>
+        {e.status && e.status !== "working" && (
+          <span className="ml-1 text-[10px] text-muted-foreground">{e.status}</span>
+        )}
+      </span>
+    )
+  }
+  return <span className="text-xs text-muted-foreground">scoring…</span>
+}
+
+function EventRow({ e, onSelect }: { e: TimelineEvent; onSelect: (id: number) => void }) {
+  const up = dirUp(e.direction)
   return (
     <button
-      onClick={() => onSelect(p.id)}
-      className="flex w-full gap-3 rounded-lg border border-border bg-card p-3 text-left transition-colors hover:border-indigo-500/40 hover:bg-muted/40"
+      onClick={() => onSelect(e.id)}
+      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted/50"
     >
-      <span className="w-6 shrink-0 pt-0.5 text-right font-mono text-sm tabular-nums text-muted-foreground/50">
-        {n}
+      {up ? <ArrowUp className="h-3.5 w-3.5 shrink-0 text-emerald-500" /> : <ArrowDown className="h-3.5 w-3.5 shrink-0 text-red-500" />}
+      <span className={`text-xs font-medium ${up ? "text-emerald-500" : "text-red-500"}`}>{dirWord(e.direction)}</span>
+      <span className="font-mono text-[11px] tabular-nums text-muted-foreground">{etDateTime(e.ts)}</span>
+      {e.edge && <span className="hidden rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground sm:inline">{plainEdge(e.edge)}</span>}
+      <span className="ml-auto shrink-0">
+        <Outcome e={e} />
       </span>
-      <div className="min-w-0 flex-1">
-      <div className="flex items-center gap-2.5">
-        <span
-          className={`grid h-6 w-6 place-items-center rounded ${
-            long ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"
-          }`}
-        >
-          {long ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />}
-        </span>
-        <span className="font-semibold">{p.symbol}</span>
-        <span className={`text-xs font-medium ${long ? "text-emerald-500" : "text-red-500"}`}>
-          {dirWord(p.direction)}
-        </span>
-        <span className="text-xs text-muted-foreground">hold ~{p.horizon_days}d</span>
-        {p.edge && (
-          <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
-            {plainEdge(p.edge)}
-          </span>
-        )}
-        <span className="ml-auto text-right">
-          {graded ? (
-            <span
-              className={`font-mono text-sm font-semibold tabular-nums ${
-                p.alpha_net! > 0 ? "text-emerald-500" : "text-red-500"
-              }`}
-            >
-              {fmtAlpha(p.alpha_net)}
-            </span>
-          ) : (
-            <span className="text-xs text-muted-foreground">scoring…</span>
-          )}
-        </span>
-      </div>
-      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-        {p.verdict && (
-          <span className={p.verdict === "PASS" ? "text-muted-foreground" : "text-foreground"}>
-            {plainVerdict(p.verdict)}
-          </span>
-        )}
-        <span>· conf {Math.round(p.adjusted_score ?? p.score)}</span>
-        <span>· {p.approved ? "conviction ✓" : "thin lean"}</span>
-        {p.debate?.flipped && <span className="font-medium text-fuchsia-500">· reversed</span>}
-        <span>· {p.arm === "LONER" ? "Solo" : "Team"}</span>
-        <span className="font-mono tabular-nums text-muted-foreground/70">
-          · {etDateTime(p.ts)} ET
-        </span>
-        <span className="text-muted-foreground/70">· #{p.id}</span>
-      </div>
-      {why && <p className="mt-1.5 line-clamp-2 text-xs leading-snug text-muted-foreground">{why}</p>}
-      </div>
     </button>
   )
 }
 
-function dayLabel(dateKey: string): string {
-  const today = etDateKey(new Date().toISOString())
-  const yesterday = etDateKey(new Date(Date.now() - 86_400_000).toISOString())
-  if (dateKey === today) return "Today"
-  if (dateKey === yesterday) return "Yesterday"
-  // dateKey is already the ET calendar date; format it without shifting tz again.
-  return new Date(dateKey + "T12:00:00Z").toLocaleDateString("en-US", {
-    timeZone: "UTC",
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  })
-}
-
-function groupByDay(picks: Pick[]): [string, Pick[]][] {
-  const map = new Map<string, Pick[]>()
-  for (const p of picks) {
-    const d = etDateKey(p.ts)
-    const arr = map.get(d)
-    if (arr) arr.push(p)
-    else map.set(d, [p])
-  }
-  return [...map.entries()]
-}
-
-function EmptyState() {
+function SymbolCard({ s, onSelect }: { s: SymbolTimeline; onSelect: (id: number) => void }) {
+  const events = [...s.events].reverse() // newest first
+  const shown = events.slice(0, 8)
+  const more = events.length - shown.length
+  const latest = events[0]
+  const exitReason = s.current === "EXITED" ? latest?.exit_reason : null
   return (
-    <div className="rounded-lg border border-dashed border-border bg-card p-8 text-center">
-      <p className="text-sm font-medium">No ideas yet</p>
-      <p className="mx-auto mt-1 max-w-xs text-xs text-muted-foreground">
-        Hit <b className="text-foreground">Run</b> on the desk to scan the market. Every idea is
-        scored against the S&P 500 at its own horizon.
-      </p>
+    <div className="rounded-lg border border-border bg-card p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-semibold">{s.symbol}</span>
+        <StanceBadge current={s.current} />
+        {s.changed && (
+          <span className="inline-flex items-center gap-1 rounded bg-fuchsia-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-fuchsia-600 dark:text-fuchsia-400">
+            <RotateCcw className="h-2.5 w-2.5" /> changed
+          </span>
+        )}
+        <span className="ml-auto text-[11px] text-muted-foreground">
+          {events.length} call{events.length > 1 ? "s" : ""}
+        </span>
+      </div>
+      {exitReason && <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">Exited: {exitReason}</p>}
+      <div className="mt-1.5 divide-y divide-border/60">
+        {shown.map((e) => (
+          <EventRow key={e.id} e={e} onSelect={onSelect} />
+        ))}
+      </div>
+      {more > 0 && <div className="mt-1 px-2 text-[11px] text-muted-foreground">+{more} earlier</div>}
     </div>
   )
 }
 
-export function Ledger({
-  picks,
-  stats,
-  onSelect,
-}: {
-  picks: Pick[]
-  stats: Stats | null
-  onSelect: (id: number) => void
-}) {
+export function Ledger({ stats, onSelect }: { stats: Stats | null; onSelect: (id: number) => void }) {
+  const [symbols, setSymbols] = useState<SymbolTimeline[]>([])
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    const load = () =>
+      api
+        .timelines()
+        .then((d) => {
+          if (alive) {
+            setSymbols(d.symbols)
+            setLoaded(true)
+          }
+        })
+        .catch(console.error)
+    load()
+    const t = setInterval(load, 30_000) // outcomes update live for open calls
+    return () => {
+      alive = false
+      clearInterval(t)
+    }
+  }, [])
+
   return (
     <div className="space-y-3">
       <PerfStrip stats={stats} />
-      {picks.length === 0 ? (
-        <EmptyState />
+      {loaded && symbols.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border bg-card p-8 text-center">
+          <p className="text-sm font-medium">No ideas yet</p>
+          <p className="mx-auto mt-1 max-w-xs text-xs text-muted-foreground">
+            Hit <b className="text-foreground">Run</b> on the desk. Each stock builds a timeline here —
+            every call, whether it worked, and when the desk changed its mind.
+          </p>
+        </div>
       ) : (
-        <div className="space-y-4">
-          {(() => {
-            const pos = new Map(picks.map((p, i) => [p.id, i + 1]))
-            return groupByDay(picks).map(([date, items]) => (
-              <div key={date} className="space-y-2">
-                <div className="flex items-center gap-2 px-0.5">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    {dayLabel(date)}
-                  </h3>
-                  <span className="text-[11px] tabular-nums text-muted-foreground">
-                    {items.length}
-                  </span>
-                  <div className="ml-1 h-px flex-1 bg-border" />
-                </div>
-                {items.map((p) => (
-                  <IdeaRow key={p.id} n={pos.get(p.id) ?? 0} p={p} onSelect={onSelect} />
-                ))}
-              </div>
-            ))
-          })()}
+        <div className="space-y-2">
+          {symbols.map((s) => (
+            <SymbolCard key={s.symbol} s={s} onSelect={onSelect} />
+          ))}
         </div>
       )}
     </div>

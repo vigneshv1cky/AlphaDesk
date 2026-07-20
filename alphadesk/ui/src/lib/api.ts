@@ -96,6 +96,39 @@ export interface LivePick {
   status: string // working | near target | near stop | target hit | stopped out | no quote
 }
 
+// One call in a symbol's timeline, with its outcome.
+export interface TimelineEvent {
+  id: number
+  ts: string
+  direction: "LONG" | "SHORT"
+  horizon_days: number
+  edge: string | null
+  verdict: string | null
+  approved: number
+  adjusted_score: number | null
+  plan_entry: number | null
+  plan_target: number | null
+  plan_stop: number | null
+  entry_price: number | null
+  alpha_net: number | null
+  graded_at: string | null
+  exit_ts: string | null
+  exit_reason: string | null
+  state: "open" | "graded" | "exited"
+  current: number | null
+  pnl_pct: number | null
+  status: string | null
+}
+
+// The desk's evolving view on one stock — the "track record", grouped.
+export interface SymbolTimeline {
+  symbol: string
+  current: string // LONG | SHORT | EXITED | CLOSED
+  changed: boolean
+  last_ts: string
+  events: TimelineEvent[]
+}
+
 export interface Stats {
   total: {
     picks: number
@@ -150,6 +183,7 @@ export const api = {
   picks: (limit = 40) => get<{ picks: Pick[] }>(`/api/picks?limit=${limit}`),
   pick: (id: number) => get<Pick>(`/api/picks/${id}`),
   live: () => get<{ live: LivePick[]; market: string }>("/api/live"),
+  timelines: () => get<{ symbols: SymbolTimeline[]; market: string }>("/api/timelines"),
   stats: () => get<Stats>("/api/stats"),
   funnel: (limit = 20) =>
     get<{ paused: string | null; windows: FunnelWindow[] }>(`/api/funnel?limit=${limit}`),

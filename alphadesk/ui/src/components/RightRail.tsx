@@ -1,5 +1,5 @@
 import { useState } from "react"
-import type { EarningsRow, Pick, Stats, TokenRow } from "@/lib/api"
+import type { EarningsRow, Stats, TokenRow } from "@/lib/api"
 import { Ledger } from "@/components/Ledger"
 import { Earnings } from "@/components/Earnings"
 import { Activity } from "@/components/Activity"
@@ -8,13 +8,11 @@ import { LiveTracker } from "@/components/LiveTracker"
 type View = "live" | "record" | "calendar" | "usage"
 
 export function RightRail({
-  picks,
   stats,
   tokens,
   earnings,
   onSelect,
 }: {
-  picks: Pick[]
   stats: Stats | null
   tokens: TokenRow[]
   earnings?: { upcoming: EarningsRow[]; reported: EarningsRow[] }
@@ -47,7 +45,7 @@ export function RightRail({
       </div>
 
       {view === "live" && <LiveTracker />}
-      {view === "record" && <Ledger picks={picks} stats={stats} onSelect={onSelect} />}
+      {view === "record" && <Ledger stats={stats} onSelect={onSelect} />}
       {view === "calendar" && <Earnings earnings={earnings} />}
       {view === "usage" && <Activity tokens={tokens} />}
     </div>

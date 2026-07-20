@@ -188,6 +188,51 @@ def api_live():
     return {"live": out, "market": market_session()}
 
 
+@app.get("/api/timelines")
+def api_timelines(days: int = 30):
+    """Track record grouped BY STOCK: each symbol's ordered calls with outcomes
+    (open → live P&L; graded → vs S&P; exited), the desk's current stance, and
+    whether that stance changed over time (buy→sell / an exit)."""
+    from alphadesk.config import session as market_session
+    from alphadesk.ingest import prices
+    rows = store.recent_team_picks(days)
+    by_sym: dict[str, list[dict]] = {}
+    for r in rows:
+        by_sym.setdefault(r["symbol"], []).append(r)
+    open_syms = [s for s, evs in by_sym.items()
+                 if any(e["graded_at"] is None and e["exit_ts"] is None for e in evs)]
+    quotes = prices.latest_prices(open_syms)
+
+    symbols = []
+    for sym, evs in by_sym.items():
+        evs.sort(key=lambda e: e["id"])
+        events = []
+        for e in evs:
+            state = "exited" if e["exit_ts"] else ("graded" if e["graded_at"] else "open")
+            ev = dict(e, state=state, current=None, pnl_pct=None, status=None)
+            if state == "open":
+                cur = quotes.get(sym.upper())
+                entry, target, stop = e["plan_entry"], e["plan_target"], e["plan_stop"]
+                ev["current"] = cur
+                if cur and entry and target and stop and target != stop:
+                    up = e["direction"] == "LONG"
+                    ev["pnl_pct"] = round((1.0 if up else -1.0) * (cur - entry) / entry * 100, 2)
+                    hit_t = cur >= target if up else cur <= target
+                    hit_s = cur <= stop if up else cur >= stop
+                    ev["status"] = ("target hit" if hit_t else "stopped out" if hit_s
+                                    else "working")
+            events.append(ev)
+        latest = evs[-1]
+        current = ("EXITED" if latest["exit_ts"]
+                   else latest["direction"] if latest["graded_at"] is None else "CLOSED")
+        changed = len({e["direction"] for e in evs}) > 1 or any(e["exit_ts"] for e in evs)
+        symbols.append({"symbol": sym, "current": current, "changed": changed,
+                        "last_ts": latest["ts"], "events": events})
+    symbols.sort(key=lambda s: s["last_ts"], reverse=True)           # recent first…
+    symbols.sort(key=lambda s: 0 if s["current"] in ("LONG", "SHORT") else 1)  # …open on top
+    return {"symbols": symbols, "market": market_session()}
+
+
 _run_day = ""
 _run_count = 0
 
