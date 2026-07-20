@@ -96,9 +96,12 @@ def _fetch_calendar_date(date_str: str) -> list[dict]:
     return data.get("rows") or []
 
 
-def refresh_calendar(days_back: int = 5, days_fwd: int = 7) -> int:
+def refresh_calendar(days_back: int = 5, days_fwd: int = 14) -> int:
     """Pull the market-wide earnings calendar for [today-days_back, today+days_fwd]
     into the ledger, keeping only Alpaca-tradable names. Returns rows upserted.
+
+    days_fwd reaches ~2 weeks so the mega-caps (which cluster late in a reporting
+    season) show up in the reporting-soon view, not just the nearest small-caps.
 
     report_date is stored DATE-ONLY so an event is keyed stably whether we see it
     pre-report (forecast row) or post-report (actual row) — the ON CONFLICT REPLACE
@@ -134,11 +137,14 @@ def refresh_calendar(days_back: int = 5, days_fwd: int = 7) -> int:
                 "eps_estimate": est,
                 "eps_actual": act,
                 "surprise_pct": surp,
+                "market_cap": _f(r.get("marketCap")),
             })
         time.sleep(0.4)                               # be polite to the endpoint
     store.upsert_earnings(rows)
-    log.info("earnings calendar refreshed: %d tradable reporters across %d days",
-             len(rows), days_back + days_fwd + 1)
+    purged = store.purge_legacy_earnings()            # drop old full-timestamp dupes
+    log.info("earnings calendar refreshed: %d tradable reporters across %d days"
+             "%s", len(rows), days_back + days_fwd + 1,
+             f" (purged {purged} legacy rows)" if purged else "")
     return len(rows)
 
 

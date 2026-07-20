@@ -17,6 +17,38 @@ function Panel({ title, sub, children }: { title?: string; sub?: string; childre
   )
 }
 
+function fmtCap(v?: number | null): string {
+  if (v == null) return ""
+  if (v >= 1e12) return `$${(v / 1e12).toFixed(1)}T`
+  if (v >= 1e9) return `$${(v / 1e9).toFixed(0)}B`
+  if (v >= 1e6) return `$${(v / 1e6).toFixed(0)}M`
+  return `$${Math.round(v)}`
+}
+
+function runDayLabel(runDay: string): string {
+  const d = new Date(`${runDay}T12:00:00`) // noon avoids TZ date-rollover
+  const wd = d.toLocaleDateString("en-US", { weekday: "short" })
+  return `${wd} ${runDay.slice(5)}`
+}
+
+type RunGroup = { runDay: string; rows: EarningsRow[] }
+
+// upcoming arrives pre-sorted by (run_at asc, market_cap desc), so a single pass
+// yields run-day groups with the biggest names first inside each.
+function groupByRunDay(rows: EarningsRow[]): RunGroup[] {
+  const groups: RunGroup[] = []
+  for (const e of rows) {
+    const runDay = (e.run_at ?? "").slice(0, 10) || "—"
+    let g = groups[groups.length - 1]
+    if (!g || g.runDay !== runDay) {
+      g = { runDay, rows: [] }
+      groups.push(g)
+    }
+    g.rows.push(e)
+  }
+  return groups
+}
+
 export function Earnings({
   earnings,
 }: {
@@ -67,25 +99,39 @@ export function Earnings({
       )}
 
       {earnings.upcoming.length > 0 && (
-        <Panel title="Reporting soon" sub="with the time to run the desk to catch the drift">
-          <ul className="divide-y divide-border">
-            {earnings.upcoming.slice(0, 20).map((e) => (
-              <li
-                key={e.symbol + e.report_date}
-                className="flex items-center gap-2 py-1.5 text-sm"
-              >
-                <span className="w-14 font-semibold">{e.symbol}</span>
-                <span className="text-muted-foreground">
-                  {e.report_date.slice(5, 10)} {e.session}
-                </span>
-                {e.run_at && (
-                  <span className="ml-auto text-xs font-medium text-emerald-500">
-                    run {e.run_at.slice(5, 10)} · 9:30 ET
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
+        <Panel title="Reporting soon" sub="grouped by when to run the desk — biggest names first">
+          <div className="space-y-3">
+            {groupByRunDay(earnings.upcoming).map((g) => {
+              const shown = g.rows.slice(0, 8)
+              const more = g.rows.length - shown.length
+              return (
+                <div key={g.runDay}>
+                  <div className="mb-1 text-xs font-semibold text-emerald-500">
+                    {g.runDay === "—" ? "Run time n/a" : `Run ${runDayLabel(g.runDay)} · 9:30 ET`}
+                  </div>
+                  <ul className="divide-y divide-border">
+                    {shown.map((e) => (
+                      <li
+                        key={e.symbol + e.report_date}
+                        className="flex items-center gap-2 py-1.5 text-sm"
+                      >
+                        <span className="w-14 font-semibold">{e.symbol}</span>
+                        <span className="w-14 text-xs text-muted-foreground">
+                          {fmtCap(e.market_cap)}
+                        </span>
+                        <span className="ml-auto text-xs text-muted-foreground">
+                          {e.report_date.slice(5, 10)} {e.session}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  {more > 0 && (
+                    <div className="mt-1 text-xs text-muted-foreground">+{more} more</div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </Panel>
       )}
     </div>

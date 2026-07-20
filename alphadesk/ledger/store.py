@@ -115,11 +115,12 @@ CREATE INDEX IF NOT EXISTS idx_skips_ts ON skips (ts);
 -- Drives "be ready" (upcoming) + post-earnings-drift candidates (recently reported).
 CREATE TABLE IF NOT EXISTS earnings (
     symbol       TEXT NOT NULL,
-    report_date  TEXT NOT NULL,     -- ISO datetime of the report
+    report_date  TEXT NOT NULL,     -- report date, YYYY-MM-DD (date-only, stable key)
     session      TEXT,              -- BMO (pre-open) | AMC (post-close) | DAY
     eps_estimate REAL,
     eps_actual   REAL,              -- NULL until reported
     surprise_pct REAL,              -- NULL until reported
+    market_cap   REAL,              -- for ranking big names in the reporting-soon view
     fetched_at   TEXT,
     UNIQUE(symbol, report_date) ON CONFLICT REPLACE
 );
@@ -167,6 +168,10 @@ def init() -> None:
                 conn.execute(f"ALTER TABLE picks ADD COLUMN {col} {decl}")
             except sqlite3.OperationalError:
                 pass  # already migrated
+        try:
+            conn.execute("ALTER TABLE earnings ADD COLUMN market_cap REAL")
+        except sqlite3.OperationalError:
+            pass  # already migrated
 
 
 def _now() -> str:
@@ -518,16 +523,26 @@ def save_enrichment(items: list[dict]) -> None:
 
 def upsert_earnings(rows: list[dict]) -> None:
     """Insert/replace earnings-calendar rows. Each: {symbol, report_date, session,
-    eps_estimate, eps_actual, surprise_pct}."""
+    eps_estimate, eps_actual, surprise_pct, market_cap}."""
     data = [(r["symbol"].upper(), r["report_date"], r.get("session"),
-             r.get("eps_estimate"), r.get("eps_actual"), r.get("surprise_pct"), _now())
+             r.get("eps_estimate"), r.get("eps_actual"), r.get("surprise_pct"),
+             r.get("market_cap"), _now())
             for r in (rows or []) if r.get("symbol") and r.get("report_date")]
     if not data:
         return
     with _lock, _connect() as conn:
         conn.executemany(
             "INSERT INTO earnings (symbol, report_date, session, eps_estimate,"
-            " eps_actual, surprise_pct, fetched_at) VALUES (?,?,?,?,?,?,?)", data)
+            " eps_actual, surprise_pct, market_cap, fetched_at) VALUES (?,?,?,?,?,?,?,?)", data)
+
+
+def purge_legacy_earnings() -> int:
+    """Drop stale rows keyed by the OLD full-timestamp report_date (e.g.
+    '2026-07-22T16:00:00-04:00'). The market-wide calendar now stores date-only
+    keys, so these legacy rows would otherwise double every event. Idempotent."""
+    with _lock, _connect() as conn:
+        cur = conn.execute("DELETE FROM earnings WHERE report_date LIKE '%T%'")
+        return cur.rowcount or 0
 
 
 def recently_reported(days: int = 3) -> list[dict]:
@@ -547,7 +562,7 @@ def upcoming_earnings(days: int = 7) -> list[dict]:
     """Companies REPORTING in the next `days` — the 'be ready' watch."""
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT symbol, report_date, session, eps_estimate FROM earnings"
+            "SELECT symbol, report_date, session, eps_estimate, market_cap FROM earnings"
             " WHERE eps_actual IS NULL AND report_date >= date('now')"
             "   AND report_date <= date('now', ?) ORDER BY report_date", (f"+{int(days)} days",),
         ).fetchall()

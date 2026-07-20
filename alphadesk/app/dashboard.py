@@ -110,9 +110,12 @@ def api_earnings():
     drift) and who just reported."""
     from alphadesk.ingest import prices
     from alphadesk.ingest.earnings import run_at
-    upcoming = store.upcoming_earnings(days=7)
+    upcoming = store.upcoming_earnings(days=14)
     for e in upcoming:
         e["run_at"] = run_at(e["report_date"], e.get("session"))
+    # Sort so the UI can group by run-day (earliest to run first) with the biggest
+    # names surfaced first inside each day — never truncated by earlier small-caps.
+    upcoming.sort(key=lambda e: (e["run_at"] or "9999", -(e.get("market_cap") or 0.0)))
     reported = store.recently_reported(days=3)
     # Show the real, verifiable signal: how much the stock has moved SINCE the
     # report went public (the drift itself) — not a maybe-misleading EPS surprise%.
