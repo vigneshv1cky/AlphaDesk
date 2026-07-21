@@ -155,7 +155,7 @@ def enrich(articles: list[dict]) -> list[dict]:
             out = call_role(
                 "enrichment", _ENRICH_SYSTEM,
                 "Articles:\n" + wrap_data("articles", numbered),
-                schema=_ENRICH_SCHEMA,
+                schema=_ENRICH_SCHEMA, source="FINANCIAL",
             )
             results = {item["i"]: item for item in out.get("items", [])}
         except LLMError as exc:

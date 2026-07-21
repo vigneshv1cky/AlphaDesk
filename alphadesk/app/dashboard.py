@@ -106,6 +106,13 @@ def api_tokens(days: int = 1):
     return {"days": days, "usage": store.token_summary(days)}
 
 
+@app.get("/api/sources")
+def api_sources(days: int = 30):
+    """Per ingestion source: articles in, tokens spent (ingest + debate), and
+    value (picks / graded / avg alpha) — which channel earns its tokens."""
+    return {"days": days, "sources": store.source_scorecard(days)}
+
+
 @app.get("/api/earnings")
 def api_earnings():
     """Be-ready view: who reports next (with the time to RUN the desk to catch the

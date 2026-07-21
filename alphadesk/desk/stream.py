@@ -57,6 +57,19 @@ def _ev(_type: str, **data):
     return {"type": _type, **data}
 
 
+def _source_of(sym: str, earnings_syms: set, world_syms: set, ripple_syms: set) -> str:
+    """Which ingestion channel surfaced this pick (most-specific wins), for
+    cost/value attribution in the source scorecard."""
+    su = sym.upper()
+    if su in earnings_syms:
+        return "EARNINGS"
+    if su in ripple_syms:
+        return "SPILLOVER"
+    if su in world_syms:
+        return "WORLD"
+    return "FINANCIAL"
+
+
 def _headlines(articles: list[dict]) -> list[str]:
     return [
         f"[{a.get('category', '?')}] {a.get('title', '')[:120]}"
@@ -95,6 +108,7 @@ async def stream_find_trades(hours: float = 48.0, max_debates: int = 6,
         yield _ev("status", msg=f"News scan failed: {exc}")
         yield _ev("done", board=[])
         return
+    await loop.run_in_executor(None, store.record_ingest, "FINANCIAL", n, len(candidates))
 
     # Earnings drift — a CANDIDATE SOURCE parallel to the news scan: names that
     # reported in the last few days are first-class candidates (the desk's cleanest
@@ -120,6 +134,8 @@ async def stream_find_trades(hours: float = 48.0, max_debates: int = 6,
                 deduped.append(a)
         bucket[:] = deduped
     if drift:
+        await loop.run_in_executor(None, store.record_ingest, "EARNINGS",
+                                   sum(len(a) for a in drift.values()), len(drift))
         yield _ev("status", msg=f"{len(drift)} name(s) reported in the last "
                                 f"{EARNINGS_DRIFT_DAYS}d — added as post-earnings-drift candidates.")
 
@@ -133,11 +149,13 @@ async def stream_find_trades(hours: float = 48.0, max_debates: int = 6,
     # truncated out by the window cap below.
     world_syms: set[str] = set()
     if not await _gone():
+        world_events = 0
         try:
-            _, world_cands = await loop.run_in_executor(None, world.poll, WORLD_MAX_CATEGORIES)
+            world_events, world_cands = await loop.run_in_executor(None, world.poll, WORLD_MAX_CATEGORIES)
         except Exception as exc:
             world_cands = {}
             log.warning("World-news poll failed: %s", exc)
+        await loop.run_in_executor(None, store.record_ingest, "WORLD", world_events, len(world_cands))
         for wsym, w_arts in world_cands.items():
             world_syms.add(wsym.upper())
             bucket = candidates.setdefault(wsym, [])
@@ -245,6 +263,7 @@ async def stream_find_trades(hours: float = 48.0, max_debates: int = 6,
                     yield _ev("exposure_candidate", shock=res["shock"], symbol=csym,
                               direction=c["direction"], chain=c["chain"], strength=c["strength"])
                     added += 1
+            await loop.run_in_executor(None, store.record_ingest, "SPILLOVER", added, added)
             yield _ev("status", msg=f"Connections desk surfaced {added} ripple candidates.")
 
     # Anti-double-dip across runs — but not blind to NEW catalysts:
@@ -361,6 +380,7 @@ async def stream_find_trades(hours: float = 48.0, max_debates: int = 6,
             log.info("Find Trades client disconnected — stopping after %d debates", pick_idx)
             return
         sym = pick["symbol"]
+        pick["source"] = _source_of(sym, earnings_syms, world_syms, ripple_syms)
         decision_id = f"{sym}-{uuid.uuid4().hex[:8]}"
         price_ctx = window.get(sym, {}).get("price")
         arts = candidates.get(sym, [])

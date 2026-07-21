@@ -91,7 +91,8 @@ def map_connections(shock: str, event: str, decision_id: str | None = None) -> d
     )
     try:
         out = call_role("connections", _SYSTEM, user, schema=_SCHEMA,
-                        decision_id=did, tools=_WEB, max_turns=_WEB_TURNS)
+                        decision_id=did, tools=_WEB, max_turns=_WEB_TURNS,
+                        source="SPILLOVER")
         candidates = [c for c in (out.get("candidates") or []) if in_universe(c["symbol"])]
     except LLMError as exc:
         log.warning("Connections desk failed for %s: %s", shock, exc)

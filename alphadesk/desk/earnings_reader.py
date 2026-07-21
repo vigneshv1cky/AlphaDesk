@@ -55,7 +55,8 @@ def get_or_read(row: dict, decision_id: str | None = None) -> str | None:
     )
     try:
         out = call_role("earnings_reader", _SYSTEM, user, schema=_SCHEMA,
-                        decision_id=decision_id, tools=_WEB, max_turns=_WEB_TURNS)
+                        decision_id=decision_id, tools=_WEB, max_turns=_WEB_TURNS,
+                        source="EARNINGS")
         out.pop("_downgraded_model", None)
         read = (f"GUIDANCE: {out.get('guidance', '')}\n"
                 f"REACTION: {out.get('reaction', '')}\n{out.get('summary', '')}").strip()

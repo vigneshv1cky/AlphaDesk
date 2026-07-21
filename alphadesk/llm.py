@@ -98,11 +98,11 @@ _ladder_until: dict[str, float] = {}   # role → downgraded-until timestamp
 _ladder_level: dict[str, int] = {}     # role → current TIERS index while downgraded
 _breaker_until: float = 0.0
 
-# token sink: fn(role, model, input_tokens, output_tokens, decision_id)
-_token_sink: Optional[Callable[[str, str, int, int, Optional[str]], None]] = None
+# token sink: fn(role, model, input_tokens, output_tokens, decision_id, source)
+_token_sink: Optional[Callable[[str, str, int, int, Optional[str], Optional[str]], None]] = None
 
 
-def set_token_sink(fn: Callable[[str, str, int, int, Optional[str]], None]) -> None:
+def set_token_sink(fn: Callable[[str, str, int, int, Optional[str], Optional[str]], None]) -> None:
     global _token_sink
     _token_sink = fn
 
@@ -277,6 +277,7 @@ def call_role(
     decision_id: str | None = None,
     tools: list[str] | None = None,
     max_turns: int = 1,
+    source: str | None = None,
 ) -> dict:
     """Blocking, validated, guarded LLM call. Call from an executor thread.
 
@@ -311,7 +312,7 @@ def call_role(
 
         if _token_sink:
             try:
-                _token_sink(role, model + ("(downgraded)" if downgraded else ""), tin, tout, decision_id)
+                _token_sink(role, model + ("(downgraded)" if downgraded else ""), tin, tout, decision_id, source)
             except Exception:
                 log.debug("token sink failed", exc_info=True)
 

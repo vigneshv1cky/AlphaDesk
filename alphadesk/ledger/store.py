@@ -106,8 +106,21 @@ CREATE TABLE IF NOT EXISTS token_usage (
     model       TEXT NOT NULL,
     input_tok   INTEGER NOT NULL,
     output_tok  INTEGER NOT NULL,
-    decision_id TEXT
+    decision_id TEXT,
+    source      TEXT             -- ingestion source this call served (FINANCIAL|EARNINGS|WORLD|SPILLOVER); NULL = cross-source
 );
+
+-- Per-run ingestion volume by source: how many articles came in from where, and
+-- how many became candidates. Joined with token_usage.source + picks.source for
+-- the source scorecard (cost + volume + value per ingestion channel).
+CREATE TABLE IF NOT EXISTS ingest_stats (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts         TEXT NOT NULL,
+    source     TEXT NOT NULL,     -- FINANCIAL | EARNINGS | WORLD | SPILLOVER
+    articles   INTEGER DEFAULT 0,
+    candidates INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_ingest_ts ON ingest_stats (ts);
 
 -- Scout skips, graded forward for missed moves (anti-survivorship). A skip has
 -- no direction, so 'missed' = a large |move vs SPY| we chose not to even look at.
@@ -187,11 +200,16 @@ def init() -> None:
         except sqlite3.OperationalError:
             pass  # already migrated
         for col, decl in (("plan_entry", "REAL"), ("plan_target", "REAL"),
-                          ("plan_stop", "REAL"), ("plan_note", "TEXT")):
+                          ("plan_stop", "REAL"), ("plan_note", "TEXT"),
+                          ("source", "TEXT"), ("decision_id", "TEXT")):
             try:
                 conn.execute(f"ALTER TABLE picks ADD COLUMN {col} {decl}")
             except sqlite3.OperationalError:
                 pass  # already migrated
+        try:
+            conn.execute("ALTER TABLE token_usage ADD COLUMN source TEXT")
+        except sqlite3.OperationalError:
+            pass  # already migrated
 
 
 def _now() -> str:
@@ -357,12 +375,68 @@ def funnel_add(ingested: int, candidates: int, picked: int, skipped: int,
         )
 
 
-def token_sink(role: str, model: str, tin: int, tout: int, decision_id: str | None) -> None:
+def token_sink(role: str, model: str, tin: int, tout: int,
+               decision_id: str | None, source: str | None = None) -> None:
     with _lock, _connect() as conn:
         conn.execute(
-            "INSERT INTO token_usage (ts, role, model, input_tok, output_tok, decision_id)"
-            " VALUES (?,?,?,?,?,?)", (_now(), role, model, tin, tout, decision_id),
+            "INSERT INTO token_usage (ts, role, model, input_tok, output_tok, decision_id, source)"
+            " VALUES (?,?,?,?,?,?,?)", (_now(), role, model, tin, tout, decision_id, source),
         )
+
+
+def record_ingest(source: str, articles: int, candidates: int) -> None:
+    """One row per source per run: articles in → candidates out. Feeds the source
+    scorecard's volume column."""
+    with _lock, _connect() as conn:
+        conn.execute(
+            "INSERT INTO ingest_stats (ts, source, articles, candidates) VALUES (?,?,?,?)",
+            (_now(), source.upper(), int(articles), int(candidates)),
+        )
+
+
+def source_scorecard(days: int = 30) -> list[dict]:
+    """Per ingestion source: volume (articles/candidates), cost (ingestion +
+    debate tokens), and value (picks/taken/graded/avg alpha). Answers which
+    channel earns its tokens. 'shared' bucket = cross-source calls (scout, head)."""
+    since = f"-{int(days)} day"
+    with _connect() as conn:
+        vol = {r["source"]: dict(r) for r in conn.execute(
+            "SELECT source, sum(articles) AS articles, sum(candidates) AS candidates"
+            " FROM ingest_stats WHERE ts >= datetime('now', ?) GROUP BY source", (since,))}
+        # ingestion tokens: tagged directly on the call
+        ing_tok = {r["source"]: r["tok"] for r in conn.execute(
+            "SELECT source, sum(input_tok + output_tok) AS tok FROM token_usage"
+            " WHERE source IS NOT NULL AND ts >= datetime('now', ?) GROUP BY source", (since,))}
+        # debate tokens: attributed via the pick's decision_id → its source
+        deb_tok = {r["source"]: r["tok"] for r in conn.execute(
+            "SELECT p.source AS source, sum(t.input_tok + t.output_tok) AS tok"
+            " FROM token_usage t JOIN picks p ON t.decision_id = p.decision_id"
+            " WHERE p.source IS NOT NULL AND t.ts >= datetime('now', ?) GROUP BY p.source", (since,))}
+        val = {r["source"]: dict(r) for r in conn.execute(
+            "SELECT source, count(*) AS picks, sum(taken) AS taken,"
+            " sum(CASE WHEN alpha_net IS NOT NULL THEN 1 ELSE 0 END) AS graded,"
+            " round(avg(alpha_net), 2) AS avg_alpha FROM picks"
+            " WHERE arm='TEAM' AND source IS NOT NULL AND ts >= datetime('now', ?)"
+            " GROUP BY source", (since,))}
+
+    sources = set(vol) | set(ing_tok) | set(deb_tok) | set(val)
+    out = []
+    for s in sources:
+        v, va = vol.get(s, {}), val.get(s, {})
+        out.append({
+            "source": s,
+            "articles": v.get("articles") or 0,
+            "candidates": v.get("candidates") or 0,
+            "ingest_tokens": ing_tok.get(s) or 0,
+            "debate_tokens": deb_tok.get(s) or 0,
+            "tokens": (ing_tok.get(s) or 0) + (deb_tok.get(s) or 0),
+            "picks": va.get("picks") or 0,
+            "taken": va.get("taken") or 0,
+            "graded": va.get("graded") or 0,
+            "avg_alpha": va.get("avg_alpha"),
+        })
+    out.sort(key=lambda r: -r["tokens"])
+    return out
 
 
 def token_summary(days: int = 1) -> list[dict]:

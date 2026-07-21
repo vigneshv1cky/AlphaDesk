@@ -158,6 +158,19 @@ export interface TokenRow {
   output_tok: number
 }
 
+export interface SourceStat {
+  source: string
+  articles: number
+  candidates: number
+  ingest_tokens: number
+  debate_tokens: number
+  tokens: number
+  picks: number
+  taken: number
+  graded: number
+  avg_alpha: number | null
+}
+
 export interface EarningsRow {
   symbol: string
   report_date: string
@@ -182,6 +195,7 @@ export const api = {
   timelines: () => get<{ symbols: SymbolTimeline[]; market: string }>("/api/timelines"),
   stats: () => get<Stats>("/api/stats"),
   tokens: (days = 1) => get<{ usage: TokenRow[] }>(`/api/tokens?days=${days}`),
+  sources: (days = 30) => get<{ sources: SourceStat[] }>(`/api/sources?days=${days}`),
   earnings: () =>
     get<{ upcoming: EarningsRow[]; reported: EarningsRow[] }>("/api/earnings"),
 }

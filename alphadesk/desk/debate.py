@@ -91,6 +91,7 @@ async def deliberate(sym: str, pick: dict, briefs: list[dict], price_ctx: dict |
 
     pick_id = store.record_pick({
         "symbol": sym, "arm": "TEAM", "edge": pick.get("edge_hint"),
+        "source": pick.get("source"), "decision_id": decision_id,
         "trigger_src": trigger_src, "session": sess,
         "direction": booked_dir, "horizon_days": horizon,
         "score": thesis["score"], "adjusted_score": verdict["adjusted_score"],

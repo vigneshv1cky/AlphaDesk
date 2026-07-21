@@ -197,7 +197,7 @@ def assess(headlines: list[dict]) -> list[dict]:
             out = call_role(
                 "enrichment", _WORLD_SYSTEM,
                 "World headlines:\n" + wrap_data("headlines", numbered),
-                schema=_WORLD_SCHEMA,
+                schema=_WORLD_SCHEMA, source="WORLD",
             )
             results = {item["i"]: item for item in out.get("items", [])}
         except LLMError as exc:
