@@ -51,6 +51,12 @@ MODEL_MAP: dict[str, str] = {
 # Connections desk fires only on the top-N most material shocks per run (cost gate)
 EXPOSURE_MAX_SHOCKS = int(os.environ.get("EXPOSURE_MAX_SHOCKS", "2"))
 
+# World-news breadth per Find Trades run. Default = the full 11-category taxonomy
+# every run (deterministic, no rotation blind spots — CONFLICT/ENERGY/etc. always
+# covered). Each category adds ~5s of throttle-spaced fetching; set lower to trade
+# coverage for latency (e.g. WORLD_MAX_CATEGORIES=5). Capped at the taxonomy size.
+WORLD_MAX_CATEGORIES = int(os.environ.get("WORLD_MAX_CATEGORIES", "11"))
+
 for _role in list(MODEL_MAP):
     _override = os.environ.get(f"MODEL_{_role.upper()}")
     if _override:

@@ -30,6 +30,7 @@ from alphadesk.config import (
     MODEL_MAP,
     REPICK_COOLDOWN_HOURS,
     SOLO_ARM_EVERY_N,
+    WORLD_MAX_CATEGORIES,
     session,
 )
 from alphadesk.desk import (
@@ -132,7 +133,7 @@ async def stream_find_trades(hours: float = 48.0, max_debates: int = 6,
     world_syms: set[str] = set()
     if not await _gone():
         try:
-            _, world_cands = await loop.run_in_executor(None, world.poll)
+            _, world_cands = await loop.run_in_executor(None, world.poll, WORLD_MAX_CATEGORIES)
         except Exception as exc:
             world_cands = {}
             log.warning("World-news poll failed: %s", exc)

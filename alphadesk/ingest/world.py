@@ -235,11 +235,13 @@ def poll(categories_per_tick: int = 3) -> tuple[int, dict[str, list[dict]]]:
     """
     global _rotation_idx
     headlines: list[dict] = []
-    for _ in range(categories_per_tick):
+    n_cats = min(categories_per_tick, len(_rotation))  # >taxonomy would just re-fetch
+    for k in range(n_cats):
         category, query = _rotation[_rotation_idx % len(_rotation)]
         _rotation_idx += 1
         headlines.extend(fetch_category(category, query))
-        time.sleep(5.0)  # polite spacing — GDELT 429s under faster polling
+        if k < n_cats - 1:
+            time.sleep(5.0)  # polite spacing between GDELT calls (429s under faster polling)
 
     if not headlines:
         return 0, {}
