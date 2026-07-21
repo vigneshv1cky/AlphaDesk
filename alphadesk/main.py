@@ -81,7 +81,7 @@ async def _serve() -> None:
         actually closes the position instead of only relabeling it in the live view.
         Pure code (a crossed level is a fact); no LLM, no token cost."""
         from alphadesk.config import session as market_session
-        from alphadesk.desk.plan import level_crossed
+        from alphadesk.desk.plan import level_crossed, realized_exit
         from alphadesk.ingest import prices
         from alphadesk.ledger import store
         loop = asyncio.get_running_loop()
@@ -94,7 +94,9 @@ async def _serve() -> None:
                                    if p.get("plan_target") and p.get("plan_stop")]
                     if monitorable:
                         quotes = await loop.run_in_executor(
-                            None, prices.latest_prices, [p["symbol"] for p in monitorable])
+                            None, prices.latest_prices,
+                            [p["symbol"] for p in monitorable] + ["SPY"])
+                        spy_now = quotes.get("SPY")
                         for p in monitorable:
                             cur = quotes.get(p["symbol"].upper())
                             if not cur:
@@ -105,9 +107,16 @@ async def _serve() -> None:
                                 level = p["plan_target"] if hit == "target" else p["plan_stop"]
                                 label = "target hit" if hit == "target" else "stopped out"
                                 reason = f"{label} @ {cur} ({hit} {level})"
-                                await loop.run_in_executor(None, store.record_exit, p["id"], reason)
-                                log.info("Auto-exit #%d %s %s — %s",
-                                         p["id"], p["symbol"], p["direction"], reason)
+                                # freeze realized performance at the exit price
+                                entry = p.get("entry_price") or p.get("plan_entry")
+                                perf = realized_exit(p["direction"], entry, cur,
+                                                     p.get("spy_price"), spy_now)
+                                await loop.run_in_executor(
+                                    None, lambda pid=p["id"], r=reason, pf=perf:
+                                    store.record_exit(pid, r, **pf))
+                                log.info("Auto-exit #%d %s %s — %s (%s%% vs SPY)",
+                                         p["id"], p["symbol"], p["direction"], reason,
+                                         perf.get("exit_alpha"))
             except Exception as exc:
                 log.error("position watch error: %s", exc)
             await asyncio.sleep(180)   # ~3 min; a hit closes the paper position

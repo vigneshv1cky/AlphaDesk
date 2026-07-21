@@ -60,7 +60,10 @@ CREATE TABLE IF NOT EXISTS picks (
     -- position lifecycle: set when the Chief marks TAKE; re-evaluated on later runs
     taken           INTEGER NOT NULL DEFAULT 0,
     exit_ts         TEXT,                          -- early exit stamped by a re-eval
-    exit_reason     TEXT
+    exit_reason     TEXT,
+    exit_price      REAL,                          -- price at exit (target/stop hit or review)
+    exit_return_pct REAL,                          -- realized return entry→exit (direction-aware)
+    exit_alpha      REAL                           -- realized alpha vs SPY over the hold, net friction
 );
 CREATE INDEX IF NOT EXISTS idx_picks_ts ON picks (ts);
 CREATE INDEX IF NOT EXISTS idx_picks_symbol ON picks (symbol);
@@ -168,7 +171,9 @@ def init() -> None:
         conn.executescript(_SCHEMA)
         # idempotent migrations for pre-existing DBs (no-op once the column exists)
         for col, decl in (("taken", "INTEGER NOT NULL DEFAULT 0"),
-                          ("exit_ts", "TEXT"), ("exit_reason", "TEXT")):
+                          ("exit_ts", "TEXT"), ("exit_reason", "TEXT"),
+                          ("exit_price", "REAL"), ("exit_return_pct", "REAL"),
+                          ("exit_alpha", "REAL")):
             try:
                 conn.execute(f"ALTER TABLE picks ADD COLUMN {col} {decl}")
             except sqlite3.OperationalError:
@@ -432,7 +437,7 @@ def open_taken_picks() -> list[dict]:
     with _connect() as conn:
         rows = conn.execute(
             "SELECT id, ts, symbol, direction, horizon_days, adjusted_score, confidence,"
-            " edge, thesis, entry_price, triage_reason FROM picks"
+            " edge, thesis, entry_price, spy_price, plan_entry, triage_reason FROM picks"
             " WHERE taken=1 AND exit_ts IS NULL AND graded_at IS NULL"
             "   AND datetime(ts, '+' || (horizon_days + 3) || ' days') >= datetime('now')"
             " ORDER BY id DESC",
@@ -447,7 +452,8 @@ def recent_team_picks(days: int = 30) -> list[dict]:
         rows = conn.execute(
             "SELECT id, ts, symbol, direction, horizon_days, edge, verdict, approved,"
             " adjusted_score, confidence, plan_entry, plan_target, plan_stop, plan_note,"
-            " entry_price, spy_price, alpha_net, ret_horizon, graded_at, exit_ts, exit_reason"
+            " entry_price, spy_price, alpha_net, ret_horizon, graded_at, exit_ts, exit_reason,"
+            " exit_price, exit_return_pct, exit_alpha"
             " FROM picks WHERE arm='TEAM' AND ts >= datetime('now', ?)"
             " ORDER BY symbol, id", (f"-{int(days)} days",),
         ).fetchall()
@@ -460,7 +466,7 @@ def live_picks() -> list[dict]:
     with _connect() as conn:
         rows = conn.execute(
             "SELECT id, ts, symbol, direction, horizon_days, session, edge, verdict,"
-            " approved, adjusted_score, confidence, taken, spy_price,"
+            " approved, adjusted_score, confidence, taken, spy_price, entry_price,"
             " plan_entry, plan_target, plan_stop, plan_note FROM picks"
             " WHERE arm='TEAM' AND plan_entry IS NOT NULL"
             "   AND graded_at IS NULL AND exit_ts IS NULL"
@@ -470,11 +476,17 @@ def live_picks() -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def record_exit(pick_id: int, reason: str) -> None:
-    """Stamp an early exit issued by a position re-evaluation."""
+def record_exit(pick_id: int, reason: str, exit_price: float | None = None,
+                exit_return_pct: float | None = None,
+                exit_alpha: float | None = None) -> None:
+    """Stamp an early exit (a target/stop hit or a review) WITH its realized
+    performance at the exit price. Distinct from the horizon grade (alpha_net),
+    which still settles at the declared horizon and measures the call's edge."""
     with _lock, _connect() as conn:
-        conn.execute("UPDATE picks SET exit_ts=?, exit_reason=? WHERE id=?",
-                     (_now(), reason, int(pick_id)))
+        conn.execute(
+            "UPDATE picks SET exit_ts=?, exit_reason=?, exit_price=?,"
+            " exit_return_pct=?, exit_alpha=? WHERE id=?",
+            (_now(), reason, exit_price, exit_return_pct, exit_alpha, int(pick_id)))
 
 
 def record_skips(skips: list[dict], cap: int = 30) -> None:

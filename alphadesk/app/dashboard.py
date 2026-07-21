@@ -145,15 +145,10 @@ def api_earnings():
 def _alpha_so_far(direction: str, stock_then, cur, spy_then, spy_now):
     """Interim (unofficial) alpha: your return so far minus SPY over the SAME
     elapsed window, net of round-trip friction. None if a baseline is missing.
-    This is a live mark, NOT the ledger grade (which settles only at the horizon)."""
-    from alphadesk.config import FRICTION_BPS_PER_SIDE
-    if not (stock_then and cur and spy_then and spy_now):
-        return None
-    sign = 1.0 if direction == "LONG" else -1.0
-    stock_ret = sign * (cur - stock_then) / stock_then * 100
-    spy_ret = sign * (spy_now - spy_then) / spy_then * 100
-    friction = 2 * FRICTION_BPS_PER_SIDE / 100.0
-    return round(stock_ret - spy_ret - friction, 2)
+    This is a live mark, NOT the ledger grade (which settles only at the horizon).
+    Same math the exit stamp freezes (plan.realized_exit) — one definition."""
+    from alphadesk.desk.plan import realized_exit
+    return realized_exit(direction, stock_then, cur, spy_then, spy_now)["exit_alpha"]
 
 
 @app.get("/api/live")

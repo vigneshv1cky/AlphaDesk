@@ -50,7 +50,22 @@ function Outcome({ e }: { e: TimelineEvent }) {
     )
   }
   if (e.state === "exited") {
-    return <span className="text-xs font-medium text-amber-600 dark:text-amber-400">Exited</span>
+    // realized performance frozen at the exit price (vs S&P, net friction) —
+    // distinct from the horizon grade; fall back to raw return, then bare label
+    const ex = e.exit_alpha ?? e.exit_return_pct
+    return (
+      <span className="text-right">
+        <span className="text-xs font-medium text-amber-600 dark:text-amber-400">Exited</span>
+        {ex != null && (
+          <span className={`ml-1.5 font-mono text-sm font-semibold tabular-nums ${ex > 0 ? "text-emerald-500" : "text-red-500"}`}>
+            {fmtAlpha(ex)}{" "}
+            <span className="text-[10px] font-normal text-muted-foreground">
+              {e.exit_alpha != null ? "vs S&P" : "ret"}
+            </span>
+          </span>
+        )}
+      </span>
+    )
   }
   if (e.pnl_pct != null) {
     const pos = e.pnl_pct >= 0

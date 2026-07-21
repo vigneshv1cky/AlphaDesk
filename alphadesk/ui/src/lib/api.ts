@@ -115,6 +115,9 @@ export interface TimelineEvent {
   graded_at: string | null
   exit_ts: string | null
   exit_reason: string | null
+  exit_price: number | null
+  exit_return_pct: number | null // realized return entry→exit (direction-aware)
+  exit_alpha: number | null // realized alpha vs SPY over the hold, net friction
   state: "open" | "graded" | "exited"
   current: number | null
   pnl_pct: number | null

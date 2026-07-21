@@ -41,6 +41,7 @@ from alphadesk.desk import (
     loner,
     news_check,
     notes,
+    plan,
     review,
     scout,
     team,
@@ -169,7 +170,15 @@ async def stream_find_trades(hours: float = 48.0, max_debates: int = 6,
             verdict = await loop.run_in_executor(
                 None, review.review_position, pos, pctx, fresh, f"reeval-{pos['id']}")
             if verdict["decision"] == "EXIT":
-                await loop.run_in_executor(None, store.record_exit, pos["id"], verdict["reason"])
+                # freeze realized performance at the exit price (same math as the
+                # target/stop watcher — distinct from the horizon grade)
+                exit_px = (pctx or {}).get("last_price")
+                spy_now = (prices.get_context("SPY") or {}).get("last_price")
+                entry = pos.get("entry_price") or pos.get("plan_entry")
+                perf = plan.realized_exit(pos["direction"], entry, exit_px,
+                                          pos.get("spy_price"), spy_now)
+                await loop.run_in_executor(
+                    None, lambda: store.record_exit(pos["id"], verdict["reason"], **perf))
                 yield _ev("position_exit", id=pos["id"], symbol=psym, direction=pos["direction"],
                           horizon_days=pos["horizon_days"], entry=pos.get("entry_price"),
                           now=(pctx or {}).get("last_price"), reason=verdict["reason"])

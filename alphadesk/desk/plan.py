@@ -62,6 +62,28 @@ def _coherent(direction: str, entry: float, target: float, stop: float,
     return True
 
 
+def realized_exit(direction: str, entry, exit_price, spy_then, spy_now) -> dict:
+    """Realized performance of a position closed at exit_price: raw return
+    (direction-aware) and alpha vs SPY over the SAME holding window, net of
+    round-trip friction. Fields are None when a baseline is missing. Frozen at the
+    exit — distinct from the horizon grade (alpha_net), which still settles at the
+    declared horizon and measures the CALL's edge regardless of when we got out.
+    This is the ONE definition the live mark, the exit stamp, and the UI share."""
+    from alphadesk.config import FRICTION_BPS_PER_SIDE
+    out: dict = {"exit_price": round(float(exit_price), 4) if exit_price else None,
+                 "exit_return_pct": None, "exit_alpha": None}
+    if not (entry and exit_price):
+        return out
+    sign = 1.0 if direction == "LONG" else -1.0
+    ret = sign * (exit_price - entry) / entry * 100
+    out["exit_return_pct"] = round(ret, 3)
+    if spy_then and spy_now:
+        spy_ret = sign * (spy_now - spy_then) / spy_then * 100
+        friction = 2 * FRICTION_BPS_PER_SIDE / 100.0
+        out["exit_alpha"] = round(ret - spy_ret - friction, 3)
+    return out
+
+
 def level_crossed(direction: str, price: float, target: float, stop: float) -> str | None:
     """Which committed plan level the current price has reached, if any: 'target',
     'stop', or None. Pure arithmetic — a crossed level is a FACT that both the live
