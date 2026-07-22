@@ -149,6 +149,61 @@ function CoverageSummary({ reported }: { reported: EarningsRow[] }) {
   )
 }
 
+function whyText(e: EarningsRow): string {
+  if (e.engagement === "UNSEEN")
+    return "Not surfaced — the desk didn't run after this reported, or it wasn't in that run's news/earnings window."
+  return e.engagement_why || "(no reason recorded)"
+}
+
+// A reporter row that expands to show WHY the desk acted as it did (its own
+// stored reasoning: judge summary / thesis for takes & debates, the scout's
+// reason for skips, or the coverage-gap note for unseen).
+function ReportedRow({ e }: { e: EarningsRow }) {
+  const [open, setOpen] = useState(false)
+  const move = e.move_since_report_pct
+  const has = move != null
+  const up = (move ?? 0) >= 0
+  const took = e.engagement === "TOOK" || e.engagement === "DEBATED"
+  return (
+    <li className="text-sm">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 py-1.5 text-left transition-colors hover:bg-muted/30"
+      >
+        <span className="w-16 font-semibold">{e.symbol}</span>
+        <span className="w-14 text-xs text-muted-foreground">{fmtCap(e.market_cap)}</span>
+        <span className="w-10 text-xs text-muted-foreground">{e.session}</span>
+        <span className="w-20">
+          <EngBadge state={e.engagement} />
+        </span>
+        <span
+          className={`ml-auto font-mono tabular-nums ${
+            has ? (up ? "text-emerald-500" : "text-red-500") : "text-muted-foreground"
+          }`}
+        >
+          {has ? `${up ? "+" : ""}${move}%` : "—"}
+        </span>
+        <ChevronDown
+          className={`h-3.5 w-3.5 shrink-0 text-muted-foreground/40 transition-transform ${
+            open ? "" : "-rotate-90"
+          }`}
+        />
+      </button>
+      {open && (
+        <div className="mb-1.5 ml-16 mr-6 rounded-md bg-muted/40 px-2.5 py-2 text-xs leading-relaxed text-muted-foreground">
+          {took && e.engagement_dir && (
+            <span className="mr-1 font-medium text-foreground">
+              {e.engagement_dir === "LONG" ? "Long" : "Short"}
+              {e.engagement_verdict ? ` · ${e.engagement_verdict}` : ""}:
+            </span>
+          )}
+          {whyText(e)}
+        </div>
+      )}
+    </li>
+  )
+}
+
 // One run-day group in "Reporting soon" — shows the biggest 8, with the rest
 // expandable/collapsible via the "+N more / show less" toggle.
 function RunGroup({ g }: { g: DayGroup }) {
@@ -226,33 +281,9 @@ export function Earnings({
                   <span className="text-[11px] text-muted-foreground">{g.rows.length} names</span>
                 </div>
                 <ul className="divide-y divide-border">
-                  {g.rows.map((e) => {
-                    const move = e.move_since_report_pct
-                    const has = move != null
-                    const up = (move ?? 0) >= 0
-                    return (
-                      <li
-                        key={e.symbol + e.report_date}
-                        className="flex items-center gap-2 py-1.5 text-sm"
-                      >
-                        <span className="w-16 font-semibold">{e.symbol}</span>
-                        <span className="w-14 text-xs text-muted-foreground">
-                          {fmtCap(e.market_cap)}
-                        </span>
-                        <span className="w-10 text-xs text-muted-foreground">{e.session}</span>
-                        <span className="w-20">
-                          <EngBadge state={e.engagement} />
-                        </span>
-                        <span
-                          className={`ml-auto font-mono tabular-nums ${
-                            has ? (up ? "text-emerald-500" : "text-red-500") : "text-muted-foreground"
-                          }`}
-                        >
-                          {has ? `${up ? "+" : ""}${move}%` : "—"}
-                        </span>
-                      </li>
-                    )
-                  })}
+                  {g.rows.map((e) => (
+                    <ReportedRow key={e.symbol + e.report_date} e={e} />
+                  ))}
                 </ul>
               </div>
             ))}

@@ -704,8 +704,8 @@ def earnings_engagement(symbols: list[str], days_back: int = 6) -> dict[str, dic
     ph = ",".join("?" for _ in syms)
     with _connect() as conn:
         picks = conn.execute(
-            f"SELECT symbol, id, direction, taken, alpha_net, ts FROM picks"
-            f" WHERE arm='TEAM' AND symbol IN ({ph}) AND ts >= datetime('now', ?)"
+            f"SELECT symbol, id, direction, taken, alpha_net, verdict, thesis, debate, ts"
+            f" FROM picks WHERE arm='TEAM' AND symbol IN ({ph}) AND ts >= datetime('now', ?)"
             " ORDER BY ts DESC", (*syms, f"-{int(days_back)} days"),
         ).fetchall()
         skips = conn.execute(
@@ -716,12 +716,21 @@ def earnings_engagement(symbols: list[str], days_back: int = 6) -> dict[str, dic
     out: dict[str, dict] = {}
     for r in picks:                         # newest pick per symbol wins
         s = r["symbol"].upper()
-        out.setdefault(s, {
+        if s in out:
+            continue
+        why = ""                            # the judge's summary, else the thesis
+        try:
+            why = (json.loads(r["debate"] or "{}") or {}).get("arbiter_summary") or ""
+        except (ValueError, TypeError):
+            why = ""
+        why = (why or r["thesis"] or "").strip()[:500]
+        out[s] = {
             "state": "TOOK" if r["taken"] else "DEBATED", "ts": r["ts"],
-            "direction": r["direction"], "pick_id": r["id"], "alpha_net": r["alpha_net"]})
+            "direction": r["direction"], "pick_id": r["id"], "verdict": r["verdict"],
+            "alpha_net": r["alpha_net"], "why": why}
     for r in skips:                         # only if the desk never debated it
         s = r["symbol"].upper()
-        out.setdefault(s, {"state": "SKIPPED", "ts": r["ts"], "reason": r["reason"]})
+        out.setdefault(s, {"state": "SKIPPED", "ts": r["ts"], "why": (r["reason"] or "").strip()})
     return out
 
 

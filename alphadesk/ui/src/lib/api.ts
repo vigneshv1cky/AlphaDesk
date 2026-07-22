@@ -185,6 +185,8 @@ export interface EarningsRow {
   engagement?: "TOOK" | "DEBATED" | "SKIPPED" | "UNSEEN"
   engagement_pick_id?: number | null
   engagement_dir?: "LONG" | "SHORT" | null
+  engagement_verdict?: string | null // STRONG | SOFT | PASS (for took/debated)
+  engagement_why?: string | null // the desk's own reason: judge summary / thesis / skip reason
 }
 
 async function get<T>(path: string): Promise<T> {

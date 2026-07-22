@@ -174,6 +174,8 @@ def api_earnings():
             e["engagement"] = m["state"]
             e["engagement_pick_id"] = m.get("pick_id")
             e["engagement_dir"] = m.get("direction")
+            e["engagement_verdict"] = m.get("verdict")
+            e["engagement_why"] = m.get("why")
         else:
             e["engagement"] = "UNSEEN"     # never surfaced (or only picked pre-report)
     return {"upcoming": upcoming, "reported": reported}
