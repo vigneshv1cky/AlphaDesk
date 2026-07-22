@@ -5,8 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 **AlphaDesk** — a predictive multi-agent stock research engine. You trigger a run
-("Find Trades"); it reads a wide window of world + financial news, a **team** of
-specialized LLM agents debates the best opportunities live, a **Head** ranks
+("Find Trades"); it reads a wide window of financial news + earnings (world news
+optional, off by default), a **team** of specialized LLM agents debates the best
+opportunities live, a **Head** ranks
 them head-to-head, and every call is written to a self-grading ledger that scores
 itself forward against reality. **Research / paper only — no order execution.**
 
@@ -82,8 +83,9 @@ Tech debt):
 ### Pipeline
 
 ```
-Polygon (financial) + GDELT (world, 11-cat) + Alpaca/yfinance (price context)
+Polygon (financial news) + earnings drift + Alpaca/yfinance (price context)
         │  candidates (symbol → enriched articles)
+        │  [+ GDELT world news if WORLD_MAX_CATEGORIES>0 — OFF by default]
    [Connections desk]  (expose=true) shock → 1 web-grounded opus call → spillover candidates
         │
    SCOUT (sonnet)  ── picks ≤5, reasons for every pick AND skip
@@ -128,7 +130,8 @@ alphadesk/
   llm.py               the guarded call stack — every LLM call goes here
   ingest/
     news.py            Polygon poll → Haiku enrichment → candidates
-    world.py           GDELT world-news (11-category taxonomy, action-over-talk gradient)
+    world.py           GDELT world-news (11-cat taxonomy) — OFF by default in Find Trades
+                       (WORLD_MAX_CATEGORIES=0); still used by the scheduler + `world` CLI
     prices.py          lazy per-symbol context — NO triggers, NO universe sweeps
   desk/
     stream.py          on-demand "Find Trades" SSE flow (v2 primary path)
@@ -163,6 +166,7 @@ ADMIN_USERNAME=admin          # dashboard Basic Auth (fail-closed if unset)
 ADMIN_PASSWORD=...
 ALPHADESK_DATA=~/.alphadesk   # ledger.db, universe.json, relationship cache
 SOLO_ARM_EVERY_N=0            # 0=off (lean default); set e.g. 6 to measure committee-vs-solo
+WORLD_MAX_CATEGORIES=0        # GDELT world news in Find Trades: 0=off (default); 4=full sweep every ~3 runs; 11=every run (slow)
 ```
 
 ## Key design notes

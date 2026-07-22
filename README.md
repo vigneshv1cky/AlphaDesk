@@ -1,9 +1,10 @@
 # AlphaDesk
 
 A predictive **multi-agent stock research engine**. You trigger a run; it reads a wide
-window of world + financial news, a **team** of specialized LLM agents debates the best
-opportunities live, a **Head** ranks them head-to-head, and every call is written
-to a self-grading ledger that scores itself forward against reality.
+window of financial news + earnings (world news optional, off by default), a **team** of
+specialized LLM agents debates the best opportunities live, a **Head** ranks them
+head-to-head, and every call is written to a self-grading ledger that scores itself
+forward against reality.
 
 **Research / paper only — no order execution.** All LLM calls run on a **Claude Max
 subscription** via `claude-agent-sdk` (the bundled Claude Code CLI) — no API keys, no
@@ -70,8 +71,9 @@ pass of the pipeline. Both entry points share the same debate core (`desk/debate
 they can't drift apart.
 
 ```
-Polygon (financial news) + GDELT (world news, 11-category) + Alpaca/yfinance (price context)
+Polygon (financial news) + earnings drift + Alpaca/yfinance (price context)
         │  candidates: symbol → enriched articles
+        │  GDELT world news is OFF by default (set WORLD_MAX_CATEGORIES>0 to enable)
         │
    [Position review]  re-check every still-open pick FIRST → HOLD / EXIT      (opus)
         │
@@ -276,6 +278,7 @@ ALPHADESK_DATA=~/.alphadesk   # ledger.db, universe cache, enrichment cache
 
 ```ini
 SOLO_ARM_EVERY_N=0            # 0=off; set e.g. 6 to accumulate team-vs-loner comparisons
+WORLD_MAX_CATEGORIES=0        # GDELT world news in Find Trades: 0=off (default); 4=full sweep every ~3 runs; 11=every run
 EXPOSURE_MAX_SHOCKS=2         # how many top shocks the Connections desk web-maps per run
 REPICK_COOLDOWN_HOURS=24      # don't re-debate the same name/story within this window
 LLM_MAX_CONCURRENCY=4         # cap on concurrent Claude CLI subprocesses (memory)
@@ -298,7 +301,8 @@ alphadesk/
   llm.py               the guarded call stack — every LLM call goes through call_role
   ingest/
     news.py            Polygon poll → haiku enrichment → candidates
-    world.py           GDELT world-news (11-category taxonomy)
+    world.py           GDELT world-news (11-cat taxonomy) — OFF by default in Find Trades
+                       (WORLD_MAX_CATEGORIES=0); still used by the scheduler + `world` CLI
     prices.py          lazy per-symbol price context — no triggers, no universe sweeps
     earnings.py        earnings calendar + post-earnings-drift candidate source
   desk/

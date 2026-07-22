@@ -139,14 +139,13 @@ async def stream_find_trades(hours: float = 48.0, max_debates: int = 6,
         yield _ev("status", msg=f"{len(drift)} name(s) reported in the last "
                                 f"{EARNINGS_DRIFT_DAYS}d — added as post-earnings-drift candidates.")
 
-    # World-news desk — another CANDIDATE SOURCE parallel to the financial-news
-    # scan: GDELT surfaces geopolitical / supply / policy shocks (Iran, tariffs,
-    # port strikes, export bans) that Polygon's company-centric feed misses,
-    # mapped to exposed tradable names as HYPOTHESES the team must verify. Merged
-    # into the SAME pool so they flow through scout → team. Fail-open — a GDELT
-    # outage or 429 just yields nothing. Tracked in world_syms so these surfaced
-    # names get scout-window priority (like ripple candidates) and aren't
-    # truncated out by the window cap below.
+    # World-news desk — OFF by default (WORLD_MAX_CATEGORIES=0): GDELT 429-throttles
+    # hard and its enrichment dominated run time, and the button flow ran fine on
+    # financial news + earnings alone. When enabled (>0), it's a CANDIDATE SOURCE
+    # parallel to the financial-news scan: GDELT surfaces geopolitical / supply /
+    # policy shocks that Polygon's company-centric feed misses, mapped to exposed
+    # tradable names as HYPOTHESES the team must verify, merged into the SAME pool.
+    # Fail-open; tracked in world_syms for scout-window priority (like ripples).
     world_syms: set[str] = set()
     if WORLD_MAX_CATEGORIES > 0 and not await _gone():
         world_events = 0

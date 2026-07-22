@@ -1,5 +1,11 @@
 """GDELT world-news layer — the engine's global eyes.
 
+STATUS: OFF by default in the Find Trades flow (config.WORLD_MAX_CATEGORIES=0) —
+GDELT 429-throttles hard and its enrichment dominated run time, and the button
+flow historically ran fine on financial news + earnings alone. Still wired for
+the legacy 24/7 scheduler and the `world` CLI; re-enable in Find Trades by
+setting WORLD_MAX_CATEGORIES>0.
+
 GDELT DOC 2.0 API: free, no key, ~15-min freshness, 100+ languages machine-
 translated — local/foreign press hours before English financial media.
 
