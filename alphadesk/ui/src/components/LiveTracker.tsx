@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { api, exitDate, groupByDayKey, type LivePick } from "@/lib/api"
+import { api, etDateTime, exitDate, groupByDayKey, type LivePick } from "@/lib/api"
 import { dirUp, dirWord, plainEdge } from "@/lib/plain"
 import { InfoTip } from "@/components/InfoTip"
 import { Card } from "@/components/ui/card"
@@ -147,7 +147,7 @@ export function LiveTracker() {
 
             <div className="mt-1.5 flex flex-wrap items-center gap-x-2 text-[11px] text-muted-foreground">
               <span>
-                hold ~{p.horizon_days}d · through {exitDate(p.ts, p.session, p.horizon_days)}
+                entered {etDateTime(p.ts)} · hold ~{p.horizon_days}d · through {exitDate(p.ts, p.session, p.horizon_days)}
               </span>
               {p.alpha_so_far != null && (
                 <InfoTip
