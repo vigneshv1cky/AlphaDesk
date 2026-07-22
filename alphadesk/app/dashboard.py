@@ -170,7 +170,13 @@ def api_earnings():
     # decision — so a pre-report pick doesn't count as catching the drift.
     eng = store.earnings_engagement([e["symbol"] for e in reported])
     for e in reported:
-        e["move_since_report_pct"] = moves.get(e["symbol"])
+        # Split the reaction: the overnight gap is uncapturable (repriced before you
+        # could act), the drift-from-open is what was actually tradeable. The miss
+        # verdict keys on the DRIFT so a pure-gap reprice isn't flagged as a miss.
+        mv = moves.get(e["symbol"])   # {"total","gap","drift"} or None
+        e["move_since_report_pct"] = mv["total"] if mv else None
+        e["move_gap_pct"] = mv["gap"] if mv else None
+        e["move_drift_pct"] = mv["drift"] if mv else None
         m = eng.get(e["symbol"].upper())
         if m and (m.get("ts") or "")[:10] >= e["report_date"][:10]:
             e["engagement"] = m["state"]

@@ -189,21 +189,24 @@ def drift_candidates(days: int) -> dict[str, list[dict]]:
     for e in reporters:
         esym = e["symbol"]
         surp = e.get("surprise_pct")
-        mv = moved.get(esym)
+        mv = moved.get(esym)   # {"total","gap","drift"} or None
+        drift = mv["drift"] if mv else None   # capturable move from the open (excl. gap)
         if surp is not None:
             verdict = "beat" if surp > 0 else ("miss" if surp < 0 else "in-line")
             eps_txt = f"EPS {e.get('eps_actual')} vs est {e.get('eps_estimate')} — {verdict} {surp}%"
         else:
             verdict = "reaction pending"
             eps_txt = f"EPS est {e.get('eps_estimate')} — actual not yet released (drift from reaction)"
-        mv_txt = f"; moved {mv:+.1f}% since (reaction so far)" if mv is not None else ""
-        mv_note = (f" Price has moved {mv:+.1f}% since the report went public — "
-                   "that reaction is the direction/‘how much is left’ signal." if mv is not None else "")
-        # Sentiment: prefer the confirmed surprise; else read the price REACTION.
+        # The CAPTURABLE drift (from the open) is the tradeable direction/how-much-is-left
+        # signal — the overnight gap is shown as context but excluded (uncapturable).
+        mv_txt = f"; drift {drift:+.1f}% from open ({mv['gap']:+.1f}% gap excluded)" if mv else ""
+        mv_note = (f" Since the report: {mv['gap']:+.1f}% gap (uncapturable), then {drift:+.1f}% "
+                   "drift from the open — the drift is the tradeable signal." if mv else "")
+        # Sentiment: prefer the confirmed surprise; else read the capturable drift.
         if surp is not None:
             sent = round(max(-1.0, min(1.0, surp / 10.0)), 3)
-        elif mv is not None:
-            sent = round(max(-1.0, min(1.0, mv / 5.0)), 3)
+        elif drift is not None:
+            sent = round(max(-1.0, min(1.0, drift / 5.0)), 3)
         else:
             sent = 0.0
         out[esym] = [{

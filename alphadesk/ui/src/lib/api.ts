@@ -178,7 +178,9 @@ export interface EarningsRow {
   eps_estimate: number | null
   eps_actual?: number | null
   surprise_pct?: number | null
-  move_since_report_pct?: number | null // % price move since the report went public (the drift so far)
+  move_since_report_pct?: number | null // total reaction since the report (gap + drift)
+  move_gap_pct?: number | null // the overnight/pre-market gap — repriced before you could act (uncapturable)
+  move_drift_pct?: number | null // capturable drift from the first post-report open — what you could trade
   market_cap?: number | null // for ranking big names first within a run-day
   run_at?: string | null // when to run the desk to catch the drift (9:30 ET, next session)
   // coverage self-assessment (reported names only): did the desk act on this reporter?

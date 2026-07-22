@@ -268,13 +268,17 @@ def get_options_context(symbol: str) -> Optional[dict]:
 _earn_move_cache: dict[str, Any] = {"ts": 0.0, "key": None, "data": {}}
 
 
-def moves_since_report(items: list[dict], ttl: int = 300) -> dict[str, Optional[float]]:
-    """% price move since each name's earnings went public — the real drift, a hard
-    price fact (no EPS-basis ambiguity). Baseline is the last close BEFORE the report
-    was public (session-aware: AMC → report-day close; BMO/other → prior close);
-    current is the latest close. One batched yfinance download for all names, cached.
-
-    items: [{symbol, report_date, session}]. Returns {symbol: pct move | None}.
+def moves_since_report(items: list[dict], ttl: int = 300) -> dict[str, Optional[dict]]:
+    """Price move since each name's earnings went public, SPLIT into the uncapturable
+    overnight gap and the capturable drift — so a pure-gap reprice isn't mistaken for
+    tradeable drift (the same gap-vs-open lesson as the entry-price fix). One batched
+    yfinance download, cached. Returns {symbol: {"total","gap","drift"} | None}:
+      • total = pre-report close → latest close (the full reaction, gap + drift)
+      • gap   = pre-report close → first post-report OPEN (repriced before you could act)
+      • drift = first post-report open → latest close (what you could actually trade)
+    Session-aware: BMO → prior close & report-day open; AMC → report-day close & next
+    open; DAY → report-day open (intraday report, no clean overnight gap → gap 0).
+    None when no post-report session has traded yet (not measurable).
     """
     import pandas as pd
 
@@ -286,7 +290,7 @@ def moves_since_report(items: list[dict], ttl: int = 300) -> dict[str, Optional[
             return c["data"]
 
     syms = sorted({i["symbol"] for i in items})
-    out: dict[str, Optional[float]] = {s: None for s in syms}
+    out: dict[str, Optional[dict]] = {s: None for s in syms}
     if syms:
         try:
             import yfinance as yf
@@ -297,24 +301,42 @@ def moves_since_report(items: list[dict], ttl: int = 300) -> dict[str, Optional[
                 try:
                     sub = df[sym] if len(syms) > 1 else df
                     closes = sub["Close"].dropna()
+                    opens = sub["Open"]
                     if closes.empty:
                         continue
-                    days = closes.index.normalize()
+                    idx = closes.index
+                    days = idx.normalize()
                     rdts = pd.Timestamp(rd).normalize()
-                    mask = (days <= rdts) if sess == "AMC" else (days < rdts)
-                    base_days = closes.index[mask]
-                    if len(base_days) == 0:
-                        continue
-                    base_day = base_days[-1]
-                    # No regular session has traded since the report's baseline (e.g.
-                    # an AMC report today — the drift only starts NEXT session). The
-                    # move isn't measurable yet: leave it None (shown as "—"), never a
-                    # misleading 0%.
-                    if closes.index[-1].normalize() <= base_day.normalize():
-                        continue
-                    base = float(closes.loc[base_day])
                     cur = float(closes.iloc[-1])
-                    out[sym] = round((cur - base) / base * 100, 2) if base else None
+                    if sess == "DAY":
+                        # intraday report — no clean overnight gap; measure from the
+                        # report-day open, all capturable.
+                        on_after = idx[days >= rdts]
+                        if len(on_after) == 0 or idx[-1].normalize() < on_after[0].normalize():
+                            continue
+                        post_open = float(opens.loc[on_after[0]])
+                        if not post_open:
+                            continue
+                        base, gap = post_open, 0.0
+                    else:
+                        # BMO → prior close & report-day open; AMC → report-day close & next open
+                        pre = idx[(days <= rdts) if sess == "AMC" else (days < rdts)]
+                        if len(pre) == 0:
+                            continue
+                        base_day = pre[-1]
+                        post = idx[idx > base_day]
+                        if len(post) == 0:      # no session since the report — not measurable yet
+                            continue
+                        base = float(closes.loc[base_day])
+                        post_open = float(opens.loc[post[0]])
+                        if not base or not post_open:
+                            continue
+                        gap = round((post_open - base) / base * 100, 2)
+                    out[sym] = {
+                        "total": round((cur - base) / base * 100, 2),
+                        "gap": gap,
+                        "drift": round((cur - post_open) / post_open * 100, 2),
+                    }
                 except Exception:
                     continue
         except Exception as exc:

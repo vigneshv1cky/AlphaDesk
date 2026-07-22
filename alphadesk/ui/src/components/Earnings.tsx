@@ -131,7 +131,9 @@ const THIN_CAP = 100_000_000 // below ~$100M cap: effectively untradeable at siz
 // desk DID act on, whether the interim drift is going its way (not the official
 // grade, which settles at the horizon).
 function assess(e: EarningsRow): { label: string; cls: string; tip: string } | null {
-  const move = e.move_since_report_pct
+  // Key on the CAPTURABLE drift (from the open), not the gap-inclusive total — the
+  // overnight gap repriced before you could act, so a pure-gap move is not a miss.
+  const move = e.move_drift_pct ?? e.move_since_report_pct
   if (move == null) return { label: "pending", cls: "text-muted-foreground/50", tip: "no post-report session yet" }
   const eng = e.engagement
   if (eng === "TOOK" || eng === "DEBATED") {
@@ -171,9 +173,10 @@ function CoverageSummary({ reported }: { reported: EarningsRow[] }) {
   const unseen = reported.length - took - debated - skipped
   const trueMiss = reported.filter((e) => assess(e)?.label === "true miss").length
   const falseMiss = reported.filter((e) => assess(e)?.label === "false miss").length
+  const capturable = (e: EarningsRow) => e.move_drift_pct ?? e.move_since_report_pct ?? 0
   const worst = reported
     .filter((e) => assess(e)?.label === "true miss")
-    .sort((a, b) => Math.abs(b.move_since_report_pct!) - Math.abs(a.move_since_report_pct!))[0]
+    .sort((a, b) => Math.abs(capturable(b)) - Math.abs(capturable(a)))[0]
   return (
     <div className="mb-2 rounded-md bg-muted/40 px-2.5 py-2 text-[11px]">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -191,9 +194,9 @@ function CoverageSummary({ reported }: { reported: EarningsRow[] }) {
         {worst && (
           <span className="text-muted-foreground">
             worst: <span className="font-semibold text-foreground">{worst.symbol}</span>{" "}
-            <span className={worst.move_since_report_pct! >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}>
-              {worst.move_since_report_pct! >= 0 ? "+" : ""}
-              {worst.move_since_report_pct}%
+            <span className={capturable(worst) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}>
+              {capturable(worst) >= 0 ? "+" : ""}
+              {capturable(worst).toFixed(1)}% drift
             </span>
           </span>
         )}
@@ -213,9 +216,12 @@ function whyText(e: EarningsRow): string {
 // reason for skips, or the coverage-gap note for unseen).
 function ReportedRow({ e }: { e: EarningsRow }) {
   const [open, setOpen] = useState(false)
-  const move = e.move_since_report_pct
-  const has = move != null
-  const up = (move ?? 0) >= 0
+  // Headline the CAPTURABLE drift (from the open); show the uncapturable gap as
+  // muted context so a pure-gap reprice reads as "gap, no drift", not a big move.
+  const drift = e.move_drift_pct ?? e.move_since_report_pct
+  const gap = e.move_gap_pct
+  const has = drift != null
+  const up = (drift ?? 0) >= 0
   const took = e.engagement === "TOOK" || e.engagement === "DEBATED"
   return (
     <li className="text-sm">
@@ -232,12 +238,26 @@ function ReportedRow({ e }: { e: EarningsRow }) {
         <span className="w-20">
           <AssessTag e={e} />
         </span>
-        <span
-          className={`ml-auto font-mono tabular-nums ${
-            has ? (up ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400") : "text-muted-foreground"
-          }`}
-        >
-          {has ? `${up ? "+" : ""}${move}%` : "—"}
+        <span className="ml-auto text-right font-mono text-xs tabular-nums">
+          {has ? (
+            <>
+              <InfoTip
+                tip="Capturable drift since the report — the move from the first post-report open (excludes the uncapturable overnight gap)"
+                className={`cursor-help ${up ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}
+              >
+                {up ? "+" : ""}
+                {drift!.toFixed(1)}%
+              </InfoTip>
+              {gap != null && Math.abs(gap) >= 0.1 && (
+                <span className="ml-1.5 text-muted-foreground/50">
+                  {gap >= 0 ? "+" : ""}
+                  {gap.toFixed(1)}% gap
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          )}
         </span>
         <ChevronDown
           className={`h-3.5 w-3.5 shrink-0 text-muted-foreground/40 transition-transform ${
@@ -314,7 +334,7 @@ export function Earnings({
       {earnings.reported.length > 0 && (
         <Panel
           title="Just reported"
-          sub="the drift so far — price move since each report went public"
+          sub="capturable drift from the first post-report open — the uncapturable overnight gap is shown separately and excluded from the verdict"
           collapsible
           defaultOpen={false}
           count={earnings.reported.length}
@@ -326,7 +346,7 @@ export function Earnings({
             <span className="w-10">Session</span>
             <span className="w-20">Desk</span>
             <span className="w-20">Verdict</span>
-            <span className="ml-auto">Move</span>
+            <span className="ml-auto">Drift · gap</span>
           </div>
           <div className="space-y-3">
             {groupByDay(earnings.reported, (e) => e.report_date.slice(0, 10)).map((g) => (
