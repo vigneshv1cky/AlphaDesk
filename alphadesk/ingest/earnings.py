@@ -169,11 +169,18 @@ def drift_candidates(days: int) -> dict[str, list[dict]]:
     ran (refresh_calendar, on the 6h loop); this just reads the rows the run needs
     and shapes them as candidates — the caller merges them into the pool.
     """
-    reporters = store.recently_reported(days)
-    # How much each name has ALREADY moved since its report went public — the
-    # realized drift so far. Fed to the scout so "the move is already spent" is
-    # visible at entry, not just at exit (the PEGA lesson: it had fully repriced
-    # before we looked). Best-effort; a missing move just omits the note.
+    # Only reports already PUBLIC (past their BMO/DAY 9:30 or AMC 16:00 boundary) —
+    # a not-yet-public reporter has no tradeable drift yet. Time-aware, NOT gated on
+    # Nasdaq's lagged eps_actual (which made every same-day reporter invisible all
+    # day — the OTLY +30% miss). The freshest names now reach the scout the moment
+    # they can be traded, regardless of when the surprise number lands.
+    now = now_et()
+    reporters = [e for e in store.recently_reported(days)
+                 if (rp := reported_public(e["report_date"], e.get("session"))) and rp <= now]
+    # How much each name has ALREADY moved since its report went public — the realized
+    # drift/reaction. It is BOTH the "how much is left" gauge (the PEGA lesson) AND,
+    # when the surprise number hasn't landed yet, the direction signal itself (the
+    # drift edge bets the REACTION, not the result). Best-effort.
     from alphadesk.ingest import prices
     moved = prices.moves_since_report(
         [{"symbol": e["symbol"], "report_date": e["report_date"],
@@ -181,22 +188,33 @@ def drift_candidates(days: int) -> dict[str, list[dict]]:
     out: dict[str, list[dict]] = {}
     for e in reporters:
         esym = e["symbol"]
-        surp = e.get("surprise_pct") or 0.0
-        beat = "beat" if surp > 0 else ("miss" if surp < 0 else "in-line")
+        surp = e.get("surprise_pct")
         mv = moved.get(esym)
-        mv_txt = f"; moved {mv:+.1f}% since (drift so far)" if mv is not None else ""
-        mv_note = (f" Price has already moved {mv:+.1f}% since the report went public"
-                   " — weigh how much drift is left." if mv is not None else "")
+        if surp is not None:
+            verdict = "beat" if surp > 0 else ("miss" if surp < 0 else "in-line")
+            eps_txt = f"EPS {e.get('eps_actual')} vs est {e.get('eps_estimate')} — {verdict} {surp}%"
+        else:
+            verdict = "reaction pending"
+            eps_txt = f"EPS est {e.get('eps_estimate')} — actual not yet released (drift from reaction)"
+        mv_txt = f"; moved {mv:+.1f}% since (reaction so far)" if mv is not None else ""
+        mv_note = (f" Price has moved {mv:+.1f}% since the report went public — "
+                   "that reaction is the direction/‘how much is left’ signal." if mv is not None else "")
+        # Sentiment: prefer the confirmed surprise; else read the price REACTION.
+        if surp is not None:
+            sent = round(max(-1.0, min(1.0, surp / 10.0)), 3)
+        elif mv is not None:
+            sent = round(max(-1.0, min(1.0, mv / 5.0)), 3)
+        else:
+            sent = 0.0
         out[esym] = [{
             "id": f"earnings-{esym}-{e['report_date'][:10]}",
             "title": f"[EARNINGS] {esym} reported {e['report_date'][:10]} {e.get('session') or ''}: "
-                     f"EPS {e.get('eps_actual')} vs est {e.get('eps_estimate')} — {beat} {surp}%{mv_txt}",
-            "summary": f"Post-earnings-drift setup: {esym} {beat} consensus by {surp}%.{mv_note}",
+                     f"{eps_txt}{mv_txt}",
+            "summary": f"Post-earnings-drift setup: {esym} — {verdict}.{mv_note}",
             "source": "EarningsCalendar", "url": "", "published_at": e["report_date"],
             "category": "EARNINGS", "tickers": [esym],
-            "mentions": [{"symbol": esym,
-                          "sentiment": round(max(-1.0, min(1.0, surp / 10.0)), 3),
-                          "label": ("positive" if surp > 0 else "negative" if surp < 0 else "neutral"),
+            "mentions": [{"symbol": esym, "sentiment": sent,
+                          "label": ("positive" if sent > 0 else "negative" if sent < 0 else "neutral"),
                           "category": "EARNINGS"}],
             "relations": [],
         }]

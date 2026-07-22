@@ -682,18 +682,22 @@ def purge_legacy_earnings() -> int:
 
 
 def recently_reported(days: int = 3) -> list[dict]:
-    """Companies that REPORTED in the last `days` (actual EPS known) — the
-    post-earnings-drift candidate pool."""
+    """Companies that reported in the last `days` — the post-earnings-drift candidate
+    pool. NOT gated on eps_actual: Nasdaq backfills the actual EPS a day late, which
+    hid every SAME-DAY reporter from the scout (the OTLY +30% miss). The caller
+    (drift_candidates) filters to reports already PUBLIC and reads the price reaction;
+    surprise_pct is often NULL until it lands, and drift direction comes from the
+    reaction, not the result, so we don't wait for it."""
     with _connect() as conn:
         rows = conn.execute(
             "SELECT symbol, report_date, session, eps_estimate, eps_actual, surprise_pct"
-            " FROM earnings WHERE eps_actual IS NOT NULL"
-            "   AND report_date >= date('now', ?) AND report_date <= date('now')"
+            " FROM earnings WHERE report_date >= date('now', ?) AND report_date <= date('now')"
             # recency of RELEASE: newest day first, then within a day latest-released
             # first (AMC=evening > DAY > BMO=morning) — also the freshest drift.
+            # NULLS LAST so names with a known surprise lead their day, unknowns follow.
             " ORDER BY report_date DESC,"
             "   CASE session WHEN 'AMC' THEN 2 WHEN 'DAY' THEN 1 ELSE 0 END DESC,"
-            "   surprise_pct DESC",
+            "   surprise_pct IS NULL, surprise_pct DESC",
             (f"-{int(days)} days",),
         ).fetchall()
     return [dict(r) for r in rows]
