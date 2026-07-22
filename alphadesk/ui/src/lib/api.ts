@@ -219,6 +219,30 @@ export function etDateKey(ts: string): string {
   }).format(new Date(ts))
 }
 
+// "Tue 07-21" in ET — a compact day-group header.
+export function etDayLabel(ts: string): string {
+  const wd = new Intl.DateTimeFormat("en-US", { timeZone: ET, weekday: "short" }).format(
+    new Date(ts),
+  )
+  return `${wd} ${etDateKey(ts).slice(5)}`
+}
+
+// Group items by their ET day (newest day first), preserving each item's incoming
+// order within a day. `ts` picks the timestamp to group on.
+export function groupByDayKey<T>(
+  items: T[],
+  ts: (x: T) => string,
+): { key: string; label: string; items: T[] }[] {
+  const map = new Map<string, T[]>()
+  for (const it of items) {
+    const k = etDateKey(ts(it))
+    ;(map.get(k) ?? map.set(k, []).get(k)!).push(it)
+  }
+  return [...map.entries()]
+    .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+    .map(([key, group]) => ({ key, label: etDayLabel(ts(group[0])), items: group }))
+}
+
 // "Jul 18, 14:23" in ET.
 export function etDateTime(ts: string): string {
   return new Intl.DateTimeFormat("en-US", {

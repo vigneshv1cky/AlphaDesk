@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { api, etDateTime, fmtAlpha, type SymbolTimeline, type TimelineEvent, type Stats } from "@/lib/api"
+import { api, etDateTime, fmtAlpha, groupByDayKey, type SymbolTimeline, type TimelineEvent, type Stats } from "@/lib/api"
 import { dirUp, dirWord, plainEdge } from "@/lib/plain"
 import { ArrowDown, ArrowUp, RotateCcw } from "lucide-react"
 import { InfoTip } from "@/components/InfoTip"
@@ -189,9 +189,16 @@ export function Ledger({ stats, onSelect }: { stats: Stats | null; onSelect: (id
           </p>
         </Card>
       ) : (
-        <div className="space-y-2">
-          {symbols.map((s) => (
-            <SymbolCard key={s.symbol} s={s} onSelect={onSelect} />
+        <div className="space-y-3">
+          {groupByDayKey(symbols, (s) => s.last_ts).map((g) => (
+            <div key={g.key} className="space-y-2">
+              <div className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+                {g.label}
+              </div>
+              {g.items.map((s) => (
+                <SymbolCard key={s.symbol} s={s} onSelect={onSelect} />
+              ))}
+            </div>
           ))}
         </div>
       )}

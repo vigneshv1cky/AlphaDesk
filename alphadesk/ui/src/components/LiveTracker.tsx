@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { api, exitDate, type LivePick } from "@/lib/api"
+import { api, exitDate, groupByDayKey, type LivePick } from "@/lib/api"
 import { dirUp, dirWord, plainEdge } from "@/lib/plain"
 import { InfoTip } from "@/components/InfoTip"
 import { Card } from "@/components/ui/card"
@@ -104,15 +104,20 @@ export function LiveTracker() {
         </span>
       </div>
 
-      {rows.map((p) => {
-        const st = STATUS[p.status] ?? STATUS["no quote"]
-        const pos = (p.pnl_pct ?? 0) >= 0
-        return (
-          <Card
-            key={p.id}
-            size="sm"
-            className={p.approved ? "" : "border-border/60 opacity-80"}
-          >
+      {groupByDayKey(rows, (p) => p.ts).map((g) => (
+        <div key={g.key} className="space-y-3">
+          <div className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+            Chosen {g.label}
+          </div>
+          {g.items.map((p) => {
+            const st = STATUS[p.status] ?? STATUS["no quote"]
+            const pos = (p.pnl_pct ?? 0) >= 0
+            return (
+              <Card
+                key={p.id}
+                size="sm"
+                className={p.approved ? "" : "border-border/60 opacity-80"}
+              >
             <div className="flex flex-wrap items-center gap-2 text-sm">
               {dirUp(p.direction) ? (
                 <ArrowUp className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
@@ -156,9 +161,11 @@ export function LiveTracker() {
               {!p.approved && <span>· thin lean</span>}
             </div>
             {p.plan_note && <p className="mt-1 text-xs text-muted-foreground">{p.plan_note}</p>}
-          </Card>
-        )
-      })}
+              </Card>
+            )
+          })}
+        </div>
+      ))}
     </div>
   )
 }
