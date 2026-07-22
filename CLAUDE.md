@@ -133,7 +133,8 @@ alphadesk/
   llm.py               the guarded call stack — every LLM call goes here
   ingest/
     news.py            Polygon poll → Haiku enrichment → candidates
-    earnings.py        Nasdaq earnings calendar → post-earnings-drift candidates (+ realized since-report move)
+    earnings.py        Nasdaq earnings calendar → post-earnings-drift candidates the moment a report is PUBLIC
+                       (NOT gated on eps_actual, which lags a day — direction from the price reaction, not the result)
     world.py           GDELT world-news (11-cat taxonomy) — OFF by default in Find Trades
                        (WORLD_MAX_CATEGORIES=0); still used by the scheduler + `world` CLI
     prices.py          lazy per-symbol context — real-time Alpaca last trade (yfinance history fallback); NO triggers, NO sweeps
@@ -202,6 +203,19 @@ EXIT_REVIEW_COOLDOWN_S=1800   # min seconds between reviews of the same open pos
   the give-back screen closes a position once the *remaining* move plays out. Both are
   evidence the agents weigh (not gates), and the ratio only fires where options data
   exists (liquid names); thin names fall back to the qualitative priced-in read.
+- **Gap vs capturable drift** — `prices.moves_since_report` splits the move since a
+  report into the uncapturable overnight **gap** (pre-report close → first post-report
+  OPEN — repriced before you could act) and the **drift** (from that open — what you
+  could actually trade). Entry candidates, the Calendar "Move" column, and the true/
+  false-miss verdict all key on the **drift**, so a pure-gap reprice isn't counted as a
+  tradeable miss. NB: the exit/hold side is unchanged — a position held *through* a gap
+  DID capture it, so its P&L/MFE still measure from the original entry.
+- **Same-day earnings visibility** — the drift pool (`store.recently_reported`) is NOT
+  gated on `eps_actual` (Nasdaq backfills it ~a day late, which hid every same-day
+  reporter); a reporter becomes a candidate the moment it's PUBLIC (time-aware, past its
+  9:30/16:00 boundary) and its direction comes from the price reaction. Run Find Trades
+  just AFTER 9:30 so BMO reporters are public. (Prioritization — the scout still picks ≤5
+  of ~150 — is a separate, unbuilt lever.)
 - **Position review (exits)** — the team only opens positions; three things close them
   early, all research/paper (a ledger `exit_ts`/`exit_reason` stamp, never an order):
   (1) each Find Trades run, BEFORE hunting new trades, the opus `review` agent re-checks

@@ -77,7 +77,7 @@ Polygon (financial news) + earnings drift (+ since-report move) + Alpaca real-ti
         │
    [Position review]  re-check every still-open pick FIRST → HOLD / EXIT      (opus)
         │
-   [Earnings drift]   names that reported in the last few days → candidates
+   [Earnings drift]   names PUBLIC in the last few days → candidates (direction from the price reaction)
    [Connections desk] top-N shocks → 1 web-grounded call each → spillover candidates  (opus)
         │
    [Anti-double-dip]  drop names already held, or same-story within the cooldown
@@ -315,7 +315,8 @@ alphadesk/
     world.py           GDELT world-news (11-cat taxonomy) — OFF by default in Find Trades
                        (WORLD_MAX_CATEGORIES=0); still used by the scheduler + `world` CLI
     prices.py          lazy per-symbol context — real-time Alpaca last trade (yfinance history fallback); no triggers, no sweeps
-    earnings.py        Nasdaq earnings calendar + post-earnings-drift candidates (+ realized since-report move)
+    earnings.py        Nasdaq earnings calendar + drift candidates the moment a report is public
+                       (not gated on lagged eps_actual; direction from the price reaction, gap vs drift split)
   desk/
     stream.py          on-demand "Find Trades" SSE flow (v2 primary path)
     workflow.py        research_run() — the batch pipeline (desk CLI, scheduler, replay)
@@ -353,6 +354,10 @@ alphadesk/
   with pre-committed kill criteria for every component — including the debate and itself.
 - **Fail safe, not loud.** A failed stage drops one candidate with a logged reason. The
   system never invents a pick to fill a gap and never retries into a rate-limit storm.
+- **Only the capturable move counts.** Prices are read real-time (not a stale prior close),
+  entries anchor to the price you could actually fill at, and the move since a report is
+  split into the uncapturable overnight *gap* and the tradeable *drift* — so the desk
+  reasons, plans, and grades misses on what you could really have captured, not a phantom.
 
 ---
 
