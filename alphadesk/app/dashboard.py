@@ -204,6 +204,7 @@ def api_live():
     entry/target/stop, P&L, alpha-so-far vs SPY, and a status. All pure arithmetic
     (code owns physics + scoring); the levels came from the desk. Alpha-so-far is a
     live mark, NOT the official grade — that still settles only at the horizon."""
+    from alphadesk.config import entry_fill_time
     from alphadesk.config import session as market_session
     from alphadesk.desk import plan
     from alphadesk.ingest import prices
@@ -214,7 +215,9 @@ def api_live():
     for p in picks:
         cur = quotes.get(p["symbol"].upper())
         entry, target, stop = p["plan_entry"], p["plan_target"], p["plan_stop"]
+        fill = entry_fill_time(p["ts"], p.get("session"))   # honest entry (9:30 open if decided off-hours)
         row = dict(p, current=cur, pnl_pct=None, progress=None, status="no quote",
+                   entry_ts=(fill.isoformat() if fill else p["ts"]),
                    alpha_so_far=_alpha_so_far(p["direction"], entry, cur,
                                               p.get("spy_price"), spy_now))
         if cur and entry and target and stop and target != stop:
@@ -238,10 +241,23 @@ def api_live():
 
 
 @app.get("/api/timelines")
+def _closed_before_fill(exit_ts: str | None, fill) -> bool:
+    """True if a position was closed before it could fill (pre-open) — a cancel,
+    not a held trade. Compares tz-aware datetimes (exit_ts is UTC, fill is ET)."""
+    if not exit_ts or fill is None:
+        return False
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat(exit_ts) < fill
+    except (ValueError, TypeError):
+        return False
+
+
 def api_timelines(days: int = 30):
     """Track record grouped BY STOCK: each symbol's ordered calls with outcomes
     (open → live P&L; graded → vs S&P; exited), the desk's current stance, and
     whether that stance changed over time (buy→sell / an exit)."""
+    from alphadesk.config import entry_fill_time
     from alphadesk.config import session as market_session
     from alphadesk.ingest import prices
     rows = store.recent_team_picks(days)
@@ -258,8 +274,16 @@ def api_timelines(days: int = 30):
         evs.sort(key=lambda e: e["id"])
         events = []
         for e in evs:
-            state = "exited" if e["exit_ts"] else ("graded" if e["graded_at"] else "open")
-            ev = dict(e, state=state, current=None, pnl_pct=None, status=None, alpha_so_far=None)
+            # a close stamped BEFORE the position could fill (pre-open) is a CANCEL,
+            # not a held-then-exited trade (Model A). Detect by timestamp (catches
+            # historical rows too), not just the "not taken:" reason marker.
+            fill = entry_fill_time(e["ts"], e.get("session"))   # honest entry (9:30 open if decided off-hours)
+            not_taken = _closed_before_fill(e["exit_ts"], fill)
+            state = ("not_taken" if not_taken
+                     else "exited" if e["exit_ts"]
+                     else "graded" if e["graded_at"] else "open")
+            ev = dict(e, state=state, entry_ts=(fill.isoformat() if fill else e["ts"]),
+                      current=None, pnl_pct=None, status=None, alpha_so_far=None)
             if state == "open":
                 cur = quotes.get(sym.upper())
                 entry, target, stop = e["plan_entry"], e["plan_target"], e["plan_stop"]
@@ -275,7 +299,10 @@ def api_timelines(days: int = 30):
                                     else "working")
             events.append(ev)
         latest = evs[-1]
-        current = ("EXITED" if latest["exit_ts"]
+        latest_not_taken = _closed_before_fill(
+            latest["exit_ts"], entry_fill_time(latest["ts"], latest.get("session")))
+        current = ("NOT_TAKEN" if latest_not_taken
+                   else "EXITED" if latest["exit_ts"]
                    else latest["direction"] if latest["graded_at"] is None else "CLOSED")
         changed = len({e["direction"] for e in evs}) > 1 or any(e["exit_ts"] for e in evs)
         symbols.append({"symbol": sym, "current": current, "changed": changed,

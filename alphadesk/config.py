@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -125,6 +125,34 @@ def session(dt: datetime | None = None) -> str:
     if 16 * 60 <= minutes < 20 * 60:
         return "AFTER"
     return "CLOSED"
+
+
+def next_market_open(dt: datetime) -> datetime:
+    """The 9:30 ET open of the next REGULAR session at/after dt (weekends skipped;
+    holidays not modelled). Model A: fills happen only in regular hours."""
+    dt = dt.astimezone(ET)
+
+    def open_at(d) -> datetime:
+        return datetime(d.year, d.month, d.day, 9, 30, tzinfo=ET)
+
+    if dt.weekday() < 5 and dt < open_at(dt.date()):
+        return open_at(dt.date())            # still before today's open
+    d = dt.date() + timedelta(days=1)
+    while d.weekday() >= 5:
+        d += timedelta(days=1)
+    return open_at(d)
+
+
+def entry_fill_time(ts_iso: str, sess: str | None) -> datetime | None:
+    """When a pick actually FILLS under Model A (regular hours): the decision time
+    if the market was open, else the next 9:30 regular open. This is the honest
+    entry — a closed-market call can't fill at 3am, it fills at the open (the same
+    price the grader enters at). None on a bad timestamp."""
+    try:
+        dt = datetime.fromisoformat(ts_iso).astimezone(ET)
+    except (ValueError, TypeError):
+        return None
+    return dt if sess == "OPEN" else next_market_open(dt)
 
 
 # ---------------------------------------------------------------------------

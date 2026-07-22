@@ -72,6 +72,7 @@ function StanceBadge({ current, exit }: { current: string; exit?: { label: strin
     LONG: { label: "Buy", cls: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" },
     SHORT: { label: "Short", cls: "bg-red-500/15 text-red-600 dark:text-red-400" },
     EXITED: { label: "Exited", cls: "bg-amber-500/15 text-amber-600 dark:text-amber-400" },
+    NOT_TAKEN: { label: "Not taken", cls: "bg-muted text-muted-foreground" },
     CLOSED: { label: "Closed", cls: "bg-muted text-muted-foreground" },
   }
   const s = map[current] ?? map.CLOSED
@@ -80,6 +81,11 @@ function StanceBadge({ current, exit }: { current: string; exit?: { label: strin
 
 // What happened with one call: vs S&P (graded), exited, or live P&L (open).
 function Outcome({ e }: { e: TimelineEvent }) {
+  if (e.state === "not_taken") {
+    // thesis died before the open fill — never held, so no realized P&L (still
+    // graded for direction at its horizon).
+    return <span className="text-xs font-medium text-muted-foreground">Not taken</span>
+  }
   if (e.state === "graded" && e.alpha_net != null) {
     return (
       <span className={`font-mono text-sm font-semibold tabular-nums ${e.alpha_net > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
@@ -137,8 +143,10 @@ function EventRow({ e, onSelect }: { e: TimelineEvent; onSelect: (id: number) =>
       {up ? <ArrowUp className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" /> : <ArrowDown className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />}
       <span className={`text-sm font-semibold ${up ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>{dirWord(e.direction)}</span>
       <span className="font-mono text-xs tabular-nums text-muted-foreground">
-        {etDateTime(e.ts)}
-        {e.exit_ts && <span className="text-muted-foreground/70"> → {etDateTime(e.exit_ts)}</span>}
+        {etDateTime(e.entry_ts)}
+        {e.exit_ts && e.state !== "not_taken" && (
+          <span className="text-muted-foreground/70"> → {etDateTime(e.exit_ts)}</span>
+        )}
       </span>
       <span className="ml-auto shrink-0">
         <Outcome e={e} />
@@ -152,7 +160,8 @@ function SymbolCard({ s, onSelect }: { s: SymbolTimeline; onSelect: (id: number)
   const shown = events.slice(0, 8)
   const more = events.length - shown.length
   const latest = events[0]
-  const exitReason = s.current === "EXITED" ? latest?.exit_reason : null
+  const notTaken = s.current === "NOT_TAKEN"
+  const exitReason = s.current === "EXITED" || notTaken ? latest?.exit_reason : null
   const exit =
     s.current === "EXITED" && latest
       ? exitKind(latest.exit_reason, latest.exit_alpha ?? latest.exit_return_pct)
@@ -162,7 +171,7 @@ function SymbolCard({ s, onSelect }: { s: SymbolTimeline; onSelect: (id: number)
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-base font-bold">{s.symbol}</span>
         <StanceBadge current={s.current} exit={exit} />
-        {s.changed && s.current !== "EXITED" && (
+        {s.changed && s.current !== "EXITED" && !notTaken && (
           <Badge className="gap-1 bg-fuchsia-500/15 font-semibold text-fuchsia-600 dark:text-fuchsia-400">
             <RotateCcw className="h-2.5 w-2.5" /> changed
           </Badge>
@@ -171,7 +180,12 @@ function SymbolCard({ s, onSelect }: { s: SymbolTimeline; onSelect: (id: number)
           {events.length} call{events.length > 1 ? "s" : ""}
         </span>
       </div>
-      {exitReason && <p className={`mt-1.5 text-xs ${toneText(exit?.tone ?? 0)}`}>Exited: {exitReason}</p>}
+      {exitReason &&
+        (notTaken ? (
+          <p className="mt-1.5 text-xs italic text-muted-foreground">{exitReason}</p>
+        ) : (
+          <p className={`mt-1.5 text-xs ${toneText(exit?.tone ?? 0)}`}>Exited: {exitReason}</p>
+        ))}
       <div className="mt-2 divide-y divide-border/60">
         {shown.map((e) => (
           <EventRow key={e.id} e={e} onSelect={onSelect} />

@@ -515,7 +515,7 @@ def open_taken_picks() -> list[dict]:
     with _connect() as conn:
         rows = conn.execute(
             "SELECT id, ts, symbol, direction, horizon_days, adjusted_score, confidence,"
-            " edge, thesis, entry_price, spy_price, plan_entry, triage_reason FROM picks"
+            " edge, thesis, session, entry_price, spy_price, plan_entry, triage_reason FROM picks"
             " WHERE taken=1 AND exit_ts IS NULL AND graded_at IS NULL"
             "   AND datetime(ts, '+' || (horizon_days + 3) || ' days') >= datetime('now')"
             " ORDER BY id DESC",
@@ -529,7 +529,7 @@ def recent_team_picks(days: int = 30) -> list[dict]:
     with _connect() as conn:
         rows = conn.execute(
             "SELECT id, ts, symbol, direction, horizon_days, edge, verdict, approved,"
-            " adjusted_score, confidence, plan_entry, plan_target, plan_stop, plan_note,"
+            " adjusted_score, confidence, session, plan_entry, plan_target, plan_stop, plan_note,"
             " entry_price, spy_price, alpha_net, ret_horizon, graded_at, exit_ts, exit_reason,"
             " exit_price, exit_return_pct, exit_alpha, mfe_pct, mae_pct"
             " FROM picks WHERE arm='TEAM' AND ts >= datetime('now', ?)"

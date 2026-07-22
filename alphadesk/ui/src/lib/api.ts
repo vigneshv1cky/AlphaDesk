@@ -78,6 +78,7 @@ export interface Pick {
 export interface LivePick {
   id: number
   ts: string
+  entry_ts: string // honest entry fill time (9:30 open if the call was made off-hours)
   symbol: string
   direction: "LONG" | "SHORT"
   horizon_days: number
@@ -101,6 +102,7 @@ export interface LivePick {
 export interface TimelineEvent {
   id: number
   ts: string
+  entry_ts: string // honest entry fill time (9:30 open if the call was made off-hours)
   direction: "LONG" | "SHORT"
   horizon_days: number
   edge: string | null
@@ -120,7 +122,7 @@ export interface TimelineEvent {
   exit_alpha: number | null // realized alpha vs SPY over the hold, net friction
   mfe_pct: number | null // max favorable excursion (peak profit) over the hold, % vs entry
   mae_pct: number | null // max adverse excursion (worst drawdown) over the hold, % vs entry
-  state: "open" | "graded" | "exited"
+  state: "open" | "graded" | "exited" | "not_taken" // not_taken = thesis died before the open fill (never held)
   current: number | null
   pnl_pct: number | null
   alpha_so_far: number | null // interim vs-SPY while open; official alpha_net settles at horizon

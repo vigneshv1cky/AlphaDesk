@@ -99,7 +99,7 @@ async def _serve() -> None:
         reviewed_at: dict[int, float] = {}   # pick_id → monotonic ts of last review
         while True:
             try:
-                if market_session() != "CLOSED":   # prices only move in-session
+                if market_session() == "OPEN":   # Model A: only fill/exit in regular hours (skip thin pre/after-market)
                     open_pos = await loop.run_in_executor(None, store.live_picks)
                     monitorable = [p for p in open_pos
                                    if p.get("plan_target") and p.get("plan_stop")]
