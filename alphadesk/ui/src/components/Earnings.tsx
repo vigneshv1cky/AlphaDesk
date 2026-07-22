@@ -91,6 +91,40 @@ function groupByDay(rows: EarningsRow[], key: (e: EarningsRow) => string): DayGr
   return groups
 }
 
+// One run-day group in "Reporting soon" — shows the biggest 8, with the rest
+// expandable/collapsible via the "+N more / show less" toggle.
+function RunGroup({ g }: { g: DayGroup }) {
+  const [expanded, setExpanded] = useState(false)
+  const shown = expanded ? g.rows : g.rows.slice(0, 8)
+  const more = g.rows.length - 8
+  return (
+    <div>
+      <div className="mb-1 text-xs font-semibold text-emerald-500">
+        {g.day === "—" ? "Run time n/a" : `Run ${dayLabel(g.day)} · 9:30 ET`}
+      </div>
+      <ul className="divide-y divide-border">
+        {shown.map((e) => (
+          <li key={e.symbol + e.report_date} className="flex items-center gap-2 py-1.5 text-sm">
+            <span className="w-14 font-semibold">{e.symbol}</span>
+            <span className="w-14 text-xs text-muted-foreground">{fmtCap(e.market_cap)}</span>
+            <span className="ml-auto text-xs text-muted-foreground">
+              {e.report_date.slice(5, 10)} {e.session}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {more > 0 && (
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {expanded ? "− show less" : `+${more} more`}
+        </button>
+      )}
+    </div>
+  )
+}
+
 export function Earnings({
   earnings,
 }: {
@@ -171,36 +205,9 @@ export function Earnings({
             <span className="ml-auto">Report</span>
           </div>
           <div className="space-y-3">
-            {groupByDay(earnings.upcoming, (e) => (e.run_at ?? "").slice(0, 10) || "—").map((g) => {
-              const shown = g.rows.slice(0, 8)
-              const more = g.rows.length - shown.length
-              return (
-                <div key={g.day}>
-                  <div className="mb-1 text-xs font-semibold text-emerald-500">
-                    {g.day === "—" ? "Run time n/a" : `Run ${dayLabel(g.day)} · 9:30 ET`}
-                  </div>
-                  <ul className="divide-y divide-border">
-                    {shown.map((e) => (
-                      <li
-                        key={e.symbol + e.report_date}
-                        className="flex items-center gap-2 py-1.5 text-sm"
-                      >
-                        <span className="w-14 font-semibold">{e.symbol}</span>
-                        <span className="w-14 text-xs text-muted-foreground">
-                          {fmtCap(e.market_cap)}
-                        </span>
-                        <span className="ml-auto text-xs text-muted-foreground">
-                          {e.report_date.slice(5, 10)} {e.session}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                  {more > 0 && (
-                    <div className="mt-1 text-xs text-muted-foreground">+{more} more</div>
-                  )}
-                </div>
-              )
-            })}
+            {groupByDay(earnings.upcoming, (e) => (e.run_at ?? "").slice(0, 10) || "—").map((g) => (
+              <RunGroup key={g.day} g={g} />
+            ))}
           </div>
         </Panel>
       )}
