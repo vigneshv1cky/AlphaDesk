@@ -132,7 +132,11 @@ export function LiveTracker() {
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>
                 {p.order_type === "limit" ? "limit @ $" + p.plan_entry + " · " : ""}
-                entered {etDateTime(p.entry_ts)}
+                {p.status === "pending" ? "fills " : "entered "}
+                {etDateTime(p.entry_ts)}
+                {p.status === "pending" && (
+                  <span className="ml-1 text-amber-600 dark:text-amber-400">· pending</span>
+                )}
               </span>
               {p.alpha_so_far != null && (
                 <InfoTip

@@ -86,6 +86,10 @@ function Outcome({ e }: { e: TimelineEvent }) {
     // graded for direction at its horizon).
     return <span className="text-xs font-medium text-muted-foreground">Not taken</span>
   }
+  if (e.state === "open" && e.status === "pending") {
+    // decided while the market was shut — fills at the next open, not a position yet.
+    return <span className="text-xs font-medium text-amber-600 dark:text-amber-400">Pending open</span>
+  }
   if (e.state === "graded" && e.alpha_net != null) {
     return (
       <span className={`font-mono text-sm font-semibold tabular-nums ${e.alpha_net > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>

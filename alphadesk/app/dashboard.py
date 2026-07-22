@@ -214,30 +214,40 @@ def api_live():
     out = []
     for p in picks:
         cur = quotes.get(p["symbol"].upper())
-        # once filled, P&L measures from the real fill (entry_price); until then the
-        # plan level is the best estimate. Model A: closed-market fills at the open.
-        entry, target, stop = p.get("entry_price") or p["plan_entry"], p["plan_target"], p["plan_stop"]
+        target, stop = p["plan_target"], p["plan_stop"]
         fill = entry_fill_time(p["ts"], p.get("session"))   # honest entry (9:30 open if decided off-hours)
-        row = dict(p, current=cur, pnl_pct=None, progress=None, status="no quote",
+        # A pick is only a POSITION once it has actually filled (entry_price stamped
+        # at the open). Until then it's PENDING — no P&L, no vs-SPY (you're not in it),
+        # regardless of market/limit. Filled → measure everything from the real entry.
+        filled = p.get("entry_price") is not None
+        row = dict(p, current=cur, pnl_pct=None, progress=None,
+                   status=("pending" if not filled else "no quote"),
                    entry_ts=(fill.isoformat() if fill else p["ts"]),
-                   alpha_so_far=_alpha_so_far(p["direction"], entry, cur,
-                                              p.get("spy_price"), spy_now))
-        if cur and entry and target and stop and target != stop:
+                   alpha_so_far=None)
+        if filled:
+            entry = p["entry_price"]
+            row["alpha_so_far"] = _alpha_so_far(p["direction"], entry, cur,
+                                                p.get("spy_price"), spy_now)
+            if cur and entry and target and stop and target != stop:
+                up = p["direction"] == "LONG"
+                row["pnl_pct"] = round((1.0 if up else -1.0) * (cur - entry) / entry * 100, 2)
+                prog = (cur - stop) / (target - stop) if up else (stop - cur) / (stop - target)
+                row["progress"] = round(max(0.0, min(1.0, prog)), 3)  # 0 = at stop, 1 = at target
+                hit = plan.level_crossed(p["direction"], cur, target, stop)
+                if hit == "target":
+                    row["status"] = "target hit"
+                elif hit == "stop":
+                    row["status"] = "stopped out"
+                elif abs(cur - target) <= 0.15 * abs(target - entry):
+                    row["status"] = "near target"
+                elif abs(cur - stop) <= 0.15 * abs(stop - entry):
+                    row["status"] = "near stop"
+                else:
+                    row["status"] = "working"
+        elif cur and target != stop:   # pending: still show where price sits on the track
             up = p["direction"] == "LONG"
-            row["pnl_pct"] = round((1.0 if up else -1.0) * (cur - entry) / entry * 100, 2)
             prog = (cur - stop) / (target - stop) if up else (stop - cur) / (stop - target)
-            row["progress"] = round(max(0.0, min(1.0, prog)), 3)  # 0 = at stop, 1 = at target
-            hit = plan.level_crossed(p["direction"], cur, target, stop)
-            if hit == "target":
-                row["status"] = "target hit"
-            elif hit == "stop":
-                row["status"] = "stopped out"
-            elif abs(cur - target) <= 0.15 * abs(target - entry):
-                row["status"] = "near target"
-            elif abs(cur - stop) <= 0.15 * abs(stop - entry):
-                row["status"] = "near stop"
-            else:
-                row["status"] = "working"
+            row["progress"] = round(max(0.0, min(1.0, prog)), 3)
         out.append(row)
     return {"live": out, "market": market_session()}
 
@@ -293,17 +303,22 @@ def api_timelines(days: int = 30):
                       current=None, pnl_pct=None, status=None, alpha_so_far=None)
             if state == "open":
                 cur = quotes.get(sym.upper())
-                entry, target, stop = e.get("entry_price") or e["plan_entry"], e["plan_target"], e["plan_stop"]
                 ev["current"] = cur
-                ev["alpha_so_far"] = _alpha_so_far(e["direction"], entry, cur,
-                                                   e.get("spy_price"), spy_now)
-                if cur and entry and target and stop and target != stop:
-                    up = e["direction"] == "LONG"
-                    ev["pnl_pct"] = round((1.0 if up else -1.0) * (cur - entry) / entry * 100, 2)
-                    hit_t = cur >= target if up else cur <= target
-                    hit_s = cur <= stop if up else cur >= stop
-                    ev["status"] = ("target hit" if hit_t else "stopped out" if hit_s
-                                    else "working")
+                # only a POSITION once filled (entry_price stamped at the open) —
+                # a pending pick has no P&L / vs-SPY yet, market or limit.
+                if e.get("entry_price") is not None:
+                    entry, target, stop = e["entry_price"], e["plan_target"], e["plan_stop"]
+                    ev["alpha_so_far"] = _alpha_so_far(e["direction"], entry, cur,
+                                                       e.get("spy_price"), spy_now)
+                    if cur and entry and target and stop and target != stop:
+                        up = e["direction"] == "LONG"
+                        ev["pnl_pct"] = round((1.0 if up else -1.0) * (cur - entry) / entry * 100, 2)
+                        hit_t = cur >= target if up else cur <= target
+                        hit_s = cur <= stop if up else cur >= stop
+                        ev["status"] = ("target hit" if hit_t else "stopped out" if hit_s
+                                        else "working")
+                else:
+                    ev["status"] = "pending"
             events.append(ev)
         latest = evs[-1]
         latest_not_taken = _is_not_taken(
