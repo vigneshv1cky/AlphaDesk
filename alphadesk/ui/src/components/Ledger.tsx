@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { api, etDateTime, fmtAlpha, type SymbolTimeline, type TimelineEvent, type Stats } from "@/lib/api"
 import { dirUp, dirWord, plainEdge } from "@/lib/plain"
 import { ArrowDown, ArrowUp, RotateCcw } from "lucide-react"
+import { InfoTip } from "@/components/InfoTip"
 
 function Stat({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: number | null }) {
   const color = tone == null ? "" : tone > 0 ? "text-emerald-600 dark:text-emerald-400" : tone < 0 ? "text-red-600 dark:text-red-400" : ""
@@ -78,13 +79,13 @@ function Outcome({ e }: { e: TimelineEvent }) {
           {e.pnl_pct}%)
         </span>
         {e.alpha_so_far != null && (
-          <span
-            className={`ml-1 text-[10px] ${aPos ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}
-            title="How much it's beating the S&P 500 so far, net of friction — a live mark, not the official grade"
+          <InfoTip
+            tip="How much it's beating the S&P 500 so far, net of friction — a live mark, not the official grade"
+            className={`ml-1 cursor-help text-[10px] ${aPos ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}
           >
             vs S&P {aPos ? "+" : ""}
             {e.alpha_so_far}% so far
-          </span>
+          </InfoTip>
         )}
       </span>
     )
@@ -105,13 +106,13 @@ function EventRow({ e, onSelect }: { e: TimelineEvent; onSelect: (id: number) =>
       {e.edge && <span className="hidden rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground sm:inline">{plainEdge(e.edge)}</span>}
       <span className="ml-auto flex shrink-0 items-center gap-2.5">
         {e.mfe_pct != null && (
-          <span
-            className="hidden font-mono text-[10px] tabular-nums md:inline"
-            title="How far it ran / how far underwater while held (max favorable / adverse excursion vs entry)"
+          <InfoTip
+            tip="How far it ran / how far underwater while held (max favorable / adverse excursion vs entry)"
+            className="hidden cursor-help font-mono text-[10px] tabular-nums md:inline"
           >
             <span className="text-emerald-600/80 dark:text-emerald-400/80">▲{e.mfe_pct >= 0 ? "+" : ""}{e.mfe_pct.toFixed(1)}%</span>{" "}
             {e.mae_pct != null && <span className="text-red-600/80 dark:text-red-400/80">▼{e.mae_pct.toFixed(1)}%</span>}
-          </span>
+          </InfoTip>
         )}
         <Outcome e={e} />
       </span>

@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react"
 import { ChevronDown } from "lucide-react"
 import type { EarningsRow } from "@/lib/api"
+import { InfoTip } from "@/components/InfoTip"
 
 function Panel({
   title,
@@ -139,9 +140,9 @@ function AssessTag({ e }: { e: EarningsRow }) {
   const a = assess(e)
   if (!a) return null
   return (
-    <span className={`text-[10px] ${a.cls}`} title={a.tip}>
+    <InfoTip tip={a.tip} className={`cursor-help text-[10px] ${a.cls}`}>
       {a.label}
-    </span>
+    </InfoTip>
   )
 }
 

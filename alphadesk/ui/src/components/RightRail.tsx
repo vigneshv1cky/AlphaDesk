@@ -1,11 +1,9 @@
-import { useState } from "react"
 import type { EarningsRow, Stats, TokenRow } from "@/lib/api"
 import { Ledger } from "@/components/Ledger"
 import { Earnings } from "@/components/Earnings"
 import { Activity } from "@/components/Activity"
 import { LiveTracker } from "@/components/LiveTracker"
-
-type View = "live" | "record" | "calendar" | "usage"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 export function RightRail({
   stats,
@@ -18,36 +16,36 @@ export function RightRail({
   earnings?: { upcoming: EarningsRow[]; reported: EarningsRow[] }
   onSelect: (id: number) => void
 }) {
-  const [view, setView] = useState<View>("live")
-  const tabs: { id: View; label: string }[] = [
-    { id: "live", label: "Live" },
-    { id: "record", label: "Track record" },
-    { id: "calendar", label: "Calendar" },
-    { id: "usage", label: "Usage" },
-  ]
-
+  // Base UI Tabs: keyboard arrow-nav, roving focus, and ARIA roles for free;
+  // inactive panels unmount, so each tab's data loads only when it's the view.
   return (
-    <div className="space-y-4">
-      <div className="inline-flex rounded-lg border border-border bg-card p-0.5">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setView(t.id)}
-            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-              view === t.id
-                ? "bg-indigo-600 text-white"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {view === "live" && <LiveTracker />}
-      {view === "record" && <Ledger stats={stats} onSelect={onSelect} />}
-      {view === "calendar" && <Earnings earnings={earnings} />}
-      {view === "usage" && <Activity tokens={tokens} />}
-    </div>
+    <Tabs defaultValue="live" className="gap-4">
+      <TabsList className="h-9 bg-card p-1">
+        <TabsTrigger value="live" className="px-3 text-sm">
+          Live
+        </TabsTrigger>
+        <TabsTrigger value="record" className="px-3 text-sm">
+          Track record
+        </TabsTrigger>
+        <TabsTrigger value="calendar" className="px-3 text-sm">
+          Calendar
+        </TabsTrigger>
+        <TabsTrigger value="usage" className="px-3 text-sm">
+          Usage
+        </TabsTrigger>
+      </TabsList>
+      <TabsContent value="live">
+        <LiveTracker />
+      </TabsContent>
+      <TabsContent value="record">
+        <Ledger stats={stats} onSelect={onSelect} />
+      </TabsContent>
+      <TabsContent value="calendar">
+        <Earnings earnings={earnings} />
+      </TabsContent>
+      <TabsContent value="usage">
+        <Activity tokens={tokens} />
+      </TabsContent>
+    </Tabs>
   )
 }

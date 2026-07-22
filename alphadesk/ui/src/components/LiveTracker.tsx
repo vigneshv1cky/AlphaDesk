@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { api, exitDate, type LivePick } from "@/lib/api"
 import { dirUp, dirWord, plainEdge } from "@/lib/plain"
+import { InfoTip } from "@/components/InfoTip"
 import { ArrowDown, ArrowUp, RefreshCw } from "lucide-react"
 
 const STATUS: Record<string, { label: string; cls: string }> = {
@@ -145,13 +146,13 @@ export function LiveTracker() {
                 hold ~{p.horizon_days}d · through {exitDate(p.ts, p.session, p.horizon_days)}
               </span>
               {p.alpha_so_far != null && (
-                <span
-                  className={`font-medium ${p.alpha_so_far >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}
-                  title="Return vs S&P so far, net of friction — a live mark, not the official grade (which settles at the horizon)"
+                <InfoTip
+                  tip="Return vs S&P so far, net of friction — a live mark, not the official grade (which settles at the horizon)"
+                  className={`cursor-help font-medium ${p.alpha_so_far >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}
                 >
                   vs S&P {p.alpha_so_far >= 0 ? "+" : ""}
                   {p.alpha_so_far}% so far
-                </span>
+                </InfoTip>
               )}
               {!p.approved && <span>· thin lean</span>}
             </div>
