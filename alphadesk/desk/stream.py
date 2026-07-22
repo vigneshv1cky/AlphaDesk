@@ -102,12 +102,15 @@ async def stream_find_trades(hours: float = 48.0, max_debates: int = 6,
     since = datetime.now(timezone.utc).timestamp() - hours * 3600
     from datetime import datetime as _dt
     since_dt = _dt.fromtimestamp(since, tz=timezone.utc)
+    # The earnings calendar (already cached, free, high-signal) is a first-class
+    # candidate source — a news-scan failure must NOT waste it. So news is fail-soft:
+    # on error we proceed on earnings drift (and world, if enabled) alone.
     try:
         n, candidates = await loop.run_in_executor(None, news.poll, since_dt)
     except Exception as exc:
-        yield _ev("status", msg=f"News scan failed: {exc}")
-        yield _ev("done", board=[])
-        return
+        n, candidates = 0, {}
+        log.warning("News scan failed (%s) — proceeding on the earnings calendar", exc)
+        yield _ev("status", msg=f"News scan failed ({exc}) — running on earnings drift instead.")
     await loop.run_in_executor(None, store.record_ingest, "FINANCIAL", n, len(candidates))
 
     # Earnings drift — a CANDIDATE SOURCE parallel to the news scan: names that
