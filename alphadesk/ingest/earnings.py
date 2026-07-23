@@ -26,7 +26,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
 
-from alphadesk.config import ET, in_universe, now_et
+from alphadesk.config import ET, MATERIAL_REACTION_PCT, in_universe, now_et
 from alphadesk.ledger import store
 
 log = logging.getLogger("alphadesk.earnings")
@@ -178,9 +178,9 @@ def drift_candidates(days: int) -> dict[str, list[dict]]:
     reporters = [e for e in store.recently_reported(days)
                  if (rp := reported_public(e["report_date"], e.get("session"))) and rp <= now]
     # How much each name has ALREADY moved since its report went public — the realized
-    # drift/reaction. It is BOTH the "how much is left" gauge (the PEGA lesson) AND,
-    # when the surprise number hasn't landed yet, the direction signal itself (the
-    # drift edge bets the REACTION, not the result). Best-effort.
+    # reaction (total, extended-hours aware) split into the uncapturable gap and the
+    # capturable drift. total IS the direction signal: the drift edge bets the observed
+    # REACTION, not the result (a beat that sells off is not a long). Best-effort.
     from alphadesk.ingest import prices
     moved = prices.moves_since_report(
         [{"symbol": e["symbol"], "report_date": e["report_date"],
@@ -190,25 +190,34 @@ def drift_candidates(days: int) -> dict[str, list[dict]]:
         esym = e["symbol"]
         surp = e.get("surprise_pct")
         mv = moved.get(esym)   # {"total","gap","drift"} or None
-        drift = mv["drift"] if mv else None   # capturable move from the open (excl. gap)
+        total = mv["total"] if mv else None   # full reaction so far (extended-hours aware)
+        # GATE: the drift edge rides a VISIBLE reaction. No material move since the
+        # report = no reaction to continue — a pre-print / no-reaction earnings binary is
+        # a coin flip, not drift, so don't emit a directional candidate. total is
+        # extended-hours aware, so a pre-market reaction still counts as visible.
+        if total is None or abs(total) < MATERIAL_REACTION_PCT:
+            continue
+        gap, drift = (mv["gap"], mv["drift"]) if mv else (None, None)   # may be None pre-session
         if surp is not None:
             verdict = "beat" if surp > 0 else ("miss" if surp < 0 else "in-line")
             eps_txt = f"EPS {e.get('eps_actual')} vs est {e.get('eps_estimate')} — {verdict} {surp}%"
         else:
             verdict = "reaction pending"
             eps_txt = f"EPS est {e.get('eps_estimate')} — actual not yet released (drift from reaction)"
-        # The CAPTURABLE drift (from the open) is the tradeable direction/how-much-is-left
-        # signal — the overnight gap is shown as context but excluded (uncapturable).
-        mv_txt = f"; drift {drift:+.1f}% from open ({mv['gap']:+.1f}% gap excluded)" if mv else ""
-        mv_note = (f" Since the report: {mv['gap']:+.1f}% gap (uncapturable), then {drift:+.1f}% "
-                   "drift from the open — the drift is the tradeable signal." if mv else "")
-        # Sentiment: prefer the confirmed surprise; else read the capturable drift.
-        if surp is not None:
-            sent = round(max(-1.0, min(1.0, surp / 10.0)), 3)
-        elif drift is not None:
-            sent = round(max(-1.0, min(1.0, drift / 5.0)), 3)
+        # The observed REACTION (total) is the direction; the capturable drift from the
+        # open and the uncapturable gap are shown as context. Pre-regular-session the
+        # reaction is entirely extended-hours (no gap/drift split yet).
+        if drift is not None and gap is not None:
+            mv_txt = (f"; {total:+.1f}% reaction — {drift:+.1f}% drift from open "
+                      f"({gap:+.1f}% gap excluded)")
+            mv_note = (f" Since the report: {total:+.1f}% total reaction — {gap:+.1f}% gap "
+                       f"(uncapturable) then {drift:+.1f}% drift from the open (the tradeable leg).")
         else:
-            sent = 0.0
+            mv_txt = f"; {total:+.1f}% reaction so far (extended-hours, no regular session yet)"
+            mv_note = (f" Since the report: {total:+.1f}% reaction, still in extended hours — no "
+                       "regular session has traded yet, so the reaction itself is the signal.")
+        # Direction/sentiment from the observed reaction (total), not the raw surprise sign.
+        sent = round(max(-1.0, min(1.0, total / 5.0)), 3)
         out[esym] = [{
             "id": f"earnings-{esym}-{e['report_date'][:10]}",
             "title": f"[EARNINGS] {esym} reported {e['report_date'][:10]} {e.get('session') or ''}: "

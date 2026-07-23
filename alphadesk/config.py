@@ -91,6 +91,11 @@ LOW_LIQUIDITY_DOLLAR_VOL = 10_000_000  # avg daily dollar volume below this → 
 SKIP_GRADE_DAYS = 3             # trading days to judge a skipped name's forward move
 SKIP_MISS_ABS_ALPHA = 6.0       # |symbol return − SPY| above this % = a missed dislocation
 EARNINGS_DRIFT_DAYS = 3         # a name reported within this many days → post-earnings-drift candidate
+# Post-earnings drift needs a VISIBLE reaction to continue — betting before the stock
+# has moved on the print is a coin flip. A reporter must have reacted at least this %
+# (live price vs pre-report close, extended-hours-aware) to be a directional candidate;
+# below this = no drift setup yet, skip it (don't guess the print).
+MATERIAL_REACTION_PCT = float(os.environ.get("MATERIAL_REACTION_PCT", "1.5"))
 REPICK_COOLDOWN_HOURS = int(os.environ.get("REPICK_COOLDOWN_HOURS", "24"))  # don't re-debate a name within this window; matches the 24h news window so a catalyst is debated once (anti-double-dip across runs)
 
 # Exit-monitoring escalation SCREENS (not decisions — the opus reviewer decides).

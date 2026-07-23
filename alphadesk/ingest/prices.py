@@ -269,16 +269,19 @@ _earn_move_cache: dict[str, Any] = {"ts": 0.0, "key": None, "data": {}}
 
 
 def moves_since_report(items: list[dict], ttl: int = 300) -> dict[str, Optional[dict]]:
-    """Price move since each name's earnings went public, SPLIT into the uncapturable
-    overnight gap and the capturable drift — so a pure-gap reprice isn't mistaken for
-    tradeable drift (the same gap-vs-open lesson as the entry-price fix). One batched
-    yfinance download, cached. Returns {symbol: {"total","gap","drift"} | None}:
-      • total = pre-report close → latest close (the full reaction, gap + drift)
+    """Price move since each name's earnings went public. Uses the REAL-TIME price
+    (extended-hours aware) for 'current', so an after-hours / pre-market reaction is
+    visible even before any regular session has traded — the exact window an AMC print
+    reacts in. Splits into the uncapturable overnight gap and the capturable drift.
+    One batched yfinance download + one live-price fetch, cached.
+    Returns {symbol: {"total","gap","drift"} | None}:
+      • total = pre-report close → live price (the full reaction so far — the direction
+        signal; captures the extended-hours move)
       • gap   = pre-report close → first post-report OPEN (repriced before you could act)
-      • drift = first post-report open → latest close (what you could actually trade)
-    Session-aware: BMO → prior close & report-day open; AMC → report-day close & next
-    open; DAY → report-day open (intraday report, no clean overnight gap → gap 0).
-    None when no post-report session has traded yet (not measurable).
+      • drift = first post-report open → live price (what you could actually trade)
+    gap/drift are None before the first regular session trades (reaction is all
+    extended-hours); total is still measured. Session-aware baselines: BMO → prior
+    close/report-day open; AMC → report-day close/next open; DAY → report-day open.
     """
     import pandas as pd
 
@@ -292,6 +295,7 @@ def moves_since_report(items: list[dict], ttl: int = 300) -> dict[str, Optional[
     syms = sorted({i["symbol"] for i in items})
     out: dict[str, Optional[dict]] = {s: None for s in syms}
     if syms:
+        live = latest_prices(syms)   # real-time (extended-hours) prices for 'current'
         try:
             import yfinance as yf
             df = yf.download(syms, period="20d", interval="1d", group_by="ticker",
@@ -299,7 +303,11 @@ def moves_since_report(items: list[dict], ttl: int = 300) -> dict[str, Optional[
             for i in items:
                 sym, rd, sess = i["symbol"], i["report_date"], i.get("session")
                 try:
-                    sub = df[sym] if len(syms) > 1 else df
+                    # group_by="ticker" yields per-symbol MultiIndex columns even for a
+                    # SINGLE symbol, so key by symbol whenever the level exists (the old
+                    # len>1 heuristic broke single-reporter runs — df["Close"] KeyError'd).
+                    sub = (df[sym] if isinstance(df.columns, pd.MultiIndex)
+                           and sym in df.columns.get_level_values(0) else df)
                     closes = sub["Close"].dropna()
                     opens = sub["Open"]
                     if closes.empty:
@@ -307,35 +315,34 @@ def moves_since_report(items: list[dict], ttl: int = 300) -> dict[str, Optional[
                     idx = closes.index
                     days = idx.normalize()
                     rdts = pd.Timestamp(rd).normalize()
-                    cur = float(closes.iloc[-1])
+                    cur = live.get(sym.upper()) or float(closes.iloc[-1])   # live, fallback close
+                    post_open: float | None
+                    gap: float | None
                     if sess == "DAY":
-                        # intraday report — no clean overnight gap; measure from the
-                        # report-day open, all capturable.
+                        # intraday report — measure from the report-day open (no gap).
                         on_after = idx[days >= rdts]
                         if len(on_after) == 0 or idx[-1].normalize() < on_after[0].normalize():
                             continue
-                        post_open = float(opens.loc[on_after[0]])
-                        if not post_open:
-                            continue
-                        base, gap = post_open, 0.0
+                        base = float(opens.loc[on_after[0]])
+                        post_open, gap = base, 0.0
                     else:
-                        # BMO → prior close & report-day open; AMC → report-day close & next open
+                        # BMO → prior close/report-day open; AMC → report-day close/next open
                         pre = idx[(days <= rdts) if sess == "AMC" else (days < rdts)]
                         if len(pre) == 0:
                             continue
-                        base_day = pre[-1]
-                        post = idx[idx > base_day]
-                        if len(post) == 0:      # no session since the report — not measurable yet
-                            continue
-                        base = float(closes.loc[base_day])
-                        post_open = float(opens.loc[post[0]])
-                        if not base or not post_open:
-                            continue
-                        gap = round((post_open - base) / base * 100, 2)
+                        base = float(closes.loc[pre[-1]])
+                        post = idx[idx > pre[-1]]
+                        if len(post):
+                            post_open = float(opens.loc[post[0]]) or None
+                            gap = round((post_open - base) / base * 100, 2) if post_open else None
+                        else:   # no regular session yet — reaction is entirely extended-hours
+                            post_open, gap = None, None
+                    if not base:
+                        continue
                     out[sym] = {
                         "total": round((cur - base) / base * 100, 2),
                         "gap": gap,
-                        "drift": round((cur - post_open) / post_open * 100, 2),
+                        "drift": round((cur - post_open) / post_open * 100, 2) if post_open else None,
                     }
                 except Exception:
                     continue
