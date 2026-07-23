@@ -920,4 +920,17 @@ def add_run(kind: str, top_picks: list[dict]) -> None:
                      (_now(), kind, json.dumps(top_picks)))
 
 
+def runs_today(kind: str = "FIND_TRADES") -> int:
+    """Count of runs of `kind` recorded so far today (ET) — the durable half of the
+    daily runaway cap, so a restart can't zero an in-memory counter and bypass it."""
+    from alphadesk.config import now_et
+    start = now_et().replace(hour=0, minute=0, second=0, microsecond=0)
+    start_utc = start.astimezone(timezone.utc).isoformat()
+    with _connect() as conn:
+        (n,) = conn.execute(
+            "SELECT COUNT(*) FROM runs WHERE kind = ? AND ts >= ?",
+            (kind, start_utc)).fetchone()
+    return int(n)
+
+
 init()

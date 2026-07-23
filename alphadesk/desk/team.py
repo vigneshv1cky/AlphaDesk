@@ -371,7 +371,13 @@ def fact_check_concerns(concerns: list[dict], price_ctx: dict | None) -> list[st
         for m in _MOVE_PCT_RE.finditer(text):
             raw = m.group(1) or m.group(2)
             val = abs(float(raw))
-            if val > 0.5 and known and min(abs(val - k) for k in known) > max(5.0, val):
+            # Tolerance keys on the DATA (largest real move, floor 5pp), NOT the claim.
+            # The old `max(5.0, val)` grew the tolerance with the claim, so the BIGGER
+            # the fabrication the LESS likely it was flagged (a "surged 40%" lie when
+            # real moves are ~2% escaped: 37 < 40). Now an egregious move far from every
+            # real one is caught regardless of how large it's claimed to be.
+            tol = max(5.0, max(known)) if known else 5.0
+            if val > 0.5 and known and min(abs(val - k) for k in known) > tol:
                 flags.append(
                     f"Critic cited a {raw}% price move — no matching move in data "
                     f"(today={price_ctx.get('change_today_pct')}%, "

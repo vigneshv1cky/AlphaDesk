@@ -383,7 +383,12 @@ def fill_ohlc(items: list[dict]) -> dict[int, tuple]:
         for i in items:
             try:
                 sub = df[i["symbol"]] if len(syms) > 1 else df
-                row = sub[sub.index.strftime("%Y-%m-%d") == i["fill_date"]].dropna()
+                # First bar ON OR AFTER the fill date (not an exact match): a fill_date
+                # that lands on a market HOLIDAY has no bar, and an exact match left the
+                # position stranded forever (never filled, never marked not-taken) while
+                # the grader — which snaps to the next real bar — still graded it. Rolling
+                # forward here matches the grader and de-strands the holiday case.
+                row = sub[sub.index.strftime("%Y-%m-%d") >= i["fill_date"]].dropna()
                 if len(row):
                     r = row.iloc[0]
                     out[int(i["id"])] = (round(float(r["Open"]), 4),

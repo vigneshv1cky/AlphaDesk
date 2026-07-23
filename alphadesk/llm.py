@@ -176,6 +176,13 @@ def _validate(spec: dict, data: Any, path: str = "") -> list[str]:
         if expected and not isinstance(value, expected):
             errors.append(f"{loc}: expected {expected}, got {type(value).__name__}")
             continue
+        # bool is a subclass of int, so `True` sails through an (int, float) check and a
+        # 0–100 range as 1 — a judge/researcher emitting a boolean where a score belongs
+        # would book a max-conviction pick. Reject it unless bool is explicitly allowed.
+        if expected and isinstance(value, bool) and bool not in (
+                expected if isinstance(expected, tuple) else (expected,)):
+            errors.append(f"{loc}: boolean not valid for {expected}")
+            continue
         if "min" in rules and value < rules["min"]:
             errors.append(f"{loc}: {value} < min {rules['min']}")
         if "max" in rules and value > rules["max"]:

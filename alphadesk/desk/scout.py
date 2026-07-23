@@ -71,6 +71,9 @@ def run_scout(window: dict[str, dict], movers: list[dict]) -> dict:
     if not window:
         return {"picks": [], "skips": []}
 
+    if len(window) > 40:
+        log.info("scout window truncated: %d candidates → 40 shown, %d dropped UNSEEN "
+                 "(prioritisation is a known gap)", len(window), len(window) - 40)
     lines = []
     for sym, info in list(window.items())[:40]:
         price = info.get("price") or {}
@@ -94,6 +97,15 @@ def run_scout(window: dict[str, dict], movers: list[dict]) -> dict:
         + "\n\nToday's top movers (FYI ranking — investigate only if you judge it worthwhile):\n"
         + wrap_data("movers", json.dumps(movers) if movers else "unavailable")
     )
-    return call_role(
+    out = call_role(
         "scout", _SYSTEM.format(max_picks=MAX_PICKS_PER_WINDOW), user, schema=_SCHEMA
     )
+    # Drop skips carrying a hallucinated / non-universe ticker: skips[].symbol isn't
+    # whitelisted in _SCHEMA (only length-capped), and they flow to grade_skips →
+    # false_negative_block, which feeds the "names we skipped that then moved" stat back
+    # into scout+judge. An invented ticker would pollute that self-referential prior.
+    if out.get("skips"):
+        from alphadesk.config import in_universe
+        out["skips"] = [s for s in out["skips"]
+                        if isinstance(s.get("symbol"), str) and in_universe(s["symbol"])]
+    return out

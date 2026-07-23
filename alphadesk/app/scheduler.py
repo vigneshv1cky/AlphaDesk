@@ -30,11 +30,22 @@ log = logging.getLogger("alphadesk.scheduler")
 _pending: dict[str, list[dict]] = {}
 _paused_reason: str | None = None
 _batch_done: dict[str, str] = {}  # kind → date string of last run
-_last_heartbeat: float = 0.0      # monotonic ts of the last completed ingest cycle
+_last_heartbeat: float = 0.0      # monotonic ts of the last completed background cycle
+
+
+def beat() -> None:
+    """Stamp the liveness heartbeat. Called by whichever background loop is running —
+    the ingest loop (legacy `run` mode) AND the grader/position-watch loops (v2
+    `dashboard` mode, which never runs ingest). Without this, healthz saw the ingest
+    heartbeat stuck at 0 in dashboard mode and returned 503 forever after the boot grace,
+    though every loop was healthy."""
+    global _last_heartbeat
+    import time
+    _last_heartbeat = time.monotonic()
 
 
 def heartbeat_age_s() -> float:
-    """Seconds since the ingest loop last completed a cycle (inf if never)."""
+    """Seconds since any critical background loop last completed a cycle (inf if never)."""
     import time
     if _last_heartbeat == 0.0:
         return float("inf")

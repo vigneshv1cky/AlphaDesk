@@ -64,6 +64,10 @@ def _coherent(direction: str, entry: float, target: float, stop: float,
         return False
     if last_price and abs(entry - last_price) / last_price > 0.20:
         return False  # entry way off the current price — not an executable swing entry
+    if abs(target - entry) / entry > 0.60:
+        return False  # target implausibly far — not a real objective for a days-long swing
+    if abs(stop - entry) / entry > 0.30:
+        return False  # stop so wide it can't invalidate — an effectively stopless plan
     return True
 
 
@@ -127,13 +131,17 @@ def limit_fill(direction: str, order_type: str | None, entry: float | None,
         if open_px <= entry:                       # gapped at/below the limit → fill at open
             px = round(open_px, 4)
         elif low_px is not None and low_px <= entry * (1 + b):   # dipped into the (buffered) limit
-            px = round(entry, 4)
+            # Fill at a price that ACTUALLY traded: the limit only if price truly reached
+            # it, else the session low (a buffered near-miss). Filling at `entry` when the
+            # low stopped above it booked a price below the low — a fictitious better-than-
+            # market fill that contaminated paper P&L and alpha_net.
+            px = round(entry if low_px <= entry else low_px, 4)
         else:
             px = None                              # never reached → not taken
     elif open_px >= entry:                         # SHORT: gapped at/above the limit → fill at open
         px = round(open_px, 4)
     elif high_px is not None and high_px >= entry * (1 - b):
-        px = round(entry, 4)
+        px = round(entry if high_px >= entry else high_px, 4)
     else:
         px = None
     if px is None:

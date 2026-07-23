@@ -360,15 +360,22 @@ _run_count = 0
 
 
 def _within_daily_cap() -> bool:
-    """Runaway guard: cap Find Trades runs per calendar day."""
+    """Runaway guard: cap Find Trades runs per calendar day. Durable — a restart zeroes
+    the in-memory counter, so we also count runs already recorded in the ledger today and
+    take the max, so a crash-loop/deploy can't bypass the cap (it's a runaway backstop)."""
     global _run_day, _run_count
     from datetime import date
 
     from alphadesk.config import MAX_RUNS_PER_DAY
+    from alphadesk.ledger import store
     today = date.today().isoformat()
     if today != _run_day:
         _run_day, _run_count = today, 0
-    if _run_count >= MAX_RUNS_PER_DAY:
+    try:
+        ledgered = store.runs_today("FIND_TRADES")
+    except Exception:
+        ledgered = 0
+    if max(_run_count, ledgered) >= MAX_RUNS_PER_DAY:
         return False
     _run_count += 1
     return True

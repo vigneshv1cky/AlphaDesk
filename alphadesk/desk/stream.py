@@ -519,7 +519,12 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
             order = {r["symbol"].upper(): i for i, r in enumerate(chief.get("ranked", []))}
             for row in board:
                 cr = ranking.get(row["symbol"].upper())
-                row["take"] = bool(cr["take"]) if cr else row["approved"]
+                if cr:
+                    row["take"] = bool(cr["take"])
+                elif ranking:              # Chief ranked others but OMITTED this one →
+                    row["take"] = False    # a deliberate drop (dedup); don't book it on its own approval
+                else:                      # Chief returned nothing rankable → fall back to own approval
+                    row["take"] = row["approved"]
                 row["chief_reason"] = cr["reason"] if cr else ""
             board.sort(key=lambda r: order.get(r["symbol"].upper(), 999))
             store.add_run("FIND_TRADES", board)

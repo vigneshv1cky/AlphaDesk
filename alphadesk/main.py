@@ -52,6 +52,7 @@ async def _serve() -> None:
     paper portfolio marking even while nothing else runs."""
 
     async def _grader_loop():
+        from alphadesk.app import scheduler
         from alphadesk.ledger.grader import grade_due
         loop = asyncio.get_running_loop()
         log = logging.getLogger("alphadesk.grader")
@@ -62,6 +63,7 @@ async def _serve() -> None:
                     log.info("Graded %d positions", n)
             except Exception as exc:
                 log.error("grader error: %s", exc)
+            scheduler.beat()   # liveness for /healthz in dashboard mode (no ingest loop here)
             await asyncio.sleep(3600)
 
     async def _earnings_loop():
@@ -219,6 +221,8 @@ async def _serve() -> None:
                                          perf.get("exit_alpha"))
             except Exception as exc:
                 log.error("position watch error: %s", exc)
+            from alphadesk.app import scheduler
+            scheduler.beat()   # 180s liveness for /healthz (grader's hourly beat is too coarse)
             await asyncio.sleep(180)   # ~3 min; a hit closes the paper position
 
     await asyncio.gather(_grader_loop(), _earnings_loop(),

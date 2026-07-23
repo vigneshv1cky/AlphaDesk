@@ -65,14 +65,21 @@ def _priced_in_digest(price_ctx: dict | None, options: dict | None) -> dict | No
     em = options.get("expected_move_to_expiry_pct")
     if not em:
         return None
+    # Match each realized move to its OWN-horizon implied move (1d move ÷ 1d implied,
+    # 5d move ÷ 5d implied). Dividing a 1d/5d realized move by the far larger to-EXPIRY
+    # implied deflated the ratio, so a stock that had already run 2.5x its 1d implied
+    # (the PEGA-at-entry case) read as "barely moved → enter" — the safeguard fired
+    # backwards. Fall back to the to-expiry move only when a horizon leg is missing.
+    em_1d = options.get("expected_move_1d_pct") or em
+    em_5d = options.get("expected_move_5d_pct") or em
     out: dict = {"implied_move_pct": em}
     t, f = price_ctx.get("change_today_pct"), price_ctx.get("change_5d_pct")
-    if t is not None:
+    if t is not None and em_1d:
         out["moved_today_pct"] = t
-        out["today_vs_implied"] = round(abs(t) / em, 2)
-    if f is not None:
+        out["today_vs_implied"] = round(abs(t) / em_1d, 2)
+    if f is not None and em_5d:
         out["moved_5d_pct"] = f
-        out["5d_vs_implied"] = round(abs(f) / em, 2)
+        out["5d_vs_implied"] = round(abs(f) / em_5d, 2)
     return out
 
 
