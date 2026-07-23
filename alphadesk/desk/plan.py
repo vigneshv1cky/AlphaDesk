@@ -106,6 +106,43 @@ def level_crossed(direction: str, price: float, target: float, stop: float) -> s
     return None
 
 
+def first_touch_exit(direction: str, target: float, stop: float,
+                     bars: list[dict]) -> dict | None:
+    """Walk the intraday bar PATH and return the FIRST level actually touched:
+    {"level": "target"|"stop", "price": <realistic fill>}, or None if neither is hit.
+    Fixes the spot-quote watcher's three blind spots — it can now tell WHICH level came
+    first, price the fill at the level (not wherever the poll landed), and resolve gaps.
+    Rules per bar (chronological):
+      • a bar whose OPEN is already beyond a level = a gap you couldn't have filled at the
+        level → fill at the open;
+      • otherwise fill at the level the bar reached;
+      • a single bar straddling BOTH levels (sub-bar order unknowable at this granularity)
+        → assume the ADVERSE one (stop), conservative for realized P&L.
+    Pure code — the exit physics; bars must be chronological with open/high/low/close."""
+    up = direction == "LONG"
+    for b in bars:
+        o, hi, lo = b["open"], b["high"], b["low"]
+        if up:
+            if o >= target:
+                return {"level": "target", "price": round(o, 4)}   # gapped up through target
+            if o <= stop:
+                return {"level": "stop", "price": round(o, 4)}     # gapped down through stop
+            hit_t, hit_s = hi >= target, lo <= stop
+        else:
+            if o <= target:
+                return {"level": "target", "price": round(o, 4)}
+            if o >= stop:
+                return {"level": "stop", "price": round(o, 4)}
+            hit_t, hit_s = lo <= target, hi >= stop
+        if hit_t and hit_s:
+            return {"level": "stop", "price": round(stop, 4)}      # ambiguous → adverse
+        if hit_t:
+            return {"level": "target", "price": round(target, 4)}
+        if hit_s:
+            return {"level": "stop", "price": round(stop, 4)}
+    return None
+
+
 def limit_fill(direction: str, order_type: str | None, entry: float | None,
                open_px: float | None, high_px: float | None, low_px: float | None,
                buffer_pct: float, stop: float | None = None,

@@ -106,8 +106,9 @@ Polygon (financial news) + earnings drift (+ since-report move) + Alpaca real-ti
         │
    LEDGER (SQLite/WAL) → GRADER (hourly, alpha_net vs SPY at own horizon)
         │
-   POSITION WATCHER (~180s): target/stop cross → close (pure code);
-     cheap give-back / near-target SCREEN → selective opus REVIEW → HOLD/EXIT (close a spent move before it decays)
+   POSITION WATCHER (~180s): walks intraday MINUTE bars for the first-touched level → close
+     at that level, gap-/order-aware (pure code); cheap give-back / near-target SCREEN →
+     selective opus REVIEW → HOLD/EXIT (close a spent move before it decays)
 ```
 
 ### Model tiering (`config.MODEL_MAP`, every role env-overridable `MODEL_<ROLE>`)
@@ -237,7 +238,11 @@ EXIT_REVIEW_COOLDOWN_S=1800   # min seconds between reviews of the same open pos
   (1) each Find Trades run, BEFORE hunting new trades, the opus `review` agent re-checks
   every open TAKE (`store.open_taken_picks`) vs price + fresh news → HOLD/EXIT, surfaced
   first (you may have traded it); (2) the **position watcher** (`main._position_watch_loop`,
-  ~180s) closes on a target/stop level cross (pure code); (3) between runs, a cheap code
+  ~180s) walks the intraday MINUTE-bar path (`prices.intraday_bars` →
+  `plan.first_touch_exit`) and closes at the FIRST level actually touched — priced at that
+  level, gap-aware (a level opened-through fills at the bar open), and order-aware (a bar
+  spanning both target and stop books the adverse one); falls back to the spot-quote level
+  check only when bars are unavailable (pure code); (3) between runs, a cheap code
   SCREEN (`plan.exit_signal`: near-target, or MFE give-back seeded from the persisted
   `mfe_pct` so it survives restarts) flags a spent move and escalates that ONE position to
   the same opus reviewer — so a played-out move is closed before the gain decays, not only

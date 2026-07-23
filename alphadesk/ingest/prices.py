@@ -401,6 +401,33 @@ def fill_ohlc(items: list[dict]) -> dict[int, tuple]:
     return out
 
 
+def intraday_bars(symbol: str, start) -> list[dict]:
+    """Minute bars for `symbol` from `start` (a tz-aware datetime) to now, via Alpaca
+    (free IEX feed). Lets the position watcher walk the true intraday price PATH — so an
+    exit is booked at the FIRST level actually touched, and in the right order when one
+    bar spans both target and stop, instead of whatever the ~180s spot poll happened to
+    catch. Chronological (oldest first). Empty list on any failure → caller falls back to
+    the spot-quote check."""
+    client = _alpaca_data_client()
+    if client is None:
+        return []
+    try:
+        from alpaca.data.enums import DataFeed
+        from alpaca.data.requests import StockBarsRequest
+        from alpaca.data.timeframe import TimeFrame
+        resp = client.get_stock_bars(StockBarsRequest(
+            symbol_or_symbols=symbol.upper(), timeframe=TimeFrame.Minute,
+            start=start, feed=DataFeed.IEX))
+        data = resp.data.get(symbol.upper(), []) if hasattr(resp, "data") else []
+        bars = [{"ts": b.timestamp, "open": float(b.open), "high": float(b.high),
+                 "low": float(b.low), "close": float(b.close)} for b in data]
+        bars.sort(key=lambda x: x["ts"])
+        return bars
+    except Exception as exc:
+        log.debug("intraday_bars failed for %s: %s", symbol, exc)
+        return []
+
+
 def latest_prices(symbols: list[str]) -> dict[str, float]:
     """Real-time last-trade prices, batched in one Alpaca call (fallback: the
     cached yfinance context per missing symbol). For live position tracking."""

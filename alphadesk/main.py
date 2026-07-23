@@ -98,13 +98,20 @@ async def _serve() -> None:
         )
         from alphadesk.config import session as market_session
         from alphadesk.desk import review
-        from alphadesk.desk.plan import exit_signal, level_crossed, limit_fill, realized_exit
+        from alphadesk.desk.plan import (
+            exit_signal,
+            first_touch_exit,
+            level_crossed,
+            limit_fill,
+            realized_exit,
+        )
         from alphadesk.ingest import prices
         from alphadesk.ledger import store
         loop = asyncio.get_running_loop()
         log = logging.getLogger("alphadesk.watch")
         peak_fav: dict[int, float] = {}      # pick_id → best favorable move % seen
         reviewed_at: dict[int, float] = {}   # pick_id → monotonic ts of last review
+        last_check: dict[int, object] = {}   # pick_id → ET ts we last walked bars up to
         while True:
             try:
                 if market_session() == "OPEN":   # Model A: only fill/exit in regular hours (skip thin pre/after-market)
@@ -163,17 +170,33 @@ async def _serve() -> None:
                         spy_now = quotes.get("SPY")
                         for p in monitorable:
                             cur = quotes.get(p["symbol"].upper())
-                            if not cur:
-                                continue
                             entry = p.get("entry_price") or p.get("plan_entry")
-                            hit = level_crossed(p["direction"], cur,
-                                                p["plan_target"], p["plan_stop"])
-                            if hit:
-                                level = p["plan_target"] if hit == "target" else p["plan_stop"]
-                                label = "target hit" if hit == "target" else "stopped out"
-                                reason = f"{label} @ {cur} ({hit} {level})"
-                                # freeze realized performance at the exit price
-                                perf = realized_exit(p["direction"], entry, cur,
+                            # Walk the true intraday PATH since we last looked (first sight:
+                            # since the fill) to find the FIRST level touched — priced AT the
+                            # level, gap-aware, and order-aware when a bar spans both. This
+                            # replaces reading a single ~180s spot quote (which mis-booked the
+                            # wrong level on a target-then-stop bar and froze P&L at whatever
+                            # price the poll happened to catch). Falls back to the spot quote
+                            # only when intraday bars are unavailable.
+                            start = last_check.get(p["id"]) or entry_fill_time(
+                                p["ts"], p.get("session"))
+                            bars = (await loop.run_in_executor(
+                                None, prices.intraday_bars, p["symbol"], start)
+                                if start else [])
+                            last_check[p["id"]] = now
+                            ft = (first_touch_exit(p["direction"], p["plan_target"],
+                                                   p["plan_stop"], bars) if bars else None)
+                            if ft is None and not bars and cur:   # no bars → spot fallback
+                                hit = level_crossed(p["direction"], cur,
+                                                    p["plan_target"], p["plan_stop"])
+                                if hit:
+                                    ft = {"level": hit, "price": p["plan_target"]
+                                          if hit == "target" else p["plan_stop"]}
+                            if ft:
+                                label = "target hit" if ft["level"] == "target" else "stopped out"
+                                exit_px = ft["price"]
+                                reason = f"{label} @ {exit_px} (first-touch {ft['level']})"
+                                perf = realized_exit(p["direction"], entry, exit_px,
                                                      p.get("spy_price"), spy_now)
                                 await loop.run_in_executor(
                                     None, lambda pid=p["id"], r=reason, pf=perf:
@@ -182,6 +205,8 @@ async def _serve() -> None:
                                          p["id"], p["symbol"], p["direction"], reason,
                                          perf.get("exit_alpha"))
                                 continue
+                            if not cur:
+                                continue   # nothing crossed and no spot price → nothing to screen
                             # track the peak favorable move, then run the cheap screen.
                             # Fold in the PERSISTED MFE (grade_paths, daily High/Low):
                             # it survives restarts and catches intraday spikes between
