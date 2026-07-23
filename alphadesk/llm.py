@@ -215,7 +215,7 @@ def _extract_json(text: str) -> Any:
 # ---------------------------------------------------------------------------
 
 def _one_shot(model: str, system: str, user: str,
-              tools: list[str] | None = None, max_turns: int = 1,
+              tools: list[str] | None = None, max_turns: int = 5,
               timeout: float | None = None) -> tuple[str, int, int]:
     """Single Agent SDK completion. Returns (text, input_tokens, output_tokens).
     tools/max_turns enable grounded (e.g. web-search) agents."""
@@ -277,8 +277,8 @@ def call_role(
     schema: dict,
     decision_id: str | None = None,
     tools: list[str] | None = None,
-    max_turns: int = 1,
-    source: str | None = None,
+    max_turns: int = 5,   # give the model room to think before answering — a thinking
+    source: str | None = None,   # step counts as a turn; max_turns=1 errored (error_max_turns)
 ) -> dict:
     """Blocking, validated, guarded LLM call. Call from an executor thread.
 
@@ -300,14 +300,20 @@ def call_role(
             if any(marker in err for marker in _RATE_LIMIT_MARKERS):
                 _note_rate_limit(role, model)
                 raise LLMError(f"rate-limited ({role}/{model})") from exc
-            if not transient_retried:  # one retry for transient CLI/transport errors
-                transient_retried = True
-                log.info("Transient LLM error for %s/%s (%s) — one retry", role, model, exc)
-                time.sleep(2)
-                try:
-                    text, tin, tout = _one_shot(model, system, attempts_user, tools=tools, max_turns=max_turns)
-                except Exception as exc2:
-                    raise LLMError(f"{role}/{model} call failed after retry: {exc2}") from exc2
+            if not transient_retried:  # a few backoff retries for transient/opaque SDK errors
+                transient_retried = True                   # (an interrupted CLI subprocess,
+                last = exc                                 # a momentary throttle, an occasional
+                for delay in (1.5, 3.0, 6.0):              # error_max_turns) — the scout is a
+                    log.info("Transient LLM error for %s/%s (%s) — retry in %.1fs",
+                             role, model, last, delay)
+                    time.sleep(delay)
+                    try:
+                        text, tin, tout = _one_shot(model, system, attempts_user, tools=tools, max_turns=max_turns)
+                        break
+                    except Exception as exc2:
+                        last = exc2
+                else:   # single point of failure, so don't let one flaky call kill the run
+                    raise LLMError(f"{role}/{model} call failed after retries: {last}") from last
             else:
                 raise LLMError(f"{role}/{model} call failed: {exc}") from exc
 
