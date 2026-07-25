@@ -137,6 +137,11 @@ KIMI_K3_REASONING_EFFORT = os.environ.get("KIMI_K3_REASONING_EFFORT", "low")
 KIMI_THINKING = os.environ.get("KIMI_THINKING", "disabled").strip().lower()
 if KIMI_THINKING not in ("enabled", "disabled"):
     raise RuntimeError("KIMI_THINKING must be 'enabled' or 'disabled'")
+# Kimi's builtin $web_search tool (server-executed) — restores web grounding for the
+# connections desk + earnings reader on the kimi transport. Requires thinking
+# DISABLED (Moonshot: the tool is incompatible with thinking mode). On any tool-loop
+# failure the call falls back to parametric for that role (fail-soft). 0 = parametric.
+KIMI_WEB_SEARCH = os.environ.get("KIMI_WEB_SEARCH", "1") not in ("0", "", "false", "False", "no")
 
 # ---------------------------------------------------------------------------
 # Hard caps — resource physics, not judgment

@@ -260,7 +260,8 @@ def _one_shot(model: str, system: str, user: str,
     if MODEL_PROVIDER == "claude_sdk":
         return _one_shot_sdk(model, system, user, tools=tools, max_turns=max_turns,
                              timeout=timeout, budget_usd=budget_usd)
-    return _one_shot_http(model, system, user, tools=tools, timeout=timeout)
+    return _one_shot_http(model, system, user, tools=tools, max_turns=max_turns,
+                          timeout=timeout)
 
 
 # USD per 1M tokens (input, output) for the HTTP providers, from the providers'
@@ -289,45 +290,32 @@ def _provider_key() -> str:
                    f"set one of {', '.join(ep['key_envs'])}")
 
 
-def _one_shot_http(model: str, system: str, user: str,
-                   tools: list[str] | None = None,
-                   timeout: float | None = None) -> tuple[str, int, int, float]:
-    """One OpenAI-compatible chat completion against the configured HTTP provider.
-    Returns (text, input_tokens, output_tokens, cost_usd).
+def web_tools_available() -> bool:
+    """Can the configured transport actually ground a role on the live web?
+    claude_sdk → the SDK's WebSearch tool; kimi → the builtin server-side
+    $web_search (when enabled); deepseek → nothing (parametric only)."""
+    if MODEL_PROVIDER == "claude_sdk":
+        return True
+    if MODEL_PROVIDER == "kimi":
+        from alphadesk.config import KIMI_WEB_SEARCH
+        return KIMI_WEB_SEARCH
+    return False
 
-    v1: no client-side tool loop — a role asking for web tools (connections,
-    earnings_reader) is answered PARAMETRICALLY (the documented degradation
-    path). A search shim (provider-builtin or external) plugs in here later."""
-    concrete = _concrete_model(model)
-    if tools:
-        log.info("web tools unavailable on HTTP provider %s — %s answers parametrically",
-                 MODEL_PROVIDER, concrete)
-    key = _provider_key()
-    base = PROVIDER_ENDPOINTS[MODEL_PROVIDER]["base_url"].rstrip("/")
-    timeout = timeout or LLM_TIMEOUT_S
-    if len(user) > LLM_MAX_INPUT_CHARS:   # same input-size cap as the SDK path
-        user = user[:LLM_MAX_INPUT_CHARS] + "\n[…truncated at input-size limit]"
-    payload = {
-        "model": concrete,
-        "messages": [
-            {"role": "system", "content": system + _INJECTION_GUARD},
-            {"role": "user", "content": user},
-        ],
-        "max_tokens": LLM_HTTP_MAX_TOKENS,
-        # JSON mode (both providers support it) — every role prompt already says
-        # "Return ONLY JSON", which json_object mode requires.
-        "response_format": {"type": "json_object"},
-        "stream": False,
-    }
-    if concrete.startswith("kimi-k3"):
-        # k3 always reasons and reasoning bills as output — cap the effort (cost rail,
-        # env-overridable via KIMI_K3_REASONING_EFFORT).
-        from alphadesk.config import KIMI_K3_REASONING_EFFORT
-        payload["reasoning_effort"] = KIMI_K3_REASONING_EFFORT
-    elif MODEL_PROVIDER == "kimi" and concrete.startswith("kimi-k2"):
-        # k2.x thinks by default (~30-50s/call). The debate structure externalizes
-        # reasoning already — KIMI_THINKING=disabled keeps runs interactive.
-        payload["thinking"] = {"type": KIMI_THINKING}
+
+# Kimi's server-executed builtin search: the model emits a tool_call for
+# "$web_search"; per Moonshot's protocol the client echoes the call back as the
+# tool result and the SERVER runs the search and continues. (Docs flag web_search
+# as mid-update — the loop falls back to parametric on any failure.)
+_KIMI_WEB_SEARCH_TOOL = {
+    "type": "builtin_function",
+    "function": {"name": "$web_search"},
+}
+
+
+def _http_chat(base: str, key: str, payload: dict, timeout: float) -> dict:
+    """One POST to the provider's /chat/completions → parsed response dict.
+    HTTPError carries the status + body snippet (429 → the rate-limit ladder);
+    URLError/TimeoutError propagate as transient errors for the caller's backoff."""
     req = urllib.request.Request(
         f"{base}/chat/completions",
         data=json.dumps(payload).encode(),
@@ -336,23 +324,104 @@ def _one_shot_http(model: str, system: str, user: str,
     )
     try:
         with _spawn_gate, urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8", "replace"))
+            return json.loads(resp.read().decode("utf-8", "replace"))
     except urllib.error.HTTPError as exc:
         body = ""
         try:
             body = exc.read().decode("utf-8", "replace")[:300]
         except Exception:
             pass
-        # 429 surfaces in the message → _is_rate_limit steps the ladder/breaker
         raise RuntimeError(f"HTTP {exc.code} from {MODEL_PROVIDER}: {body}") from exc
-    # URLError / TimeoutError propagate as transient errors → caller's backoff retries
+
+
+def _one_shot_http(model: str, system: str, user: str,
+                   tools: list[str] | None = None, max_turns: int = 5,
+                   timeout: float | None = None) -> tuple[str, int, int, float]:
+    """One OpenAI-compatible completion against the configured HTTP provider.
+    Returns (text, input_tokens, output_tokens, cost_usd).
+
+    Web grounding: on kimi with tools requested + KIMI_WEB_SEARCH on, this runs the
+    builtin-$web_search tool loop (bounded by max_turns); on any tool-loop failure
+    it falls back to a plain parametric call (fail-soft — the role still answers).
+    On providers with no search (deepseek), tools are ignored (parametric)."""
+    concrete = _concrete_model(model)
+    key = _provider_key()
+    base = PROVIDER_ENDPOINTS[MODEL_PROVIDER]["base_url"].rstrip("/")
+    timeout = timeout or LLM_TIMEOUT_S
+    if len(user) > LLM_MAX_INPUT_CHARS:   # same input-size cap as the SDK path
+        user = user[:LLM_MAX_INPUT_CHARS] + "\n[…truncated at input-size limit]"
+
+    messages: list[dict] = [
+        {"role": "system", "content": system + _INJECTION_GUARD},
+        {"role": "user", "content": user},
+    ]
+
+    def _payload(with_tools: bool) -> dict:
+        p: dict = {
+            "model": concrete,
+            "messages": messages,
+            "max_tokens": LLM_HTTP_MAX_TOKENS,
+            "stream": False,
+        }
+        if not with_tools:
+            # JSON mode (both providers support it) — every role prompt already
+            # says "Return ONLY JSON", which json_object mode requires.
+            p["response_format"] = {"type": "json_object"}
+        else:
+            p["tools"] = [_KIMI_WEB_SEARCH_TOOL]
+            p["tool_choice"] = "auto"
+        if concrete.startswith("kimi-k3"):
+            # k3 always reasons and reasoning bills as output — cap the effort.
+            from alphadesk.config import KIMI_K3_REASONING_EFFORT
+            p["reasoning_effort"] = KIMI_K3_REASONING_EFFORT
+        elif MODEL_PROVIDER == "kimi" and concrete.startswith("kimi-k2"):
+            # k2.x thinks by default (~30-50s/call). The debate structure
+            # externalizes reasoning already — KIMI_THINKING=disabled keeps runs fast.
+            p["thinking"] = {"type": KIMI_THINKING}
+        return p
+
+    tin = tout = 0
+    grounded = bool(tools) and MODEL_PROVIDER == "kimi" and web_tools_available()
+    if tools and not grounded:
+        log.info("web tools unavailable on HTTP provider %s — %s answers parametrically",
+                 MODEL_PROVIDER, concrete)
+    try:
+        data = _http_chat(base, key, _payload(grounded), timeout)
+        # builtin-search loop: model asks for $web_search → echo the call → server
+        # searches → continues. Bounded; the final turn must produce text.
+        for _ in range(max(1, max_turns - 1) if grounded else 0):
+            msg = (data.get("choices") or [{}])[0].get("message") or {}
+            tcs = msg.get("tool_calls") or []
+            if not tcs:
+                break
+            messages.append({"role": "assistant",
+                             "content": msg.get("content") or "",
+                             "tool_calls": tcs})
+            for tc in tcs:
+                fn = (tc.get("function") or {})
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.get("id"),
+                    "name": fn.get("name", "$web_search"),
+                    "content": fn.get("arguments") or "",
+                })
+            usage = data.get("usage") or {}
+            tin += int(usage.get("prompt_tokens") or 0)
+            tout += int(usage.get("completion_tokens") or 0)
+            data = _http_chat(base, key, _payload(grounded), timeout)
+    except Exception as exc:
+        if not grounded:
+            raise
+        log.warning("kimi web_search loop failed (%s) — parametric fallback", exc)
+        data = _http_chat(base, key, _payload(False), timeout)
+
     msg = (data.get("choices") or [{}])[0].get("message") or {}
     text = (msg.get("content") or "").strip()
     if not text:
         raise RuntimeError(f"empty completion from {MODEL_PROVIDER}/{concrete}")
     usage = data.get("usage") or {}
-    tin = int(usage.get("prompt_tokens") or 0)   # deepseek folds cache hits into prompt_tokens
-    tout = int(usage.get("completion_tokens") or 0)
+    tin += int(usage.get("prompt_tokens") or 0)   # deepseek folds cache hits into prompt_tokens
+    tout += int(usage.get("completion_tokens") or 0)
     pin, pout = _MODEL_PRICES_USD_PER_MTOK.get(concrete, (0.0, 0.0))
     return text, tin, tout, (tin * pin + tout * pout) / 1e6
 
