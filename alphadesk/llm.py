@@ -4,7 +4,9 @@ Layers applied to every call (see plan §6):
   1. model resolution     MODEL_MAP[role] + env override + downgrade-ladder state
   2. injection defense    external text only enters via wrap_data() delimiters
   3. breaker check        open → fail fast to the caller's safe default
-  4. Agent SDK call       one-shot, no tools, hard timeout
+  4. model call           one-shot, hard timeout — via the configured TRANSPORT:
+                         claude-agent-sdk (default, Claude Max) or an OpenAI-
+                         compatible HTTP API (kimi / deepseek, key'd)
   5. schema validation    ranges/enums + universe whitelist; ONE re-ask, then raise
   6. token accounting     per role/model/decision → ledger sink
   7. rate-limit ladder    opus→sonnet→haiku for a window; bottom limited → breaker
@@ -16,28 +18,39 @@ candidate with a logged reason. Never a phantom pick, never a retry storm.
 import asyncio
 import json
 import logging
+import os
 import re
 import threading
 import time
+import urllib.error
+import urllib.request
 from concurrent.futures import TimeoutError as FuturesTimeout
 from typing import Any, Callable, Optional
 
 from alphadesk.config import (
+    KIMI_THINKING,
+    LLM_HTTP_MAX_CONCURRENCY,
+    LLM_HTTP_MAX_TOKENS,
     LLM_MAX_CONCURRENCY,
     LLM_MAX_INPUT_CHARS,
     LLM_TIMEOUT_S,
     LLM_TOOL_BUDGET_USD,
     LLM_TOOL_TIMEOUT_S,
     MODEL_MAP,
+    MODEL_PROVIDER,
+    PROVIDER_ENDPOINTS,
+    PROVIDER_MODELS,
     TIERS,
     in_universe,
 )
 
 log = logging.getLogger("alphadesk.llm")
 
-# Caps concurrent Claude CLI subprocesses (~250MB each) across ALL parallel
-# calls — briefs, exposure specialists, etc. — so fan-outs don't spike memory.
-_spawn_gate = threading.Semaphore(LLM_MAX_CONCURRENCY)
+# Caps concurrent model calls across ALL parallel fan-outs (briefs, gates, debates).
+# On claude_sdk this bounds ~250MB CLI subprocesses (memory); on HTTP it bounds
+# sockets — cheap, so it can be wider (watch provider rate limits if you raise it).
+_spawn_gate = threading.Semaphore(
+    LLM_MAX_CONCURRENCY if MODEL_PROVIDER == "claude_sdk" else LLM_HTTP_MAX_CONCURRENCY)
 
 # ALL SDK calls run on ONE persistent event loop in a dedicated thread. Creating
 # a fresh loop per call (asyncio.run) churns the SDK's subprocess async
@@ -118,6 +131,13 @@ def set_token_sink(fn: Callable[[str, str, int, int, Optional[str], Optional[str
 
 def _base_tier_index(model: str) -> int:
     return TIERS.index(model) if model in TIERS else 0
+
+
+def _concrete_model(tier_or_model: str) -> str:
+    """Tier alias → the configured provider's concrete model name. A string that
+    isn't a tier (a per-role override naming a concrete model directly) passes
+    through unchanged. For claude_sdk the map is identity (tier = CLI alias)."""
+    return PROVIDER_MODELS.get(MODEL_PROVIDER, {}).get(tier_or_model, tier_or_model)
 
 
 def _resolve_model(role: str) -> tuple[str, bool]:
@@ -234,6 +254,113 @@ def _one_shot(model: str, system: str, user: str,
               tools: list[str] | None = None, max_turns: int = 5,
               timeout: float | None = None,
               budget_usd: float | None = None) -> tuple[str, int, int, float]:
+    """Transport dispatch: the Claude Agent SDK (default) or an OpenAI-compatible
+    HTTP API (kimi/deepseek), per config.MODEL_PROVIDER. `model` is the TIER alias;
+    each backend resolves its concrete model. Same return contract either way."""
+    if MODEL_PROVIDER == "claude_sdk":
+        return _one_shot_sdk(model, system, user, tools=tools, max_turns=max_turns,
+                             timeout=timeout, budget_usd=budget_usd)
+    return _one_shot_http(model, system, user, tools=tools, timeout=timeout)
+
+
+# USD per 1M tokens (input, output) for the HTTP providers, from the providers'
+# pricing pages (2026-07) — telemetry ONLY (tokens are the durable metric; prices
+# drift — check the provider's page before trusting the cost column). Unlisted
+# models report cost 0.
+_MODEL_PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
+    "deepseek-chat": (0.27, 1.10),
+    "deepseek-reasoner": (0.55, 2.19),
+    "kimi-k3": (3.00, 15.00),     # flagship; reasoning bills as output
+    "kimi-k2.6": (0.95, 4.00),    # workhorse
+    "kimi-k2-0905-preview": (0.60, 2.50),   # legacy naming, approximate
+}
+
+
+def _provider_key() -> str:
+    ep = PROVIDER_ENDPOINTS.get(MODEL_PROVIDER)
+    if ep is None:
+        raise LLMError(f"unknown MODEL_PROVIDER: {MODEL_PROVIDER!r} "
+                       "(expected claude_sdk | kimi | deepseek)")
+    for env in ep["key_envs"]:
+        key = os.environ.get(env, "").strip()
+        if key:
+            return key
+    raise LLMError(f"no API key for provider {MODEL_PROVIDER!r} — "
+                   f"set one of {', '.join(ep['key_envs'])}")
+
+
+def _one_shot_http(model: str, system: str, user: str,
+                   tools: list[str] | None = None,
+                   timeout: float | None = None) -> tuple[str, int, int, float]:
+    """One OpenAI-compatible chat completion against the configured HTTP provider.
+    Returns (text, input_tokens, output_tokens, cost_usd).
+
+    v1: no client-side tool loop — a role asking for web tools (connections,
+    earnings_reader) is answered PARAMETRICALLY (the documented degradation
+    path). A search shim (provider-builtin or external) plugs in here later."""
+    concrete = _concrete_model(model)
+    if tools:
+        log.info("web tools unavailable on HTTP provider %s — %s answers parametrically",
+                 MODEL_PROVIDER, concrete)
+    key = _provider_key()
+    base = PROVIDER_ENDPOINTS[MODEL_PROVIDER]["base_url"].rstrip("/")
+    timeout = timeout or LLM_TIMEOUT_S
+    if len(user) > LLM_MAX_INPUT_CHARS:   # same input-size cap as the SDK path
+        user = user[:LLM_MAX_INPUT_CHARS] + "\n[…truncated at input-size limit]"
+    payload = {
+        "model": concrete,
+        "messages": [
+            {"role": "system", "content": system + _INJECTION_GUARD},
+            {"role": "user", "content": user},
+        ],
+        "max_tokens": LLM_HTTP_MAX_TOKENS,
+        # JSON mode (both providers support it) — every role prompt already says
+        # "Return ONLY JSON", which json_object mode requires.
+        "response_format": {"type": "json_object"},
+        "stream": False,
+    }
+    if concrete.startswith("kimi-k3"):
+        # k3 always reasons and reasoning bills as output — cap the effort (cost rail,
+        # env-overridable via KIMI_K3_REASONING_EFFORT).
+        from alphadesk.config import KIMI_K3_REASONING_EFFORT
+        payload["reasoning_effort"] = KIMI_K3_REASONING_EFFORT
+    elif MODEL_PROVIDER == "kimi" and concrete.startswith("kimi-k2"):
+        # k2.x thinks by default (~30-50s/call). The debate structure externalizes
+        # reasoning already — KIMI_THINKING=disabled keeps runs interactive.
+        payload["thinking"] = {"type": KIMI_THINKING}
+    req = urllib.request.Request(
+        f"{base}/chat/completions",
+        data=json.dumps(payload).encode(),
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with _spawn_gate, urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8", "replace"))
+    except urllib.error.HTTPError as exc:
+        body = ""
+        try:
+            body = exc.read().decode("utf-8", "replace")[:300]
+        except Exception:
+            pass
+        # 429 surfaces in the message → _is_rate_limit steps the ladder/breaker
+        raise RuntimeError(f"HTTP {exc.code} from {MODEL_PROVIDER}: {body}") from exc
+    # URLError / TimeoutError propagate as transient errors → caller's backoff retries
+    msg = (data.get("choices") or [{}])[0].get("message") or {}
+    text = (msg.get("content") or "").strip()
+    if not text:
+        raise RuntimeError(f"empty completion from {MODEL_PROVIDER}/{concrete}")
+    usage = data.get("usage") or {}
+    tin = int(usage.get("prompt_tokens") or 0)   # deepseek folds cache hits into prompt_tokens
+    tout = int(usage.get("completion_tokens") or 0)
+    pin, pout = _MODEL_PRICES_USD_PER_MTOK.get(concrete, (0.0, 0.0))
+    return text, tin, tout, (tin * pin + tout * pout) / 1e6
+
+
+def _one_shot_sdk(model: str, system: str, user: str,
+                  tools: list[str] | None = None, max_turns: int = 5,
+                  timeout: float | None = None,
+                  budget_usd: float | None = None) -> tuple[str, int, int, float]:
     """Single Agent SDK completion. Returns (text, input_tokens, output_tokens, cost_usd).
     tools/max_turns enable grounded (e.g. web-search) agents. budget_usd overrides the
     per-call dollar ceiling (the caller passes the budget REMAINING under the per-decision
@@ -309,6 +436,7 @@ def call_role(
         raise LLMUnavailable("breaker open")
 
     model, downgraded = _resolve_model(role)
+    sink_model = _concrete_model(model)   # telemetry tags the model actually billed
     attempts_user = user
     spent_usd = 0.0   # cumulative tool cost across ALL attempts of this one decision
 
@@ -356,7 +484,7 @@ def call_role(
 
         if _token_sink:
             try:
-                _token_sink(role, model + ("(downgraded)" if downgraded else ""), tin, tout, decision_id, source)
+                _token_sink(role, sink_model + ("(downgraded)" if downgraded else ""), tin, tout, decision_id, source)
             except Exception:
                 log.debug("token sink failed", exc_info=True)
 

@@ -75,6 +75,70 @@ for _role in list(MODEL_MAP):   # per-role override wins over the cheap default
         MODEL_MAP[_role] = _override
 
 # ---------------------------------------------------------------------------
+# Model transport — where the tier aliases actually RUN. ALL-OR-NOTHING by law:
+# exactly ONE provider serves EVERY role in the process — there is no per-role
+# provider mixing and NO silent cross-provider fallback (a missing key or a bad
+# provider name fails loud at startup / call time, never a quiet route back to
+# Claude). Default: the bundled Claude Code CLI (claude-agent-sdk, Claude Max
+# subscription); the SDK is imported LAZILY, so on an HTTP provider it is never
+# even loaded. HTTP providers (kimi, deepseek) are OpenAI-compatible
+# chat-completions APIs with API keys. Roles still map to TIERS; each provider
+# resolves tier → concrete model below. A per-role MODEL_<ROLE> override may
+# name a concrete model of the SAME provider directly (bypasses the tier ladder).
+# v1: web tools (connections, earnings_reader) are SDK-only; on HTTP providers
+# those roles answer parametrically (the documented degradation path).
+# ---------------------------------------------------------------------------
+MODEL_PROVIDERS = ("claude_sdk", "kimi", "deepseek")
+MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "claude_sdk").strip().lower()
+if MODEL_PROVIDER not in MODEL_PROVIDERS:
+    raise RuntimeError(
+        f"MODEL_PROVIDER={MODEL_PROVIDER!r} not understood — the system runs on exactly "
+        f"ONE provider for every role; pick one of {MODEL_PROVIDERS}."
+    )
+
+PROVIDER_MODELS: dict[str, dict[str, str]] = {
+    "claude_sdk": {"opus": "opus", "sonnet": "sonnet", "haiku": "haiku"},
+    "kimi": {
+        # ALL tiers default to kimi-k2.6 ($0.95/$4 per Mtok) — the k3 flagship ($3/$15,
+        # always-reasons) is OFF by default; opt in per tier (KIMI_MODEL_OPUS=kimi-k3)
+        # or per role (MODEL_JUDGE=kimi-k3).
+        "opus": os.environ.get("KIMI_MODEL_OPUS", "kimi-k2.6"),
+        "sonnet": os.environ.get("KIMI_MODEL_SONNET", "kimi-k2.6"),
+        "haiku": os.environ.get("KIMI_MODEL_HAIKU", "kimi-k2.6"),
+    },
+    "deepseek": {
+        "opus": os.environ.get("DEEPSEEK_MODEL_OPUS", "deepseek-reasoner"),
+        "sonnet": os.environ.get("DEEPSEEK_MODEL_SONNET", "deepseek-chat"),
+        "haiku": os.environ.get("DEEPSEEK_MODEL_HAIKU", "deepseek-chat"),
+    },
+}
+
+PROVIDER_ENDPOINTS: dict[str, dict] = {
+    "kimi": {
+        "base_url": os.environ.get("KIMI_BASE_URL", "https://api.moonshot.ai/v1"),
+        "key_envs": ("KIMI_API_KEY", "MOONSHOT_API_KEY"),   # first set wins
+    },
+    "deepseek": {
+        "base_url": os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
+        "key_envs": ("DEEPSEEK_API_KEY",),
+    },
+}
+LLM_HTTP_MAX_TOKENS = int(os.environ.get("LLM_HTTP_MAX_TOKENS", "8192"))  # completion cap per HTTP call
+LLM_HTTP_MAX_CONCURRENCY = int(os.environ.get("LLM_HTTP_MAX_CONCURRENCY", "8"))  # HTTP calls are sockets,
+# not 250MB CLI subprocesses — the spawn gate can be wider than LLM_MAX_CONCURRENCY.
+# Only fires if kimi-k3 is explicitly enabled (it ALWAYS reasons, and reasoning tokens
+# bill as output): cap the effort so a short JSON verdict can't burn "max"-effort
+# reasoning (the provider default). k3 is OFF by default (all tiers → kimi-k2.6).
+KIMI_K3_REASONING_EFFORT = os.environ.get("KIMI_K3_REASONING_EFFORT", "low")
+# kimi k2.x thinks by default (~30-50s/call). The desk's debate structure already
+# externalizes reasoning (researcher→critic→rebuttal→judge IS the chain-of-thought),
+# so hidden thinking is redundant — "disabled" (~5-15s/call) keeps runs interactive.
+# Set "enabled" for deeper but much slower debates.
+KIMI_THINKING = os.environ.get("KIMI_THINKING", "disabled").strip().lower()
+if KIMI_THINKING not in ("enabled", "disabled"):
+    raise RuntimeError("KIMI_THINKING must be 'enabled' or 'disabled'")
+
+# ---------------------------------------------------------------------------
 # Hard caps — resource physics, not judgment
 # ---------------------------------------------------------------------------
 
@@ -134,6 +198,30 @@ ENTRY_GAP_SKIP_PCT = float(os.environ.get("ENTRY_GAP_SKIP_PCT", "2.0"))
 # market cap — so the biggest movers are seen first instead of being truncated behind
 # mega-caps (the THRM +22.7% miss). Raise to see more per run (more scout tokens + fetches).
 SCOUT_MAX_CANDIDATES = int(os.environ.get("SCOUT_MAX_CANDIDATES", "60"))
+
+# ---------------------------------------------------------------------------
+# Lean mode (default ON) — cost discipline for an unproven system. Earnings drift
+# is the primary, cheapest, highest-signal channel; everything around it is
+# throttled. One master switch (LEAN_MODE=0 restores full mode); each knob is
+# independently env-overridable. Affects the Find Trades / autorun path (the
+# recurring cost); the desk CLI inherits the news.py fetch caps.
+# ---------------------------------------------------------------------------
+LEAN_MODE = os.environ.get("LEAN_MODE", "1") not in ("0", "", "false", "False", "no")
+# Earnings-primary: with at least this many material reporters, skip the news poll
+# entirely — a heavy earnings slate is where the edge lives; news adds cost, not coverage.
+LEAN_EARNINGS_SKIP_NEWS = int(os.environ.get("LEAN_EARNINGS_SKIP_NEWS", "5"))
+# When the news poll DOES run: shorter window + smaller fetch (news is perishable).
+LEAN_NEWS_HOURS = float(os.environ.get("LEAN_NEWS_HOURS", "12"))
+LEAN_NEWS_MAX_ARTICLES = int(os.environ.get("LEAN_NEWS_MAX_ARTICLES", "100"))  # fetch cap (full: 200)
+LEAN_NEWS_MAX_SCAN = int(os.environ.get("LEAN_NEWS_MAX_SCAN", "200"))          # raw scan cap (full: 400)
+# Narrower scout window + fewer debates per run (materiality ranking keeps the big movers).
+LEAN_SCOUT_MAX_CANDIDATES = int(os.environ.get("LEAN_SCOUT_MAX_CANDIDATES", "30"))   # (full: 60)
+LEAN_MAX_DEBATES = int(os.environ.get("LEAN_MAX_DEBATES", "4"))                      # (full: 6)
+# Trigger-only position review: an open position gets an LLM review only on fresh news
+# in the pool; else auto-HOLD. Price exits belong to the pure-code watcher (the reviewer
+# is shown no prices), and it closes on level crosses between runs — nothing is unguarded.
+LEAN_REVIEW_TRIGGER_ONLY = os.environ.get(
+    "LEAN_REVIEW_TRIGGER_ONLY", "1") not in ("0", "", "false", "False", "no")
 # Auto-run: in `dashboard` mode, fire Find Trades every AUTORUN_INTERVAL_HOURS within the
 # [AUTORUN_START_ET, AUTORUN_END_ET] ET window on trading days — no button click. Default:
 # hourly, 09:35–16:00 (market hours; start a few min after 9:30 so BMO reporters are public
@@ -175,15 +263,9 @@ MATERIAL_REACTION_PCT = float(os.environ.get("MATERIAL_REACTION_PCT", "1.5"))
 REACTION_AB_HORIZON_DAYS = int(os.environ.get("REACTION_AB_HORIZON_DAYS", "3"))
 REPICK_COOLDOWN_HOURS = int(os.environ.get("REPICK_COOLDOWN_HOURS", "24"))  # don't re-debate a name within this window; matches the 24h news window so a catalyst is debated once (anti-double-dip across runs)
 
-# Exit-monitoring escalation SCREENS (not decisions — the opus reviewer decides).
-# Cheap, deliberately generous code triggers that flag an open position for a
-# thesis re-review between Find Trades runs, so a spent move (like a beat that has
-# exceeded its implied move) gets closed before the gain decays. Tunable/removable;
-# the reviewer is the real filter, so err toward escalating.
-EXIT_NEAR_TARGET_FRAC = float(os.environ.get("EXIT_NEAR_TARGET_FRAC", "0.85"))  # ≥ this much of the entry→target move captured → ask "take it now?"
-EXIT_GIVEBACK_MIN_PEAK = float(os.environ.get("EXIT_GIVEBACK_MIN_PEAK", "4.0"))  # only watch give-back once the favorable move peaked above this % (below this is intraday noise, not a spent thesis)
-EXIT_GIVEBACK_FRAC = float(os.environ.get("EXIT_GIVEBACK_FRAC", "0.40"))         # faded ≥ this fraction of that peak → the MFE-decay flag
-EXIT_REVIEW_COOLDOWN_S = int(os.environ.get("EXIT_REVIEW_COOLDOWN_S", "1800"))   # don't re-review the same open position more often than this
+# (Removed: the exit give-back / near-target LLM-escalation screens. Price-based
+# exits are owned entirely by the pure-code first-touch watcher; the run-level
+# reviewer is shown no prices and exits only on fresh adverse NEWS — design law #2.)
 
 # Limit-order fills: a 'limit' pick fills only if the market reaches the plan entry
 # — with this buffer of tolerance so a near-miss still counts as a fill (else it's
