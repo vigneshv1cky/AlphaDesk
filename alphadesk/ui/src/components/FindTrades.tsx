@@ -110,6 +110,19 @@ function Tag({ children, className = "" }: { children: React.ReactNode; classNam
   )
 }
 
+// One row of a tree-structured section: a ├─ connector (└─ on the last row) to the
+// left of the card, so the live run reads like a file tree.
+function TreeRow({ last, children }: { last?: boolean; children: React.ReactNode }) {
+  return (
+    <div className="flex items-start gap-1.5">
+      <span className="mt-2.5 w-4 shrink-0 select-none font-mono text-xs text-muted-foreground/60">
+        {last ? "└─" : "├─"}
+      </span>
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  )
+}
+
 function Line({ ev }: { ev: Ev }) {
   const cls = `rounded-md border border-l-4 ${ACCENT[ev.type] ?? "border-l-border"} bg-card p-2.5 text-sm`
   switch (ev.type) {
@@ -351,38 +364,6 @@ export function FindTrades({
           Deep scan — also map supply-chain ripples (slower, uses more)
         </label>
 
-        <pre className="mt-3 overflow-x-auto rounded-md bg-muted/40 p-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground">
-{`Find Trades run
-  │
-  ├─ SCAN     earnings movers (≥1.5% reaction) + 12h news
-  │            └ heavy earnings day → news poll skipped (lean)
-  │
-  ├─ REVIEW   open picks: fresh news → HOLD/EXIT (no prices shown)
-  │            └ code watcher guards target/stop every 180s
-  │
-  ├─ SCOUT    top ≤4 of ranked candidates (+ reason for every skip)
-  │
-  ├─ GATE     no real catalyst? → dropped & graded forward
-  │            └ earnings reports pass automatically
-  │
-  ├─ EVIDENCE — facts fetched in code, never from model memory
-  │    • price/volume/valuation + options-implied move
-  │    • earnings track record + analyst revisions (yfinance)
-  │    • supply-chain links: EDGAR 10-Ks, Polygon peers, news graph
-  │
-  ├─ DEBATE   researcher → critic (may flip) → fact-check
-  │            → rebuttal → judge commits LONG/SHORT
-  │
-  ├─ PLAN     entry now · target · stop (coherence-checked in code)
-  │
-  ├─ HEAD     ranks the slate · max 2 per sector+direction/day
-  │
-  └─ AFTERMATH
-       • watcher: closes at first target/stop touch (pure code)
-       • grader: alpha vs S&P at each call's horizon
-         — skips & rejects graded too`}
-        </pre>
-
         <details className="mt-3 text-xs text-muted-foreground">
           <summary className="cursor-pointer select-none">How this works</summary>
           <div className="mt-1.5 space-y-1.5 border-l-2 border-border pl-3">
@@ -457,29 +438,30 @@ export function FindTrades({
             {positions.map((p, i) => {
               const exit = p.type === "position_exit"
               return (
-                <div
-                  key={i}
-                  className={`rounded-md border border-l-4 bg-card p-2.5 text-sm ${
-                    exit ? "border-l-red-500" : "border-l-emerald-600"
-                  }`}
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge className={exit ? "bg-red-600 text-white" : "bg-emerald-600 text-white"}>
-                      {exit ? "Sell now" : "Keep"}
-                    </Badge>
-                    <span className={dirUp(p.direction) ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}>
-                      {dirWord(p.direction)}
-                    </span>
-                    <span className="font-bold">{p.symbol}</span>
-                    <span className="text-muted-foreground">~{p.horizon_days}-day pick</span>
-                    {exit && p.entry != null && p.now != null && (
-                      <span className="text-muted-foreground">
-                        · {p.entry} → {p.now}
+                <TreeRow key={i} last={i === positions.length - 1}>
+                  <div
+                    className={`rounded-md border border-l-4 bg-card p-2.5 text-sm ${
+                      exit ? "border-l-red-500" : "border-l-emerald-600"
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge className={exit ? "bg-red-600 text-white" : "bg-emerald-600 text-white"}>
+                        {exit ? "Sell now" : "Keep"}
+                      </Badge>
+                      <span className={dirUp(p.direction) ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}>
+                        {dirWord(p.direction)}
                       </span>
-                    )}
+                      <span className="font-bold">{p.symbol}</span>
+                      <span className="text-muted-foreground">~{p.horizon_days}-day pick</span>
+                      {exit && p.entry != null && p.now != null && (
+                        <span className="text-muted-foreground">
+                          · {p.entry} → {p.now}
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 text-muted-foreground">{p.reason}</p>
                   </div>
-                  <p className="mt-1 text-muted-foreground">{p.reason}</p>
-                </div>
+                </TreeRow>
               )
             })}
           </div>
@@ -500,8 +482,8 @@ export function FindTrades({
               </span>
             </div>
             {board.map((r, i) => (
+              <TreeRow key={r.id} last={i === board.length - 1}>
               <div
-                key={r.id}
                 className={`rounded-md border p-2.5 text-sm ${
                   r.take ? "border-emerald-600/60 bg-emerald-500/5" : "opacity-70"
                 }`}
@@ -543,6 +525,7 @@ export function FindTrades({
                   </p>
                 )}
               </div>
+              </TreeRow>
             ))}
             {board.length === 0 && (
               <p className="text-sm text-muted-foreground">Nothing worth acting on this time.</p>
@@ -553,7 +536,9 @@ export function FindTrades({
         {feed.length > 0 && (
           <div className="mt-4 space-y-2">
             {feed.map((ev, i) => (
-              <Line key={i} ev={ev} />
+              <TreeRow key={i} last={i === feed.length - 1}>
+                <Line ev={ev} />
+              </TreeRow>
             ))}
           </div>
         )}
