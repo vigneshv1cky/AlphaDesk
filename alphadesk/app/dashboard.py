@@ -39,7 +39,15 @@ def _cross_origin(request: Request) -> bool:
     otherwise triggerable by ANY page the operator visits (a bare `<img>`/`fetch`/
     `EventSource` to 127.0.0.1 fires a real LLM run + ledger writes). Browser drive-bys
     always carry an Origin or a Referer pointing at the attacker's host; we reject those.
-    Same-origin (the real dashboard) and header-less clients (curl) are allowed."""
+    Same-origin (the real dashboard) and header-less clients (curl) are allowed.
+
+    Sec-Fetch-Site backstop: browsers send it even when Origin/Referer are stripped
+    (e.g. an HTTPS page hot-linking the HTTP localhost server via <img> — the
+    HTTPS→HTTP downgrade drops Referer). curl/scripts send neither header, so this
+    only ever rejects real browser cross-site requests."""
+    sfs = request.headers.get("sec-fetch-site", "").lower()
+    if sfs and sfs not in ("same-origin", "same-site", "none"):
+        return True
     host = request.headers.get("host", "")
     for h in ("origin", "referer"):
         v = request.headers.get(h)
@@ -471,7 +479,13 @@ async def api_find_trades(request: Request, hours: float = 24.0,
 
     from fastapi.responses import StreamingResponse
 
+    from alphadesk.config import MAX_PICKS_PER_WINDOW
     from alphadesk.desk.stream import stream_find_trades
+
+    # Clamp caller-supplied run parameters — the daily run cap bounds RUNS, not
+    # debates-per-run or the news window (cost rails, not judgment).
+    hours = max(1.0, min(float(hours), 168.0))                    # ≤ 1 week lookback
+    max_debates = max(1, min(int(max_debates), MAX_PICKS_PER_WINDOW))
 
     async def gen():
         if _cross_origin(request):

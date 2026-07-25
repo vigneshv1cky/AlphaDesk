@@ -44,6 +44,8 @@ log = logging.getLogger("alphadesk.world")
 _DOC_API = "https://api.gdeltproject.org/api/v2/doc/doc"
 _BATCH = 15
 _seen_urls: set[str] = set()
+_SEEN_CAP = 100_000   # bound memory in a 24/7 process; a rare cleared URL just
+                      # re-enters assessment (deduped again downstream by the cooldowns)
 
 # Domains that are overwhelmingly noise/aggregator spam (factual junk filter)
 _DOMAIN_BLOCKLIST = {
@@ -169,6 +171,8 @@ def fetch_category(category: str, query: str, timespan: str = "1h",
         domain = art.get("domain", "")
         if not url or url in _seen_urls or domain in _DOMAIN_BLOCKLIST:
             continue
+        if len(_seen_urls) >= _SEEN_CAP:
+            _seen_urls.clear()
         _seen_urls.add(url)
         seen = art.get("seendate", "")
         try:

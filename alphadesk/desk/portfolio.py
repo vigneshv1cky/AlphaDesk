@@ -15,7 +15,9 @@ capped at PM_MAX_POSITION_USD. So thin leans get tiny positions and high-convict
 selection re-expressed as SIZE now that the desk takes everything.
 
 Limitations (v1): one position per SYMBOL (Alpaca aggregates); a short that isn't shortable is
-rejected and not retried; partial fills aren't tracked beyond the submit.
+rejected and not retried; partial fills aren't tracked beyond the submit. Reconcile only closes
+positions it opened (stamped with a broker_order_id) — manual trades in the same paper account
+are left alone.
 """
 
 import logging
@@ -114,9 +116,13 @@ def reconcile() -> dict:
             store.set_broker_order(pick["id"], None, f"rejected: {exc}", 0)
             log.warning("PM order REJECTED %s %s: %s", pick["direction"], sym, exc)
 
-    # EXITS — close what Alpaca holds but the ledger has exited/graded (no longer open-taken).
+    # EXITS — close what Alpaca holds but the ledger has exited/graded (no longer
+    # open-taken). ONLY positions the PM itself opened (broker_order_id stamped): an
+    # unrecognized position (e.g. a manual trade in the same paper account) is left
+    # alone, never liquidated.
+    managed = store.pm_managed_symbols()
     for sym in positions:
-        if sym not in open_syms:
+        if sym not in open_syms and sym in managed:
             try:
                 client.close_position(sym)
                 closed += 1

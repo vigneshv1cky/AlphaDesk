@@ -15,7 +15,12 @@ import os
 import time
 from datetime import datetime, timedelta, timezone
 
-from alphadesk.config import in_universe
+from alphadesk.config import (
+    LEAN_MODE,
+    LEAN_NEWS_MAX_ARTICLES,
+    LEAN_NEWS_MAX_SCAN,
+    in_universe,
+)
 from alphadesk.ledger import store
 from alphadesk.llm import LLMError, call_role, wrap_data
 
@@ -25,6 +30,9 @@ _POLYGON_KEY = os.environ.get("POLYGON_API_KEY", "")
 _BATCH = 30               # articles per enrichment call (bigger batch = fewer calls = less overhead)
 _MAX_SCAN = 400           # cap raw articles paged through (free-tier rate-limit guard)
 _seen_ids: set[str] = set()
+_SEEN_CAP = 100_000       # bound memory in a 24/7 process (~10 days of ids); clearing
+                          # only risks re-fetching an old article, which the persistent
+                          # enrichment cache absorbs (no re-enrichment cost)
 
 _ENRICH_SYSTEM = (
     "You are a financial news enrichment engine. For each numbered article you "
@@ -100,16 +108,19 @@ _ENRICH_SCHEMA = {
 def fetch_articles(since: datetime, limit: int = 200) -> list[dict]:
     """Raw Polygon articles (ticker-tagged) since `since`, NEWEST first.
 
-    Bounded: stops after `limit` usable articles OR `_MAX_SCAN` raw items paged
-    through — whichever comes first. `list_ticker_news` paginates with no ticker
-    filter, and the free tier rate-limits deep paging hard (429 backoffs stack
-    into multi-minute stalls), so we cap how far we page rather than hang.
+    Bounded: stops after `limit` usable articles OR the raw-scan cap — whichever
+    comes first. `list_ticker_news` paginates with no ticker filter, and the free
+    tier rate-limits deep paging hard (429 backoffs stack into multi-minute stalls),
+    so we cap how far we page rather than hang. Lean mode tightens both caps.
 
     Recency-first is deliberate: a wide window holds far more than the cap, so with
     a hard cap the ONLY correct policy is to sacrifice the OLDEST news, never the
     newest — the whole thesis is trading fresh catalysts before they're priced.
     """
     import polygon
+    max_scan = LEAN_NEWS_MAX_SCAN if LEAN_MODE else _MAX_SCAN
+    if LEAN_MODE:
+        limit = min(limit, LEAN_NEWS_MAX_ARTICLES)
     client = polygon.RESTClient(api_key=_POLYGON_KEY)
     out: list[dict] = []
     scanned = 0
@@ -118,12 +129,14 @@ def fetch_articles(since: datetime, limit: int = 200) -> list[dict]:
         limit=min(limit, 1000), sort="published_utc", order="desc",
     ):
         scanned += 1
-        if scanned > _MAX_SCAN:
-            log.warning("Polygon scan cap (%d) hit — %d usable articles collected", _MAX_SCAN, len(out))
+        if scanned > max_scan:
+            log.warning("Polygon scan cap (%d) hit — %d usable articles collected", max_scan, len(out))
             break
         art_id = str(getattr(art, "id", "") or getattr(art, "article_url", ""))
         if not art_id or art_id in _seen_ids:
             continue
+        if len(_seen_ids) >= _SEEN_CAP:
+            _seen_ids.clear()
         _seen_ids.add(art_id)
         tickers = [t for t in (getattr(art, "tickers", None) or []) if t]
         title = getattr(art, "title", "") or ""
@@ -158,24 +171,31 @@ def enrich(articles: list[dict]) -> list[dict]:
     fresh: dict[str, dict] = {}        # article_id → enrichment (all uncached)
     cacheable: list[dict] = []         # only genuine results (not fallbacks)
 
-    for start in range(0, len(to_enrich), _BATCH):
-        batch = to_enrich[start:start + _BATCH]
+    def _enrich_batch(batch: list[dict]) -> dict[int, dict]:
         numbered = "\n".join(
             f"{i + 1}. [{', '.join(a['tickers'])}] {a['title']}"
             + (f" — {a['summary'][:200]}" if a["summary"] else "")
             for i, a in enumerate(batch)
         )
-        results: dict[int, dict] = {}
         try:
             out = call_role(
                 "enrichment", _ENRICH_SYSTEM,
                 "Articles:\n" + wrap_data("articles", numbered),
                 schema=_ENRICH_SCHEMA, source="FINANCIAL",
             )
-            results = {item["i"]: item for item in out.get("items", [])}
+            return {item["i"]: item for item in out.get("items", [])}
         except LLMError as exc:
             log.warning("Enrichment batch failed (%s) — neutral fallback ×%d", exc, len(batch))
+            return {}
 
+    # batches run in PARALLEL (bounded) — sequential batches were ~N× call latency
+    # of dead time per run (results are index-keyed per batch, so order is preserved)
+    batches = [to_enrich[s:s + _BATCH] for s in range(0, len(to_enrich), _BATCH)]
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        batch_results = list(pool.map(_enrich_batch, batches))
+
+    for batch, results in zip(batches, batch_results):
         for i, art in enumerate(batch):
             item = results.get(i + 1)
             rec = {

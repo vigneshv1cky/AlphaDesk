@@ -13,6 +13,22 @@ from alphadesk.llm import call_role, wrap_data
 
 log = logging.getLogger("alphadesk.scout")
 
+
+def headline_rows(articles: list[dict]) -> list[str]:
+    """The one-liner per article shown in the scout window — shared by both entry
+    points (stream + batch) so the two can't drift on what the scout sees."""
+    return [
+        f"[{a.get('category', '?')}] {a.get('title', '')[:120]}"
+        + (f" (sent={a['mentions'][0]['sentiment']})" if a.get("mentions") else "")
+        for a in articles[:4]
+    ]
+
+
+def avg_sentiment(articles: list[dict]) -> float:
+    """Mean mention sentiment across a symbol's articles — shared window stat."""
+    vals = [m["sentiment"] for a in articles for m in a.get("mentions", [])]
+    return round(sum(vals) / len(vals), 3) if vals else 0.0
+
 _SYSTEM = (
     "You are the scout desk of a predictive stock research firm. Your team "
     "predicts which stocks will OUTPERFORM over the next 1-10 trading days, "

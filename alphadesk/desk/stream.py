@@ -27,6 +27,13 @@ from datetime import datetime, timezone
 from alphadesk.config import (
     EARNINGS_DRIFT_DAYS,
     EXPOSURE_MAX_SHOCKS,
+    LEAN_EARNINGS_SKIP_NEWS,
+    LEAN_MAX_DEBATES,
+    LEAN_MODE,
+    LEAN_NEWS_HOURS,
+    LEAN_REVIEW_TRIGGER_ONLY,
+    LEAN_SCOUT_MAX_CANDIDATES,
+    MAX_CONCURRENT_WORKFLOWS,
     MODEL_MAP,
     REPICK_COOLDOWN_HOURS,
     SCOUT_MAX_CANDIDATES,
@@ -75,16 +82,11 @@ def _source_of(sym: str, earnings_syms: set, world_syms: set, ripple_syms: set) 
 
 
 def _headlines(articles: list[dict]) -> list[str]:
-    return [
-        f"[{a.get('category', '?')}] {a.get('title', '')[:120]}"
-        + (f" (sent={a['mentions'][0]['sentiment']})" if a.get("mentions") else "")
-        for a in articles[:4]
-    ]
+    return scout.headline_rows(articles)
 
 
 def _avg_sentiment(articles: list[dict]) -> float:
-    vals = [m["sentiment"] for a in articles for m in a.get("mentions", [])]
-    return round(sum(vals) / len(vals), 3) if vals else 0.0
+    return scout.avg_sentiment(articles)
 
 
 def _intensity(articles: list[dict]) -> float:
@@ -99,6 +101,15 @@ def _materiality(articles: list[dict]) -> float:
     biggest movers to the scout rather than truncating them behind mega-caps (the THRM miss)."""
     reactions = [abs(a["reaction_pct"]) for a in articles if a.get("reaction_pct") is not None]
     return max(reactions) if reactions else _intensity(articles)
+
+
+def _review_trigger(pos: dict, fresh: list) -> str | None:
+    """Lean mode: is there anything NEW to judge about this open position? The ONLY
+    trigger is fresh news in this run's pool — price-based exits belong to the
+    watcher's pure-code level checks, never to an LLM (the reviewer is shown no
+    prices). No news → auto-HOLD without spending a judgment call; the 180s watcher
+    still closes on level crosses between runs, so the position is never unguarded."""
+    return "fresh news" if fresh else None
 
 
 _pending_run_picks: list[int] = []   # picks committed by the in-flight run, not yet finalised
@@ -130,6 +141,10 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
     _pending_run_picks rollback list is single-file and race-free."""
     loop = asyncio.get_running_loop()
     global _pending_run_picks
+
+    if LEAN_MODE:   # cost rails: shorter news window, fewer debates per run
+        hours = min(hours, LEAN_NEWS_HOURS)
+        max_debates = min(max_debates, LEAN_MAX_DEBATES)
 
     async def _gone() -> bool:
         return bool(is_disconnected and await is_disconnected())
@@ -170,15 +185,24 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
 
     # Financial news — merged in AFTER earnings so the calendar leads. Fail-soft: a
     # news error just means we run on earnings drift (and world, if enabled) alone.
-    if await _gone():
-        return
-    yield _ev("status", msg=f"Scanning the last {int(hours)}h of financial news…")
-    try:
-        n, news_cands = await loop.run_in_executor(None, news.poll, since_dt)
-    except Exception as exc:
+    # LEAN MODE, earnings-primary: a heavy earnings slate (≥ LEAN_EARNINGS_SKIP_NEWS
+    # reporters) is where the edge lives — skip the news poll entirely and save the
+    # fetch + enrichment spend.
+    skip_news = LEAN_MODE and len(drift) >= LEAN_EARNINGS_SKIP_NEWS
+    if skip_news:
         n, news_cands = 0, {}
-        log.warning("News scan failed (%s) — proceeding on the earnings calendar", exc)
-        yield _ev("status", msg=f"News scan failed ({exc}) — running on earnings drift.")
+        yield _ev("status", msg=f"Lean mode: {len(drift)} material earnings reporters — "
+                                "earnings-primary run, news poll skipped.")
+    elif await _gone():
+        return
+    else:
+        yield _ev("status", msg=f"Scanning the last {int(hours)}h of financial news…")
+        try:
+            n, news_cands = await loop.run_in_executor(None, news.poll, since_dt)
+        except Exception as exc:
+            n, news_cands = 0, {}
+            log.warning("News scan failed (%s) — proceeding on the earnings calendar", exc)
+            yield _ev("status", msg=f"News scan failed ({exc}) — running on earnings drift.")
     await loop.run_in_executor(None, store.record_ingest, "FINANCIAL", n, len(news_cands))
     for sym, arts in news_cands.items():
         bucket = candidates.setdefault(sym, [])
@@ -236,11 +260,18 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
             if await _gone():
                 return
             psym = pos["symbol"]
-            pctx = await loop.run_in_executor(None, prices.get_context, psym)
             fresh = candidates.get(psym, [])
+            if LEAN_MODE and LEAN_REVIEW_TRIGGER_ONLY and not _review_trigger(pos, fresh):
+                yield _ev("position_hold", id=pos["id"], symbol=psym,
+                          direction=pos["direction"], horizon_days=pos["horizon_days"],
+                          reason="lean hold — no fresh news (the watcher guards target/stop)")
+                continue
+            # the reviewer is price-blind: it judges the thesis vs the NEWS only
             verdict = await loop.run_in_executor(
-                None, review.review_position, pos, pctx, fresh, f"reeval-{pos['id']}")
+                None, review.review_position, pos, fresh, f"reeval-{pos['id']}")
             if verdict["decision"] == "EXIT":
+                # price is fetched ONLY to stamp the realized exit — never shown to the reviewer
+                pctx = await loop.run_in_executor(None, prices.get_context, psym)
                 exit_px = (pctx or {}).get("last_price")
                 fill = entry_fill_time(pos["ts"], pos.get("session"))
                 if fill and now_et() < fill:
@@ -256,10 +287,12 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
                 else:
                     # freeze realized performance at the exit price (same math as the
                     # target/stop watcher — distinct from the horizon grade)
-                    spy_now = (prices.get_context("SPY") or {}).get("last_price")
+                    spy_ctx = await loop.run_in_executor(None, prices.get_context, "SPY")
+                    spy_now = (spy_ctx or {}).get("last_price")
                     entry = pos.get("entry_price") or pos.get("plan_entry")
                     perf = plan.realized_exit(pos["direction"], entry, exit_px,
-                                              pos.get("spy_price"), spy_now)
+                                              pos.get("spy_price"), spy_now,
+                                              bool(pos.get("low_liquidity")))
                     await loop.run_in_executor(
                         None, lambda: store.record_exit(pos["id"], verdict["reason"], **perf))
                     yield _ev("position_exit", id=pos["id"], symbol=psym, direction=pos["direction"],
@@ -270,6 +303,7 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
                           horizon_days=pos["horizon_days"], reason=verdict["reason"])
 
     if not candidates:
+        await loop.run_in_executor(None, store.add_run, "FIND_TRADES", [])
         yield _ev("status", msg="No fresh catalysts found in that window.")
         yield _ev("done", board=[])
         return
@@ -362,6 +396,7 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
         yield _ev("status", msg=f"Skipped {len(dropped)} name(s): already held, or same story as a "
                                 f"debate in the last {REPICK_COOLDOWN_HOURS}h (no re-dip).")
     if not candidates:
+        await loop.run_in_executor(None, store.add_run, "FIND_TRADES", [])
         yield _ev("status", msg="Nothing fresh to debate after de-duping held/recent names.")
         yield _ev("done", board=[])
         return
@@ -386,8 +421,12 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
                  key=lambda kv: -_intensity(kv[1]))
     )
     window: dict[str, dict] = {}
-    for sym, arts in ordered[:SCOUT_MAX_CANDIDATES]:
-        ctx = await loop.run_in_executor(None, prices.get_context, sym)
+    scout_cap = LEAN_SCOUT_MAX_CANDIDATES if LEAN_MODE else SCOUT_MAX_CANDIDATES
+    scoped = ordered[:scout_cap]
+    # price contexts fetched in PARALLEL — 30 sequential yfinance calls were seconds of dead time
+    ctxs = await asyncio.gather(*[
+        loop.run_in_executor(None, prices.get_context, sym) for sym, _ in scoped])
+    for (sym, arts), ctx in zip(scoped, ctxs):
         window[sym] = {
             "headlines": _headlines(arts),
             "avg_sentiment": _avg_sentiment(arts),
@@ -398,6 +437,7 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
     try:
         result = await loop.run_in_executor(None, scout.run_scout, window, movers)
     except LLMError as exc:
+        await loop.run_in_executor(None, store.add_run, "FIND_TRADES", [])
         yield _ev("status", msg=f"Scout failed: {exc}")
         yield _ev("done", board=[])
         return
@@ -411,28 +451,19 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
                   reason=p.get("reason", ""))
 
     if not picks:
+        await loop.run_in_executor(None, store.add_run, "FIND_TRADES", [])
         yield _ev("status", msg="Scout found no opportunities worth full analysis right now.")
         yield _ev("done", board=[])
         return
 
     # Pre-debate catalyst gate — drop picks with no real external catalyst BEFORE
-    # the expensive debate (cheap haiku, fail-open). Runs in parallel across picks.
-    verdicts = await asyncio.gather(*[
-        loop.run_in_executor(None, gate.screen_catalyst, p["symbol"], p.get("reason", ""),
-                             p.get("edge_hint"), candidates.get(p["symbol"], []), f"gate-{p['symbol']}")
-        for p in picks
-    ])
-    kept, gate_drops = [], []
-    for p, v in zip(picks, verdicts):
-        if v["tradeable"]:
-            kept.append(p)
-        else:
-            gate_drops.append({"symbol": p["symbol"], "reason": f"gated: {v['reason']}"})
-            yield _ev("gate", symbol=p["symbol"], reason=v["reason"])
-    if gate_drops:
-        await loop.run_in_executor(None, store.record_skips, gate_drops)  # graded forward
-    picks = kept
+    # the expensive debate (cheap haiku, fail-open; EARNINGS picks auto-pass — the
+    # report IS the confirmed catalyst). Shared helper, same as the batch path.
+    picks, gate_drops = await gate.screen_picks(picks, candidates, loop)
+    for d in gate_drops:
+        yield _ev("gate", symbol=d["symbol"], reason=d["reason"])
     if not picks:
+        await loop.run_in_executor(None, store.add_run, "FIND_TRADES", [])
         yield _ev("status", msg="All picks gated out — no verifiable catalyst this scan.")
         yield _ev("done", board=[])
         return
@@ -444,86 +475,112 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
     calibration = team.calibration_block(
         await loop.run_in_executor(None, store.stats))
 
+    # Debates run CONCURRENTLY (bounded by MAX_CONCURRENT_WORKFLOWS) — a sequential
+    # loop was ~6 serialized LLM calls per pick (~4 min each on a slow endpoint).
+    # Per-pick event order is preserved; across picks the stream interleaves (each
+    # event carries its symbol). Board order = completion order; the Head ranks
+    # everything below regardless.
     board: list[dict] = []
-    for pick_idx, pick in enumerate(picks):
-        if await _gone():   # client closed the tab — stop burning quota
-            log.info("Find Trades client disconnected — stopping after %d debates", pick_idx)
-            return
+    ev_q: asyncio.Queue = asyncio.Queue()
+    pick_sem = asyncio.Semaphore(MAX_CONCURRENT_WORKFLOWS)
+    _DONE = object()
+    completed = 0   # drives the solo-arm cadence
+
+    async def _one_pick(pick: dict) -> None:
+        nonlocal completed
         sym = pick["symbol"]
-        pick["source"] = _source_of(sym, earnings_syms, world_syms, ripple_syms)
-        decision_id = f"{sym}-{uuid.uuid4().hex[:8]}"
-        price_ctx = window.get(sym, {}).get("price")
-        arts = candidates.get(sym, [])
-        yield _ev("debate_start", symbol=sym, edge=pick.get("edge_hint"))
-
         try:
-            # brief subagents fan out in PARALLEL (technical, news, fundamentals,
-            # freshness) — each a bounded Haiku research task feeding the researcher
-            fundamentals, opts = await asyncio.gather(
-                loop.run_in_executor(None, prices.get_fundamentals, sym),
-                loop.run_in_executor(None, prices.get_options_context, sym),
-            )
-            briefs = list(await asyncio.gather(
-                loop.run_in_executor(None, notes.market_brief, sym, price_ctx, fundamentals, arts, decision_id, opts),
-                loop.run_in_executor(None, notes.news_brief, sym, arts, decision_id),
-            ))
-            # If this pick just reported, read the ACTUAL report (web-grounded,
-            # cached per event) — guidance/tone drive the drift, so it gets its own
-            # evidence block. Only fires for names scout actually picked (lean).
-            erow = await loop.run_in_executor(None, store.earnings_row, sym, EARNINGS_DRIFT_DAYS)
-            if erow:
-                read = await loop.run_in_executor(None, earnings_reader.get_or_read, erow, f"eread-{sym}")
-                if read:
-                    briefs.append({"kind": "earnings", "summary": read, "key_facts": []})
-            for b in briefs:
-                yield _ev("brief", symbol=sym, **b)
+            async with pick_sem:
+                pick["source"] = _source_of(sym, earnings_syms, world_syms, ripple_syms)
+                decision_id = f"{sym}-{uuid.uuid4().hex[:8]}"
+                price_ctx = window.get(sym, {}).get("price")
+                arts = candidates.get(sym, [])
+                await ev_q.put(_ev("debate_start", symbol=sym, edge=pick.get("edge_hint")))
+                try:
+                    # brief subagents fan out in PARALLEL (market + news notes,
+                    # fundamentals + options data) — feeding the researcher
+                    fundamentals, opts = await asyncio.gather(
+                        loop.run_in_executor(None, prices.get_fundamentals, sym),
+                        loop.run_in_executor(None, prices.get_options_context, sym),
+                    )
+                    briefs = list(await asyncio.gather(
+                        loop.run_in_executor(None, notes.market_brief, sym, price_ctx, fundamentals, arts, decision_id, opts),
+                        loop.run_in_executor(None, notes.news_brief, sym, arts, decision_id),
+                    ))
+                    # If this pick just reported, read the ACTUAL report (cached per
+                    # event) — guidance/tone drive the drift. Only for picked names.
+                    erow = await loop.run_in_executor(None, store.earnings_row, sym, EARNINGS_DRIFT_DAYS)
+                    if erow:
+                        read = await loop.run_in_executor(None, earnings_reader.get_or_read, erow, f"eread-{sym}")
+                        if read:
+                            briefs.append({"kind": "earnings", "summary": read, "key_facts": []})
+                    for b in briefs:
+                        await ev_q.put(_ev("brief", symbol=sym, **b))
 
-            history = await loop.run_in_executor(None, store.symbol_history, sym)
-            # shared team core — yields thesis/concern/fact_flag/rebuttal to
-            # stream live, writes the ledger row, and returns it via "_result"
-            row = None
-            async for ev in debate.deliberate(sym, pick, briefs, price_ctx, history,
-                                              calibration, "FIND_TRADES", decision_id):
-                if ev["type"] == "_result":
-                    row = ev["row"]
-                else:
-                    yield ev
-        except LLMError as exc:
-            yield _ev("status", msg=f"{sym}: dropped ({exc})")
-            continue
+                    history = await loop.run_in_executor(None, store.symbol_history, sym)
+                    # shared team core — thesis/concern/fact_flag/rebuttal events,
+                    # ledger write, and the row back via "_result"
+                    row = None
+                    async for ev in debate.deliberate(sym, pick, briefs, price_ctx, history,
+                                                      calibration, "FIND_TRADES", decision_id):
+                        if ev["type"] == "_result":
+                            row = ev["row"]
+                        else:
+                            await ev_q.put(ev)
+                except LLMError as exc:
+                    await ev_q.put(_ev("status", msg=f"{sym}: dropped ({exc})"))
+                    return
 
-        if row is None:   # core yielded no result (shouldn't happen) — book nothing
-            continue
-        sess = session()   # for the solo arm's entry-price stamp below
-        board.append(row)
-        _pending_run_picks.append(row["id"])   # roll-backable if this run is interrupted
-        yield _ev("decision", **row)
+                if row is None:   # core yielded no result (shouldn't happen) — book nothing
+                    return
+                sess = session()   # for the solo arm's entry-price stamp below
+                board.append(row)
+                _pending_run_picks.append(row["id"])   # roll-backable if the run is interrupted
+                await ev_q.put(_ev("decision", **row))
+                completed += 1
 
-        # Solo control arm — every Nth pick, one strong agent works the SAME
-        # briefs blind to the team. The ledger later answers: does the
-        # team actually beat one agent? (kill-criterion #2)
-        if SOLO_ARM_EVERY_N and (pick_idx + 1) % SOLO_ARM_EVERY_N == 0:
-            try:
-                s = await loop.run_in_executor(
-                    None, lambda: loner.loner_analysis(
-                        sym, pick["reason"], briefs, history, decision_id + "-solo", calibration))
-                s_model = s.pop("_downgraded_model", MODEL_MAP["loner"])
-                loner_horizon = pinned_horizon(pick.get("edge_hint"))   # same pinned horizon as the team → apples-to-apples
-                _pending_run_picks.append(store.record_pick({
-                    "symbol": sym, "arm": "LONER", "edge": pick.get("edge_hint"),
-                    "trigger_src": "FIND_TRADES", "session": sess,
-                    "direction": s["direction"], "horizon_days": loner_horizon,
-                    "score": s["score"], "confidence": s["confidence"],
-                    "approved": int(bool(s["approved"])), "triage_reason": pick["reason"],
-                    "thesis": s["thesis"], "briefs": briefs, "model_tags": {"loner": s_model},
-                    "low_liquidity": int(bool(price_ctx and price_ctx.get("low_liquidity"))),
-                    "entry_price": (price_ctx or {}).get("last_price") if sess == "OPEN" else None,
-                    "spy_price": (prices.get_context("SPY") or {}).get("last_price"),
-                }))
-                yield _ev("loner", symbol=sym, direction=s["direction"],
-                          horizon_days=s["horizon_days"], score=s["score"])
-            except LLMError as exc:
-                log.warning("Solo arm dropped %s: %s", sym, exc)
+                # Solo control arm — every Nth pick, one strong agent works the SAME
+                # briefs blind to the team (kill-criterion #2).
+                if SOLO_ARM_EVERY_N and completed % SOLO_ARM_EVERY_N == 0:
+                    try:
+                        loner_horizon = pinned_horizon(pick.get("edge_hint"))   # same pinned horizon as the team → apples-to-apples
+                        s = await loop.run_in_executor(
+                            None, lambda: loner.loner_analysis(
+                                sym, pick["reason"], briefs, history, decision_id + "-solo",
+                                calibration, loner_horizon))
+                        s_model = s.pop("_downgraded_model", MODEL_MAP["loner"])
+                        spy_ctx = await loop.run_in_executor(None, prices.get_context, "SPY")
+                        _pending_run_picks.append(store.record_pick({
+                            "symbol": sym, "arm": "LONER", "edge": pick.get("edge_hint"),
+                            "trigger_src": "FIND_TRADES", "session": sess,
+                            "direction": s["direction"], "horizon_days": loner_horizon,
+                            "score": s["score"], "confidence": s["confidence"],
+                            "approved": int(bool(s["approved"])), "triage_reason": pick["reason"],
+                            "thesis": s["thesis"], "briefs": briefs, "model_tags": {"loner": s_model},
+                            "low_liquidity": int(bool(price_ctx and price_ctx.get("low_liquidity"))),
+                            "entry_price": (price_ctx or {}).get("last_price") if sess == "OPEN" else None,
+                            "spy_price": (spy_ctx or {}).get("last_price"),
+                        }))
+                        await ev_q.put(_ev("loner", symbol=sym, direction=s["direction"],
+                                           horizon_days=loner_horizon, score=s["score"]))
+                    except LLMError as exc:
+                        log.warning("Solo arm dropped %s: %s", sym, exc)
+        finally:
+            await ev_q.put(_DONE)
+
+    tasks = [asyncio.create_task(_one_pick(p)) for p in picks]
+    remaining = len(tasks)
+    while remaining:
+        if await _gone():   # client closed the tab — stop burning quota
+            for t in tasks:
+                t.cancel()
+            log.info("Find Trades client disconnected — debates cancelled")
+            return
+        item = await ev_q.get()
+        if item is _DONE:
+            remaining -= 1
+        else:
+            yield item
 
     # Chief — genuine head-to-head comparison across every debated idea
     # (not just sorting isolated conviction numbers). One Opus call.
@@ -569,6 +626,8 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
     for row in board:
         if row.get("sector"):
             store.update_pick(row["id"], sector=row["sector"], cluster=row["cluster"])
+    store.add_run("FIND_TRADES", board)   # record the run here too — the autorun's
+                                          # interval gate + daily cap key off it
     store.mark_taken([r["id"] for r in board if r.get("take")])
     _pending_run_picks = []   # run finalised — keep its picks
     if capped:

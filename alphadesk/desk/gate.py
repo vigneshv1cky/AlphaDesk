@@ -18,9 +18,11 @@ even if single-source; the DEBATE weighs how thin it is. The gate only asks: is
 there a concrete external event here at all, or nothing to trade?
 """
 
+import asyncio
 import json
 import logging
 
+from alphadesk.ledger import store
 from alphadesk.llm import LLMError, call_role, wrap_data
 
 log = logging.getLogger("alphadesk.gate")
@@ -84,3 +86,34 @@ def screen_catalyst(symbol: str, reason: str, edge_hint: str | None,
     except LLMError as exc:
         log.warning("Gate check failed for %s (%s) — passing through to debate", symbol, exc)
         return {"tradeable": True, "reason": "gate error — debated anyway"}
+
+
+async def screen_picks(picks: list[dict], candidates: dict[str, list[dict]],
+                       loop) -> tuple[list[dict], list[dict]]:
+    """Gate the scout's picks in parallel → (kept, drops), drops recorded as skips.
+
+    EARNINGS-sourced picks AUTO-PASS with no call: their catalyst is the confirmed
+    report itself — the calendar is a FACT, and the gate is instructed to always pass
+    a CONFIRMED-EARNINGS-REPORT, so paying a haiku call to reach a foregone conclusion
+    was pure redundancy (on earnings-primary lean days, most picks). Only news- and
+    hypothesis-sourced picks pay the check. Shared by the stream and batch pipelines
+    so the two entry points can't drift on gating."""
+    async def _one(p: dict) -> tuple[dict | None, dict | None]:
+        arts = candidates.get(p["symbol"], [])
+        if any(a.get("category") == "EARNINGS" for a in arts):
+            return p, None   # confirmed report — the gate would pass by its own rule
+        v = await loop.run_in_executor(
+            None, screen_catalyst, p["symbol"], p.get("reason", ""),
+            p.get("edge_hint"), arts, f"gate-{p['symbol']}")
+        if v["tradeable"]:
+            return p, None
+        return None, {"symbol": p["symbol"], "reason": v["reason"]}
+
+    results = await asyncio.gather(*[_one(p) for p in picks])
+    kept = [k for k, _ in results if k]
+    drops = [d for _, d in results if d]
+    if drops:   # graded forward (anti-survivorship): reveals if the gate cuts winners
+        await loop.run_in_executor(
+            None, store.record_skips,
+            [{"symbol": d["symbol"], "reason": f"gated: {d['reason']}"} for d in drops])
+    return kept, drops

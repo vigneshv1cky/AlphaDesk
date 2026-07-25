@@ -26,8 +26,9 @@ def false_negative_block(min_samples: int = FN_MIN_SAMPLES) -> str:
     lines = []
     rg, rm = rej.get("graded") or 0, rej.get("missed") or 0
     if rg >= min_samples:
-        lines.append(f"- rejections: {rm}/{rg} ({round(100 * rm / rg)}%) of your REJECTED "
-                     "calls would have beaten SPY — winners you passed on")
+        lines.append(f"- not-taken calls: {rm}/{rg} ({round(100 * rm / rg)}%) of the "
+                     "directional calls the desk did NOT book still beat SPY — winners "
+                     "left on the table")
     sg, sm = skp.get("graded") or 0, skp.get("missed") or 0
     if sg >= min_samples:
         lines.append(f"- skips: {sm}/{sg} ({round(100 * sm / sg)}%) of names you SKIPPED then "
@@ -41,26 +42,26 @@ log = logging.getLogger("alphadesk.team")
 
 _PREDICTIVE_FRAME = (
     "You work for a PREDICTIVE research desk: the question is always whether "
-    "this stock will OUTPERFORM or UNDERPERFORM the market over the next "
-    "1-10 TRADING DAYS from now — not whether past news was good. If a move "
-    "already happened, the only question is what happens NEXT (continuation, "
-    "fade, or spillover to connected names)."
+    "this stock will OUTPERFORM or UNDERPERFORM the market over a FIXED, "
+    "pre-committed horizon (stated with each call) — not whether past news was "
+    "good. If a move already happened, the only question is what happens NEXT "
+    "within that window (continuation, fade, or spillover to connected names)."
 )
 
 _ANALYST_SYSTEM = (
     "You are the Researcher. " + _PREDICTIVE_FRAME + "\n"
     "From the specialist briefs and your own track record on this symbol, form "
-    "a directional thesis. Choose the horizon that matches the mechanism "
-    "(drift: 1-3d; spillover repricing: 3-5d; theme: 5-10d). score: 0-100 where "
-    ">50 favors LONG conviction, <50 favors SHORT; be decisive. confidence: 0-100 "
-    "how sure you are.\n"
-    'Return ONLY JSON: {"direction": "LONG|SHORT", "horizon_days": <1-10>, '
+    "a directional thesis. The grading horizon is FIXED in advance (given with "
+    "the call) — argue whether the edge actually plays out WITHIN it; a thesis "
+    "that needs longer to work is a weaker call, not a reason to stretch the "
+    "window. score: 0-100 where >50 favors LONG conviction, <50 favors SHORT; "
+    "be decisive. confidence: 0-100 how sure you are.\n"
+    'Return ONLY JSON: {"direction": "LONG|SHORT", '
     '"score": <0-100>, "confidence": <0-100>, "thesis": "<5 sentences max>"}'
 )
 
 _THESIS_SCHEMA = {
     "direction": {"type": str, "enum": ["LONG", "SHORT"]},
-    "horizon_days": {"type": int, "min": 1, "max": 10},
     "score": {"type": (int, float), "min": 0, "max": 100},
     "confidence": {"type": (int, float), "min": 0, "max": 100},
     "thesis": {"type": str, "maxlen": 1500},
@@ -159,7 +160,6 @@ _ARBITER_SCHEMA = {
     "final_direction": {"type": str, "enum": ["LONG", "SHORT"]},
     "adjusted_score": {"type": (int, float), "min": 0, "max": 100},
     "adjusted_confidence": {"type": (int, float), "min": 0, "max": 100},
-    "adjusted_horizon_days": {"type": int, "min": 1, "max": 10, "optional": True},
     "verdict": {"type": str, "enum": ["STRONG", "SOFT", "PASS"]},
     "summary": {"type": str, "maxlen": 800},
 }
@@ -218,13 +218,21 @@ def calibration_block(stats: dict, min_samples: int = CALIB_MIN_SAMPLES) -> str:
     )
 
 
+def _horizon_line(horizon: int | None) -> str:
+    """The pre-committed grading window, stated as a fact so every role argues the
+    SAME clock (the one the ledger will grade on) instead of a researcher-chosen one."""
+    return (f"Fixed, pre-committed grading horizon: {horizon} trading day(s) — judge "
+            "whether the edge plays out WITHIN it.\n" if horizon else "")
+
+
 def researcher_case(symbol: str, triage_reason: str, briefs: list[dict],
                    history: list[dict], decision_id: str | None,
-                   calibration: str = "") -> dict:
+                   calibration: str = "", horizon: int | None = None) -> dict:
     from alphadesk.config import market_context_line
     calib = f"{calibration}\n\n" if calibration else ""
     user = (
-        f"Symbol: {symbol}\nTriage rationale: {triage_reason}\n\n"
+        f"Symbol: {symbol}\nTriage rationale: {triage_reason}\n"
+        f"{_horizon_line(horizon)}\n"
         f"{market_context_line()}\n\n"
         f"{calib}{_memory_block(history)}\n\nSpecialist briefs:\n{_briefs_block(briefs)}"
     )
@@ -233,9 +241,10 @@ def researcher_case(symbol: str, triage_reason: str, briefs: list[dict],
 
 
 def critic_challenge(symbol: str, thesis: dict, briefs: list[dict],
-                      decision_id: str | None) -> dict:
+                      decision_id: str | None, horizon: int | None = None) -> dict:
     user = (
-        f"Symbol: {symbol}\nAnalyst thesis: {json.dumps(thesis)}\n\n"
+        f"Symbol: {symbol}\n{_horizon_line(horizon)}"
+        f"Analyst thesis: {json.dumps(thesis)}\n\n"
         f"Specialist briefs:\n{_briefs_block(briefs)}"
     )
     return call_role("critic", _SKEPTIC_SYSTEM, user, schema=_SKEPTIC_SCHEMA,
@@ -243,12 +252,14 @@ def critic_challenge(symbol: str, thesis: dict, briefs: list[dict],
 
 
 def researcher_reply(symbol: str, thesis: dict, concerns: list[dict],
-                     counter: dict, decision_id: str | None) -> dict:
+                     counter: dict, decision_id: str | None,
+                     horizon: int | None = None) -> dict:
     stance = counter.get("stance", "SUPPORT")
     cdir = counter.get("counter_direction", "NONE")
     ctext = counter.get("counter", "")
     user = (
-        f"Symbol: {symbol}\nYour thesis: {json.dumps(thesis)}\n"
+        f"Symbol: {symbol}\n{_horizon_line(horizon)}"
+        f"Your thesis: {json.dumps(thesis)}\n"
         f"Critic's concerns: {json.dumps(concerns)}\n"
         f"Critic's stance: {stance}"
         + (f" (proposes {cdir}: {ctext})" if stance == "FLIP" else "")
@@ -318,7 +329,7 @@ def head_ranking(opportunities: list[dict], decision_id: str | None) -> dict:
 
 def judge_verdict(symbol: str, thesis: dict, concerns: list[dict], counter: dict,
                     rebuttal: dict, fact_flags: list[str],
-                    decision_id: str | None) -> dict:
+                    decision_id: str | None, horizon: int | None = None) -> dict:
     from alphadesk.config import market_context_line
     fn = false_negative_block()
     critic_call = {
@@ -330,7 +341,8 @@ def judge_verdict(symbol: str, thesis: dict, concerns: list[dict], counter: dict
         (f"{fn}\n\n" if fn else "")
         + market_context_line() + "\n\n"
         + f"Symbol: {symbol}\n"
-        f"THESIS: {json.dumps(thesis)}\n"
+        + _horizon_line(horizon)
+        + f"THESIS: {json.dumps(thesis)}\n"
         f"CRITIC CONCERNS: {json.dumps(concerns)}\n"
         f"CRITIC STANCE: {json.dumps(critic_call)}\n"
         f"RESEARCHER REBUTTAL: {json.dumps(rebuttal)}\n"

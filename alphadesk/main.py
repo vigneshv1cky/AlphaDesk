@@ -78,28 +78,21 @@ async def _serve() -> None:
             await asyncio.sleep(6 * 3600)   # 4×/day keeps upcoming + recent fresh
 
     async def _position_watch_loop():
-        """Watch open picks between runs. Two layers, both research/paper (a ledger
-        exit stamp, never an order):
-          • level cross (target/stop) → close immediately. Pure code, no token cost.
-          • cheap exit SCREEN (near-target / MFE give-back) → escalate that ONE
-            position to the opus reviewer, which decides HOLD/EXIT. So a spent move
-            (a beat that popped past its implied move) gets closed before the gain
-            decays, instead of waiting for the next Find Trades run. Code owns the
-            cheap watching; the reviewer owns the judgment. Escalation is throttled
-            per position (EXIT_REVIEW_COOLDOWN_S) so it can't spam the model."""
-        import time as _time
-
+        """Watch open picks between runs — the ONLY price-based exit, and it is
+        pure code by design (a ledger exit stamp, never an order, never an LLM):
+        walk the intraday minute-bar path and close at the FIRST of target/stop
+        actually touched, priced at that level, gap-/order-aware. Price exits
+        belong to code (no judgment, no 'spent move' second-guessing — a spent
+        move closes at its target, a wrong one at its stop); news-driven exits
+        belong to the run-level reviewer, which is shown no prices at all."""
         from alphadesk.config import (
-            EXIT_REVIEW_COOLDOWN_S,
             LIMIT_FILL_BUFFER_PCT,
             LIMIT_FILL_MIN_CUSHION_FRAC,
             entry_fill_time,
             now_et,
         )
         from alphadesk.config import session as market_session
-        from alphadesk.desk import review
         from alphadesk.desk.plan import (
-            exit_signal,
             first_touch_exit,
             level_crossed,
             limit_fill,
@@ -109,8 +102,6 @@ async def _serve() -> None:
         from alphadesk.ledger import store
         loop = asyncio.get_running_loop()
         log = logging.getLogger("alphadesk.watch")
-        peak_fav: dict[int, float] = {}      # pick_id → best favorable move % seen
-        reviewed_at: dict[int, float] = {}   # pick_id → monotonic ts of last review
         last_check: dict[int, object] = {}   # pick_id → ET ts we last walked bars up to
         while True:
             try:
@@ -160,9 +151,8 @@ async def _serve() -> None:
                                    and p.get("taken") and p.get("entry_price") is not None
                                    and p.get("plan_target") and p.get("plan_stop")]
                     live_ids = {p["id"] for p in open_pos}
-                    for stale in [i for i in peak_fav if i not in live_ids]:
-                        peak_fav.pop(stale, None)
-                        reviewed_at.pop(stale, None)
+                    for stale in [i for i in last_check if i not in live_ids]:
+                        last_check.pop(stale, None)
                     if monitorable:
                         quotes = await loop.run_in_executor(
                             None, prices.latest_prices,
@@ -197,7 +187,8 @@ async def _serve() -> None:
                                 exit_px = ft["price"]
                                 reason = f"{label} @ {exit_px} (first-touch {ft['level']})"
                                 perf = realized_exit(p["direction"], entry, exit_px,
-                                                     p.get("spy_price"), spy_now)
+                                                     p.get("spy_price"), spy_now,
+                                                     bool(p.get("low_liquidity")))
                                 await loop.run_in_executor(
                                     None, lambda pid=p["id"], r=reason, pf=perf:
                                     store.record_exit(pid, r, **pf))
@@ -205,45 +196,11 @@ async def _serve() -> None:
                                          p["id"], p["symbol"], p["direction"], reason,
                                          perf.get("exit_alpha"))
                                 continue
-                            if not cur:
-                                continue   # nothing crossed and no spot price → nothing to screen
-                            # track the peak favorable move, then run the cheap screen.
-                            # Fold in the PERSISTED MFE (grade_paths, daily High/Low):
-                            # it survives restarts and catches intraday spikes between
-                            # 180s polls, so a position that already ran up still fires
-                            # give-back after a restart (e.g. PKE peaked +12% then faded).
-                            if entry:
-                                up = p["direction"] == "LONG"
-                                fav = (cur - entry) / entry * 100 * (1 if up else -1)
-                                peak_fav[p["id"]] = max(
-                                    peak_fav.get(p["id"], 0.0), p.get("mfe_pct") or 0.0, fav)
-                            flag = exit_signal(p["direction"], entry, cur,
-                                               p["plan_target"], p["plan_stop"],
-                                               peak_fav.get(p["id"], 0.0))
-                            if not flag:
-                                continue
-                            last = reviewed_at.get(p["id"], 0.0)
-                            if _time.monotonic() - last < EXIT_REVIEW_COOLDOWN_S:
-                                continue   # throttled — don't spam the reviewer
-                            reviewed_at[p["id"]] = _time.monotonic()
-                            pctx = await loop.run_in_executor(
-                                None, prices.get_context, p["symbol"])
-                            verdict = await loop.run_in_executor(
-                                None, review.review_position, p, pctx, [],
-                                f"watch-{p['id']}")
-                            log.info("Screen flagged #%d %s (%s) → reviewer: %s — %s",
-                                     p["id"], p["symbol"], flag, verdict["decision"],
-                                     verdict["reason"])
-                            if verdict["decision"] == "EXIT":
-                                exit_px = (pctx or {}).get("last_price") or cur
-                                perf = realized_exit(p["direction"], entry, exit_px,
-                                                     p.get("spy_price"), spy_now)
-                                await loop.run_in_executor(
-                                    None, lambda pid=p["id"], r=verdict["reason"], pf=perf:
-                                    store.record_exit(pid, r, **pf))
-                                log.info("Review-exit #%d %s — %s (%s%% vs SPY)",
-                                         p["id"], p["symbol"], verdict["reason"],
-                                         perf.get("exit_alpha"))
+                            # No level crossed → nothing to do. The watcher is the ONLY
+                            # price-based exit and it is pure code: no give-back screen,
+                            # no LLM escalation on price action (a spent move closes at
+                            # its target; a wrong one at its stop; anything in between
+                            # keeps working to the levels or the horizon).
             except Exception as exc:
                 log.error("position watch error: %s", exc)
             from alphadesk.app import scheduler

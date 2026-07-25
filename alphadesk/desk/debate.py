@@ -36,14 +36,20 @@ async def deliberate(sym: str, pick: dict, briefs: list[dict], price_ctx: dict |
     """
     loop = asyncio.get_running_loop()
 
+    # Horizon is PRE-COMMITTED per edge — the grade settles at a horizon fixed in advance,
+    # NOT one the judge picked after seeing the setup (that was a garden-of-forking-paths: the
+    # same catalyst bookable as a 1d or 10d call, only the chosen spec logged). Computed UP
+    # FRONT so every role (researcher, critic, judge — and the plan) argues the SAME clock.
+    horizon = pinned_horizon(pick.get("edge_hint"))
+
     thesis = await loop.run_in_executor(
         None, lambda: team.researcher_case(
-            sym, pick["reason"], briefs, history, decision_id, calibration))
+            sym, pick["reason"], briefs, history, decision_id, calibration, horizon))
     model_tags = {"researcher": thesis.pop("_downgraded_model", MODEL_MAP["researcher"])}
-    yield {"type": "thesis", "symbol": sym, **thesis}
+    yield {"type": "thesis", "symbol": sym, "horizon_days": horizon, **thesis}
 
     concerns_out = await loop.run_in_executor(
-        None, lambda: team.critic_challenge(sym, thesis, briefs, decision_id))
+        None, lambda: team.critic_challenge(sym, thesis, briefs, decision_id, horizon))
     model_tags["critic"] = concerns_out.pop("_downgraded_model", MODEL_MAP["critic"])
     concerns = concerns_out.get("concerns", [])
     for c in concerns:
@@ -63,7 +69,7 @@ async def deliberate(sym: str, pick: dict, briefs: list[dict], price_ctx: dict |
         yield {"type": "fact_flag", "symbol": sym, "text": f}
 
     rebuttal = await loop.run_in_executor(
-        None, lambda: team.researcher_reply(sym, thesis, concerns, counter, decision_id))
+        None, lambda: team.researcher_reply(sym, thesis, concerns, counter, decision_id, horizon))
     # The researcher speaks twice (opening thesis + this rebuttal); model_tags["researcher"]
     # was set from the thesis only and the rebuttal's downgrade was discarded, so a debate
     # whose rebuttal ran on a downgraded tier was ledgered as full-tier — blinding the
@@ -74,7 +80,8 @@ async def deliberate(sym: str, pick: dict, briefs: list[dict], price_ctx: dict |
     yield {"type": "rebuttal", "symbol": sym, **rebuttal}
 
     verdict = await loop.run_in_executor(
-        None, lambda: team.judge_verdict(sym, thesis, concerns, counter, rebuttal, flags, decision_id))
+        None, lambda: team.judge_verdict(sym, thesis, concerns, counter, rebuttal, flags,
+                                         decision_id, horizon))
     model_tags["judge"] = verdict.pop("_downgraded_model", MODEL_MAP["judge"])
 
     # The judge always commits to a direction (LONG/SHORT) — it may adopt the
@@ -85,12 +92,8 @@ async def deliberate(sym: str, pick: dict, briefs: list[dict], price_ctx: dict |
     flipped = booked_dir != thesis["direction"]
 
     sess = session()
-    # Horizon is PRE-COMMITTED per edge — the grade settles at a horizon fixed in advance,
-    # NOT one the judge picked after seeing the setup (that was a garden-of-forking-paths: the
-    # same catalyst bookable as a 1d or 10d call, only the chosen spec logged). The plan (and
-    # thus the trade) sizes to this pinned horizon too, so entry and grade stay consistent.
-    horizon = pinned_horizon(pick.get("edge_hint"))
-
+    # The plan (and thus the trade) sizes to the pinned horizon too, so entry and
+    # grade stay consistent.
     # Execution desk: turn the committed call into an actionable trade plan
     # (entry/target/stop/note). Fail-open — a missing plan never blocks the pick.
     trade = await loop.run_in_executor(
@@ -99,6 +102,9 @@ async def deliberate(sym: str, pick: dict, briefs: list[dict], price_ctx: dict |
     if trade:
         yield {"type": "plan", "symbol": sym, "direction": booked_dir, **trade}
 
+    # SPY snapshot for the ledger row — fetched off the event loop (a cold yfinance
+    # call is seconds of blocking; this generator runs on the loop).
+    spy_ctx = await loop.run_in_executor(None, prices.get_context, "SPY")
     pick_id = store.record_pick({
         "symbol": sym, "arm": "TEAM", "edge": pick.get("edge_hint"),
         "source": pick.get("source"), "decision_id": decision_id,
@@ -125,7 +131,7 @@ async def deliberate(sym: str, pick: dict, briefs: list[dict], price_ctx: dict |
         "arbiter_overrode": int(bool(verdict["approved"]) and final_dir != (
             "LONG" if float(rebuttal["revised_score"]) > 50 else "SHORT")),
         "entry_price": (price_ctx or {}).get("last_price") if sess == "OPEN" else None,
-        "spy_price": (prices.get_context("SPY") or {}).get("last_price"),
+        "spy_price": (spy_ctx or {}).get("last_price"),
         "plan_entry": (trade or {}).get("entry"),
         "plan_target": (trade or {}).get("target"),
         "plan_stop": (trade or {}).get("stop"),

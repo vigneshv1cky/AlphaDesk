@@ -63,16 +63,11 @@ def _seed_cooldowns_from_ledger() -> None:
 
 
 def _headline_rows(articles: list[dict]) -> list[str]:
-    return [
-        f"[{a.get('category', '?')}] {a.get('title','')[:120]} "
-        f"(sent={a['mentions'][0]['sentiment'] if a.get('mentions') else '?'})"
-        for a in articles[:4]
-    ]
+    return scout.headline_rows(articles)
 
 
 def _avg_sentiment(articles: list[dict]) -> float:
-    vals = [m["sentiment"] for a in articles for m in a.get("mentions", [])]
-    return round(sum(vals) / len(vals), 3) if vals else 0.0
+    return scout.avg_sentiment(articles)
 
 
 async def _gather_briefs(loop, sym: str, articles: list[dict], price_ctx: dict | None,
@@ -109,14 +104,16 @@ async def _run_committee(loop, sym: str, pick: dict, articles: list[dict],
 
     pick_id = result["pick_id"]
     thesis, verdict = result["thesis"], result["verdict"]
+    pinned = result["row"]["horizon_days"]   # the pre-committed horizon the grade settles on
     log.info(
         "DECISION #%d %s %s %dd score %.0f→%.0f [%s] approved=%s (%s)",
-        pick_id, sym, thesis["direction"], thesis["horizon_days"],
+        pick_id, sym, thesis["direction"], pinned,
         thesis["score"], verdict["adjusted_score"], verdict["verdict"],
         bool(verdict["approved"]), pick.get("edge_hint"),
     )
 
-    # solo control arm on every Nth pick — independent, same evidence
+    # solo control arm on every Nth pick — independent, same evidence, SAME pinned
+    # horizon as the team (apples-to-apples control; parity with the streaming path)
     sess = session()
     global _pick_counter
     _pick_counter += 1
@@ -124,22 +121,23 @@ async def _run_committee(loop, sym: str, pick: dict, articles: list[dict],
         try:
             s = await loop.run_in_executor(
                 None, lambda: loner.loner_analysis(sym, pick["reason"], briefs, history,
-                                                 decision_id + "-solo", calibration))
+                                                 decision_id + "-solo", calibration, pinned))
             solo_model = s.pop("_downgraded_model", MODEL_MAP["loner"])
+            spy_ctx = await loop.run_in_executor(None, prices.get_context, "SPY")
             store.record_pick({
                 "symbol": sym, "arm": "LONER", "edge": pick.get("edge_hint"),
                 "trigger_src": trigger_src, "session": sess,
-                "direction": s["direction"], "horizon_days": s["horizon_days"],
+                "direction": s["direction"], "horizon_days": pinned,
                 "score": s["score"], "confidence": s["confidence"],
                 "approved": int(bool(s["approved"])),  # the solo agent's own call
                 "triage_reason": pick["reason"], "thesis": s["thesis"],
                 "briefs": briefs, "model_tags": {"loner": solo_model},
                 "low_liquidity": int(bool(price_ctx and price_ctx.get("low_liquidity"))),
                 "entry_price": (price_ctx or {}).get("last_price") if sess == "OPEN" else None,
-                "spy_price": ((prices.get_context("SPY") or {}).get("last_price")),
+                "spy_price": ((spy_ctx or {}).get("last_price")),
             })
             log.info("LONER arm: %s %s %dd score=%.0f", sym, s["direction"],
-                     s["horizon_days"], s["score"])
+                     pinned, s["score"])
         except LLMError as exc:
             log.warning("Solo arm dropped %s: %s", sym, exc)
 
@@ -195,22 +193,11 @@ async def research_run(candidates: dict[str, list[dict]], trigger_src: str = "ST
         log.info("SCOUT PICK %s [%s]: %s", p["symbol"], p["edge_hint"], p["reason"])
 
     # Pre-debate catalyst gate — drop phantom setups before the expensive debate
-    # (cheap haiku, fail-open). Parity with the streaming path.
-    verdicts = await asyncio.gather(*[
-        loop.run_in_executor(None, gate.screen_catalyst, p["symbol"], p.get("reason", ""),
-                             p.get("edge_hint"), eligible.get(p["symbol"], []), f"gate-{p['symbol']}")
-        for p in picks
-    ])
-    gate_drops, kept = [], []
-    for p, v in zip(picks, verdicts):
-        if v["tradeable"]:
-            kept.append(p)
-        else:
-            gate_drops.append({"symbol": p["symbol"], "reason": f"gated: {v['reason']}"})
-            log.info("GATE drop %s: %s", p["symbol"], v["reason"])
-    if gate_drops:
-        store.record_skips(gate_drops)
-    picks = kept
+    # (cheap haiku, fail-open; EARNINGS picks auto-pass). Shared helper, same as
+    # the streaming path.
+    picks, gate_drops = await gate.screen_picks(picks, eligible, loop)
+    for d in gate_drops:
+        log.info("GATE drop %s: %s", d["symbol"], d["reason"])
     if not picks:
         return []
 

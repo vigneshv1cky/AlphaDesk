@@ -69,12 +69,15 @@ def _coherent(direction: str, entry: float, target: float, stop: float,
     return True
 
 
-def realized_exit(direction: str, entry, exit_price, spy_then, spy_now) -> dict:
+def realized_exit(direction: str, entry, exit_price, spy_then, spy_now,
+                  low_liquidity: bool = False) -> dict:
     """Realized performance of a position closed at exit_price: raw return
     (direction-aware) and alpha vs SPY over the SAME holding window, net of
-    round-trip friction. Fields are None when a baseline is missing. Frozen at the
-    exit — distinct from the horizon grade (alpha_net), which still settles at the
-    declared horizon and measures the CALL's edge regardless of when we got out.
+    round-trip friction (doubled for low-liquidity names, matching the grader's
+    haircut so exit_alpha and alpha_net don't disagree on illiquid picks). Fields
+    are None when a baseline is missing. Frozen at the exit — distinct from the
+    horizon grade (alpha_net), which still settles at the declared horizon and
+    measures the CALL's edge regardless of when we got out.
     This is the ONE definition the live mark, the exit stamp, and the UI share."""
     from alphadesk.config import FRICTION_BPS_PER_SIDE
     out: dict = {"exit_price": round(float(exit_price), 4) if exit_price else None,
@@ -87,6 +90,8 @@ def realized_exit(direction: str, entry, exit_price, spy_then, spy_now) -> dict:
     if spy_then and spy_now:
         spy_ret = sign * (spy_now - spy_then) / spy_then * 100
         friction = 2 * FRICTION_BPS_PER_SIDE / 100.0
+        if low_liquidity:
+            friction *= 2
         out["exit_alpha"] = round(ret - spy_ret - friction, 3)
     return out
 
@@ -197,33 +202,7 @@ def limit_fill(direction: str, order_type: str | None, entry: float | None,
     return px
 
 
-def exit_signal(direction: str, entry: float | None, cur: float | None,
-                target: float | None, stop: float | None,
-                peak_fav_pct: float) -> str | None:
-    """Cheap, pure-code SCREEN that flags an open position for a (costly) opus
-    thesis re-review — it is NOT an exit itself. Returns a short reason string or
-    None. Two triggers, both about a move that has largely played out:
-      • near target — most of the entry→target move is captured (take it before it
-        gives back, rather than waiting for the exact level the watcher keys on).
-      • give-back — the favorable move ran up past a floor then faded a chunk of
-        its peak (the MFE-decay case: a beat that popped and is now leaking).
-    Code owns this cheap watching (physics/rails); the reviewer owns the judgment.
-    Deliberately generous — false flags just cost one review, which HOLDs."""
-    from alphadesk.config import (EXIT_GIVEBACK_FRAC, EXIT_GIVEBACK_MIN_PEAK,
-                                  EXIT_NEAR_TARGET_FRAC)
-    if not (entry and cur and target and stop):
-        return None
-    up = direction == "LONG"
-    span = (target - entry) if up else (entry - target)
-    if span > 0:
-        progress = ((cur - entry) if up else (entry - cur)) / span
-        if progress >= EXIT_NEAR_TARGET_FRAC:
-            return f"near target — {progress:.0%} of the move captured"
-    if peak_fav_pct >= EXIT_GIVEBACK_MIN_PEAK:
-        fav = (cur - entry) / entry * 100 * (1 if up else -1)
-        if fav <= peak_fav_pct * (1 - EXIT_GIVEBACK_FRAC):
-            return f"faded to {fav:+.1f}% from a +{peak_fav_pct:.1f}% peak"
-    return None
+
 
 
 def trade_plan(symbol: str, direction: str, horizon_days: int,

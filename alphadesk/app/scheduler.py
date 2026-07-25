@@ -164,13 +164,18 @@ async def _sentinel_loop() -> None:
             if today_committee >= 10:
                 with_approval = [b for b in s["by"]["arm"] if b["bucket"] == "TEAM"]
                 if with_approval and total["picks"]:
-                    # crude day-level approval-rate alarm
+                    # crude day-level approval-rate alarm — keyed on the ET day like
+                    # every other daily count (SQLite date('now') is UTC and shifts
+                    # the window a day in the evening ET)
                     import sqlite3
                     from alphadesk.config import DATA_DIR
+                    start_utc = now_et().replace(
+                        hour=0, minute=0, second=0, microsecond=0
+                    ).astimezone(timezone.utc).isoformat()
                     with sqlite3.connect(DATA_DIR / "ledger.db") as c:
                         row = c.execute(
                             "SELECT avg(approved) FROM picks WHERE arm='TEAM'"
-                            " AND ts >= date('now')"
+                            " AND ts >= ?", (start_utc,)
                         ).fetchone()
                     if row and row[0] is not None and row[0] > 0.8:
                         _paused_reason = f"approval rate {row[0]:.0%} today — possible prompt drift"

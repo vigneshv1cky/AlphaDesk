@@ -55,11 +55,11 @@ def news_brief(symbol: str, articles: list[dict], decision_id: str | None = None
 
 def _priced_in_digest(price_ctx: dict | None, options: dict | None) -> dict | None:
     """Explicit 'how much of the move is already done vs what the options market
-    priced' — the entry-side counterpart to the exit give-back screen. Code owns
-    the arithmetic; the note still judges. None when options data is unavailable
-    (then the model falls back to the qualitative read). A realized move already
-    well past the implied move = the drift is likely SPENT (the PEGA-at-entry case:
-    it had already moved ~2.5x its implied move before we looked)."""
+    priced' — the spent-move read, which lives at ENTRY only (price exits are the
+    watcher's, in code). Code owns the arithmetic; the note still judges. None when
+    options data is unavailable (then the model falls back to the qualitative read).
+    A realized move already well past the implied move = the drift is likely SPENT
+    (the PEGA-at-entry case: it had already moved ~2.5x its implied move before we looked)."""
     if not (price_ctx and options):
         return None
     em = options.get("expected_move_to_expiry_pct")
