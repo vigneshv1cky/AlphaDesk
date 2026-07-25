@@ -110,15 +110,25 @@ function Tag({ children, className = "" }: { children: React.ReactNode; classNam
   )
 }
 
-// One row of a tree-structured section: a ├─ connector (└─ on the last row) to the
-// left of the card, so the live run reads like a file tree.
-function TreeRow({ last, children }: { last?: boolean; children: React.ReactNode }) {
+// A tree-structured section: a header, then a CONTINUOUS vertical rail running the
+// full height of the section, with a horizontal tick branching into each card —
+// so the live run reads like a file tree instead of broken per-card glyphs.
+function TreeSection({ head, children }: { head: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="flex items-start gap-1.5">
-      <span className="mt-2.5 w-4 shrink-0 select-none font-mono text-xs text-muted-foreground/60">
-        {last ? "└─" : "├─"}
-      </span>
-      <div className="min-w-0 flex-1">{children}</div>
+    <div className="mt-4">
+      {head}
+      <div className="ml-1.5 mt-2 border-l-2 border-border/70 pl-3">
+        <div className="space-y-2 pt-0.5">{children}</div>
+      </div>
+    </div>
+  )
+}
+
+function TreeRow({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="relative">
+      <span className="absolute -left-3 top-3.5 h-[2px] w-3 bg-border/70" />
+      <div className="min-w-0">{children}</div>
     </div>
   )
 }
@@ -428,17 +438,20 @@ export function FindTrades({
         )}
 
         {positions.length > 0 && (
-          <div className="mt-4 space-y-2">
-            <div className="text-sm font-semibold">
-              Your open picks
-              <span className="ml-1 font-normal text-muted-foreground">
-                — re-checked ({positions.filter((p) => p.type === "position_exit").length} to sell)
-              </span>
-            </div>
+          <TreeSection
+            head={
+              <div className="text-sm font-semibold">
+                Your open picks
+                <span className="ml-1 font-normal text-muted-foreground">
+                  — re-checked ({positions.filter((p) => p.type === "position_exit").length} to sell)
+                </span>
+              </div>
+            }
+          >
             {positions.map((p, i) => {
               const exit = p.type === "position_exit"
               return (
-                <TreeRow key={i} last={i === positions.length - 1}>
+                <TreeRow key={i}>
                   <div
                     className={`rounded-md border border-l-4 bg-card p-2.5 text-sm ${
                       exit ? "border-l-red-500" : "border-l-emerald-600"
@@ -464,25 +477,30 @@ export function FindTrades({
                 </TreeRow>
               )
             })}
-          </div>
+          </TreeSection>
         )}
 
         {board && (
-          <div className="mt-4 space-y-2">
-            {chief && (
-              <div className="rounded-md border border-l-4 border-l-amber-500 bg-amber-500/5 p-3">
-                <Tag className="text-amber-600 dark:text-amber-400">Final call — comparing all the ideas</Tag>
-                <p className="mt-1 text-sm">{chief}</p>
+          <TreeSection
+            head={
+              <div className="text-sm font-semibold">
+                Best ideas{" "}
+                <span className="font-normal text-muted-foreground">
+                  ({takes} worth acting on)
+                </span>
               </div>
+            }
+          >
+            {chief && (
+              <TreeRow>
+                <div className="rounded-md border border-l-4 border-l-amber-500 bg-amber-500/5 p-3">
+                  <Tag className="text-amber-600 dark:text-amber-400">Final call — comparing all the ideas</Tag>
+                  <p className="mt-1 text-sm">{chief}</p>
+                </div>
+              </TreeRow>
             )}
-            <div className="text-sm font-semibold">
-              Best ideas{" "}
-              <span className="font-normal text-muted-foreground">
-                ({takes} worth acting on)
-              </span>
-            </div>
             {board.map((r, i) => (
-              <TreeRow key={r.id} last={i === board.length - 1}>
+              <TreeRow key={r.id}>
               <div
                 className={`rounded-md border p-2.5 text-sm ${
                   r.take ? "border-emerald-600/60 bg-emerald-500/5" : "opacity-70"
@@ -530,17 +548,26 @@ export function FindTrades({
             {board.length === 0 && (
               <p className="text-sm text-muted-foreground">Nothing worth acting on this time.</p>
             )}
-          </div>
+          </TreeSection>
         )}
 
         {feed.length > 0 && (
-          <div className="mt-4 space-y-2">
+          <TreeSection
+            head={
+              <div className="text-sm font-semibold">
+                Live debate feed{" "}
+                <span className="font-normal text-muted-foreground">
+                  ({feed.length} event{feed.length === 1 ? "" : "s"})
+                </span>
+              </div>
+            }
+          >
             {feed.map((ev, i) => (
-              <TreeRow key={i} last={i === feed.length - 1}>
+              <TreeRow key={i}>
                 <Line ev={ev} />
               </TreeRow>
             ))}
-          </div>
+          </TreeSection>
         )}
     </Card>
   )
