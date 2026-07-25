@@ -107,8 +107,13 @@ _REBUTTAL_SYSTEM = (
     "You are the Researcher defending your thesis against the Critic. "
     + _PREDICTIVE_FRAME + "\n"
     "Address each concern honestly: rebut with evidence where you can, CONCEDE "
-    "where the critic is right. Update your score accordingly — meaningful "
-    "concessions must move the number.\n"
+    "only where the critic's EVIDENCE genuinely beats yours. A confident or "
+    "well-phrased attack is NOT evidence — if your mechanism is intact and their "
+    "concerns are speculative, say so and HOLD your ground. Reflexive concession "
+    "corrupts the debate as much as stubbornness does; the goal is to be right, "
+    "not agreeable. Update your score to match what you actually believe — "
+    "meaningful concessions must move it, but a defended thesis should NOT drift "
+    "just because it was challenged.\n"
     "If the critic proposes a FLIP (that the trade is the OPPOSITE direction), "
     "engage it head-on: if their mechanism for the other side is stronger than "
     "yours, say so plainly — conceding a reversal is honest, not a loss. Move "
@@ -247,8 +252,24 @@ def critic_challenge(symbol: str, thesis: dict, briefs: list[dict],
         f"Analyst thesis: {json.dumps(thesis)}\n\n"
         f"Specialist briefs:\n{_briefs_block(briefs)}"
     )
-    return call_role("critic", _SKEPTIC_SYSTEM, user, schema=_SKEPTIC_SCHEMA,
-                     decision_id=decision_id)
+    out = call_role("critic", _SKEPTIC_SYSTEM, user, schema=_SKEPTIC_SCHEMA,
+                    decision_id=decision_id)
+    # Coherence rail (code owns the transcript's logic, not the model): a FLIP to
+    # the direction the thesis ALREADY holds is not a flip — it's support with
+    # concerns (k2.6 emits these); a FLIP naming NO direction is a stand-aside;
+    # and a non-FLIP stance must not carry a counter-direction. Keeps the judge's
+    # transcript and the logged debate stats honest.
+    stance = out.get("stance", "SUPPORT")
+    cdir = out.get("counter_direction", "NONE")
+    if stance == "FLIP" and cdir == thesis.get("direction"):
+        log.info("Critic FLIP-to-same-direction on %s coerced to SUPPORT", symbol)
+        out["stance"] = "SUPPORT"
+        out["counter_direction"] = "NONE"
+    elif stance == "FLIP" and cdir == "NONE":
+        out["stance"] = "STAND_ASIDE"
+    elif stance != "FLIP" and cdir != "NONE":
+        out["counter_direction"] = "NONE"
+    return out
 
 
 def researcher_reply(symbol: str, thesis: dict, concerns: list[dict],
