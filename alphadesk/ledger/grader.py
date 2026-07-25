@@ -72,6 +72,39 @@ def _borrow_cost(low_liquidity: bool, horizon_days: int) -> float:
     return round(apr * horizon_days / 252.0, 3)
 
 
+def _maybe_void(row: dict, df_missing: bool = False) -> bool:
+    """Terminal stamp for picks that can NEVER grade, so they stop retrying hourly
+    (grader zombies — `due_for_grading` is ORDER BY id LIMIT 100, so enough zombies
+    at the front would starve real grading). Two classes:
+      • never-filled 'not taken' rows (gap-skipped stale setup, limit never reached)
+        whose fill time has already passed — by design there is no trade to grade;
+      • symbols with no usable price history (delisted) well past their window — a
+        long retry budget first, so a transient yfinance outage never voids a live pick.
+    A pending fill (fill day still in the future) or a live position is NEVER voided."""
+    if df_missing:
+        try:
+            decided = datetime.fromisoformat(row["ts"])
+            if decided.tzinfo is None:
+                decided = decided.replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            return False
+        age_days = (datetime.now(timezone.utc) - decided).days
+        if age_days <= int(row["horizon_days"]) + 10:
+            return False
+    else:
+        if not (row.get("exit_ts") and row.get("entry_price") is None
+                and (row.get("exit_reason") or "").startswith("not taken")):
+            return False
+        from alphadesk.config import entry_fill_time
+        fill = entry_fill_time(row["ts"], row.get("session"))
+        if fill is None or fill > datetime.now(ET):
+            return False   # fill day hasn't arrived — a real grade may still happen
+    store.update_pick(row["id"], graded_at=datetime.now(timezone.utc).isoformat())
+    log.info("Voided ungradeable pick #%d %s (%s)", row["id"], row["symbol"],
+             "no price history" if df_missing else row.get("exit_reason"))
+    return True
+
+
 def _entry(row: dict, df):
     """(entry_day, entry_price) for a pick, or None if not determinable yet. Shared
     by the horizon grade and the MFE/MAE path so both anchor identically. Uses the
@@ -218,9 +251,13 @@ def _entry_and_outcomes(row: dict, df, spy) -> dict | None:
                           if row["direction"] == "SHORT" else 0.0)
                 out["alpha_adj"] = round(ret_h - beta * benchmark - friction - borrow, 3)
 
-    out["graded_at"] = datetime.now(timezone.utc).isoformat()
-    if row["entry_price"] is None:
-        out["entry_price"] = round(entry_price, 4)
+    # Only stamp graded_at when the full grade (alpha vs SPY) resolved. Stamping it
+    # otherwise (e.g. SPY history missing this pass) permanently marks the pick graded
+    # with no alpha — it would never be retried and is invisible to the scorecard.
+    if "alpha_net" in out:
+        out["graded_at"] = datetime.now(timezone.utc).isoformat()
+        if row["entry_price"] is None:
+            out["entry_price"] = round(entry_price, 4)
     return out
 
 
@@ -230,27 +267,38 @@ def grade_due() -> int:
     _history_cache.clear()
     spy = _daily_history("SPY")
     graded = 0
-    for row in store.due_for_grading():
-        try:
-            df = _daily_history(row["symbol"])
-            if df is None:
-                continue
-            out = _entry_and_outcomes(row, df, spy)
-            if not out:
-                continue
-            store.update_pick(row["id"], **out)
-            if "graded_at" in out:
-                graded += 1
-                log.info(
-                    "Graded #%d %s %s %dd: ret=%.2f%% alpha_net=%s",
-                    row["id"], row["symbol"], row["direction"], row["horizon_days"],
-                    out.get("ret_horizon", float("nan")), out.get("alpha_net"),
-                )
-        except Exception as exc:
-            log.warning("Grading failed for #%d %s: %s", row["id"], row["symbol"], exc)
+    if spy is None:
+        # No benchmark → grading would either corrupt (stamping graded_at with no
+        # alpha) or mis-grade (skips benchmarked against 0 = every big day flags a
+        # false miss). Skip ALL grading this pass; next hourly pass heals. MFE/MAE
+        # needs no benchmark, so it still updates.
+        log.warning("SPY history unavailable — skipping pick/reaction/skip grading "
+                    "this pass (MFE/MAE path still updates)")
+    else:
+        for row in store.due_for_grading():
+            try:
+                df = _daily_history(row["symbol"])
+                if df is None:
+                    _maybe_void(row, df_missing=True)   # delisted long past window
+                    continue
+                out = _entry_and_outcomes(row, df, spy)
+                if not out:
+                    _maybe_void(row)   # never-filled 'not taken' past its fill time
+                    continue
+                store.update_pick(row["id"], **out)
+                if "graded_at" in out:
+                    graded += 1
+                    log.info(
+                        "Graded #%d %s %s %dd: ret=%.2f%% alpha_net=%s",
+                        row["id"], row["symbol"], row["direction"], row["horizon_days"],
+                        out.get("ret_horizon", float("nan")), out.get("alpha_net"),
+                    )
+            except Exception as exc:
+                log.warning("Grading failed for #%d %s: %s", row["id"], row["symbol"], exc)
+        grade_reactions()   # forward-grade the gate A/B shadow cohort
+        graded += grade_skips()
     grade_paths()   # refresh MFE/MAE (open + closed); a routine update, not a "grade"
-    grade_reactions()   # forward-grade the gate A/B shadow cohort
-    return graded + grade_skips()
+    return graded
 
 
 def grade_reactions() -> int:
@@ -261,14 +309,21 @@ def grade_reactions() -> int:
     The bucketed comparison (`abtest`) then shows whether forward alpha actually turns
     on at MATERIAL_REACTION_PCT or the gate is discarding quiet under-reactions."""
     spy = _daily_history("SPY")
+    if spy is None:
+        return 0   # no benchmark — wait for the next pass (never grade benchmark-less)
     graded = 0
     for r in store.due_reactions():
         try:
             df = _daily_history(r["symbol"])
             if df is None:
                 continue
-            # shape a pick-like row so _entry_and_outcomes can grade it unchanged
-            row = {"session": r["session"], "ts": r["ts"], "entry_price": None,
+            # Shape a pick-like row so _entry_and_outcomes can grade it unchanged. The
+            # MARKET session at sighting (mkt_session) drives the Model-A entry clock —
+            # NOT the earnings-announcement session (BMO/AMC/DAY), which made every
+            # shadow row fill at the NEXT open and skip day-1 of the drift (the biggest
+            # day). Legacy rows (mkt_session NULL) keep the old next-open behaviour.
+            row = {"session": r.get("mkt_session") or r["session"], "ts": r["ts"],
+                   "entry_price": r.get("entry_price"),
                    "direction": r["direction"], "horizon_days": r["horizon_days"],
                    "low_liquidity": r["low_liquidity"], "exit_ts": None,
                    "order_type": None, "plan_entry": None, "plan_stop": None}

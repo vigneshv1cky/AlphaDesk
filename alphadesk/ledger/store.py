@@ -172,6 +172,7 @@ CREATE TABLE IF NOT EXISTS earnings_reactions (
     session         TEXT,               -- BMO|AMC|DAY (drives the entry clock)
     direction       TEXT,               -- LONG|SHORT, from the reaction sign
     horizon_days    INTEGER,            -- fixed A/B horizon
+    mkt_session     TEXT,               -- MARKET session at sighting (PRE|OPEN|AFTER|CLOSED) → Model-A entry clock
     reaction_total  REAL,               -- reaction % at sighting (the gate input)
     gate_passed     INTEGER,            -- 1 if |reaction| >= MATERIAL_REACTION_PCT
     low_liquidity   INTEGER DEFAULT 0,
@@ -255,6 +256,10 @@ def init() -> None:
                 conn.execute(f"ALTER TABLE picks ADD COLUMN {col} {decl}")
             except sqlite3.OperationalError:
                 pass  # already migrated
+        try:   # market session at sighting → the reaction A/B's Model-A entry clock
+            conn.execute("ALTER TABLE earnings_reactions ADD COLUMN mkt_session TEXT")
+        except sqlite3.OperationalError:
+            pass  # already migrated
 
 
 def _now() -> str:
@@ -448,11 +453,12 @@ def symbol_skips(symbol: str, days: int = 21, scan: int = 500) -> list[dict]:
 
 
 def symbol_history(symbol: str, limit: int = 5) -> list[dict]:
-    """Episodic memory: this symbol's graded track record."""
+    """Episodic memory: this symbol's graded track record (real outcomes only —
+    voided picks with no alpha are not a track record)."""
     with _connect() as conn:
         rows = conn.execute(
             "SELECT ts, direction, horizon_days, confidence, alpha_net FROM picks"
-            " WHERE symbol = ? AND graded_at IS NOT NULL ORDER BY id DESC LIMIT ?",
+            " WHERE symbol = ? AND alpha_net IS NOT NULL ORDER BY id DESC LIMIT ?",
             (symbol, limit),
         ).fetchall()
     return [dict(r) for r in rows]
@@ -463,9 +469,12 @@ def symbol_history(symbol: str, limit: int = 5) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def stats() -> dict:
+    # 'graded' counts rows with a real OUTCOME (alpha_net), not just a graded_at
+    # stamp: voided picks (ungradeable not-taken / delisted) carry the stamp with
+    # NULL alpha and must not inflate the sample gates (calibration prior, buckets).
     with _connect() as conn:
         total = dict(conn.execute(
-            "SELECT count(*) AS picks, count(graded_at) AS graded,"
+            "SELECT count(*) AS picks, count(alpha_net) AS graded,"
             " round(avg(alpha_net), 3) AS avg_alpha_net,"
             " round(avg(alpha_adj), 3) AS avg_alpha_adj,"   # beta-adjusted + borrow-aware (honest)
             " sum(CASE WHEN alpha_net > 0 THEN 1 ELSE 0 END) AS wins"
@@ -477,7 +486,7 @@ def stats() -> dict:
         eff = conn.execute(
             "SELECT count(DISTINCT cluster) AS clusters,"
             " sum(CASE WHEN cluster IS NULL THEN 1 ELSE 0 END) AS solo"
-            " FROM picks WHERE graded_at IS NOT NULL").fetchone()
+            " FROM picks WHERE alpha_net IS NOT NULL").fetchone()
         total["effective_graded"] = int(eff["clusters"] or 0) + int(eff["solo"] or 0)
         by = {}
         for dim, expr in (
@@ -487,18 +496,18 @@ def stats() -> dict:
             ("confidence", "CASE WHEN confidence < 50 THEN '<50' WHEN confidence < 70 THEN '50-70' ELSE '70+' END"),
         ):
             rows = conn.execute(
-                f"SELECT {expr} AS bucket, count(*) AS n, count(graded_at) AS graded,"
+                f"SELECT {expr} AS bucket, count(*) AS n, count(alpha_net) AS graded,"
                 f" round(avg(alpha_net), 3) AS avg_alpha_net,"
                 f" sum(CASE WHEN alpha_net > 0 THEN 1 ELSE 0 END) AS wins"
                 f" FROM picks GROUP BY bucket"
             ).fetchall()
             by[dim] = [dict(r) for r in rows]
         debate = dict(conn.execute(
-            "SELECT round(avg(CASE WHEN alpha_net IS NOT NULL AND"
+            "SELECT round(avg(CASE WHEN"
             " ((adjusted_score > 50) = (alpha_net > 0)) THEN 1.0 ELSE 0.0 END), 3) AS post_debate_acc,"
-            " round(avg(CASE WHEN alpha_net IS NOT NULL AND"
+            " round(avg(CASE WHEN"
             " ((score > 50) = (alpha_net > 0)) THEN 1.0 ELSE 0.0 END), 3) AS pre_debate_acc"
-            " FROM picks WHERE arm = 'TEAM' AND graded_at IS NOT NULL"
+            " FROM picks WHERE arm = 'TEAM' AND alpha_net IS NOT NULL"
         ).fetchone())
     return {"total": total, "by": by, "debate_lift": debate}
 
@@ -668,8 +677,8 @@ def open_taken_picks() -> list[dict]:
     with _connect() as conn:
         rows = conn.execute(
             "SELECT id, ts, symbol, direction, horizon_days, adjusted_score, confidence,"
-            " edge, thesis, session, entry_price, spy_price, plan_entry, triage_reason,"
-            " broker_order_id, broker_status FROM picks"
+            " edge, thesis, session, entry_price, spy_price, plan_entry, plan_target, plan_stop,"
+            " triage_reason, low_liquidity, mfe_pct, broker_order_id, broker_status FROM picks"
             " WHERE taken=1 AND exit_ts IS NULL AND graded_at IS NULL"
             "   AND datetime(ts, '+' || (horizon_days + 3) || ' days') >= datetime('now')"
             " ORDER BY id DESC",
@@ -685,6 +694,16 @@ def set_broker_order(pick_id: int, order_id: str | None, status: str,
         conn.execute(
             "UPDATE picks SET broker_order_id=?, broker_status=?, broker_qty=? WHERE id=?",
             (order_id, status[:200], float(qty), int(pick_id)))
+
+
+def pm_managed_symbols() -> set[str]:
+    """Symbols the paper PM has ever routed to the broker — so reconcile() only ever
+    CLOSES positions it opened itself, never a manual trade in the same account."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT symbol FROM picks WHERE broker_order_id IS NOT NULL"
+        ).fetchall()
+    return {r["symbol"].upper() for r in rows}
 
 
 def recent_team_picks(days: int = 30) -> list[dict]:
@@ -726,7 +745,7 @@ def live_picks() -> list[dict]:
             "SELECT id, ts, symbol, direction, horizon_days, session, edge, verdict,"
             " approved, adjusted_score, confidence, taken, spy_price, entry_price,"
             " plan_entry, plan_target, plan_stop, plan_note, thesis, triage_reason,"
-            " order_type, mfe_pct FROM picks"
+            " order_type, mfe_pct, low_liquidity FROM picks"
             " WHERE arm='TEAM' AND plan_entry IS NOT NULL"
             "   AND graded_at IS NULL AND exit_ts IS NULL"
             "   AND datetime(ts, '+' || (horizon_days + 2) || ' days') >= datetime('now')"
@@ -801,6 +820,7 @@ def due_skips(limit: int = 300) -> list[dict]:
 def update_skip(skip_id: int, **fields: Any) -> None:
     if not fields:
         return
+    _check_cols(fields)
     cols = ", ".join(f"{k}=?" for k in fields)
     with _lock, _connect() as conn:
         conn.execute(f"UPDATE skips SET {cols} WHERE id=?", (*fields.values(), int(skip_id)))
@@ -808,14 +828,19 @@ def update_skip(skip_id: int, **fields: Any) -> None:
 
 def false_negative_stats() -> dict:
     """The survivorship scorecard: how often the desk was wrong to say NO.
-    - reject: graded TEAM picks it REJECTED that would have beaten SPY
-      (alpha_net > 0 in the proposed direction — a passed-over winner).
+    - reject: graded TEAM calls the desk did NOT BOOK (taken=0) that would have
+      beaten SPY (alpha_net > 0 in the proposed direction — a passed-over winner).
+      Keyed on taken, NOT approved: in TAKE-ALL mode approved=0 picks are still
+      booked as positions, so counting them here would double-count outcomes
+      already in the main scorecard and tell the desk it 'passed on' winners it
+      actually holds. taken=0 is the true counterfactual set (pre-take-all
+      non-approvals + concentration-capped picks).
     - skip:   graded scout skips that made a big move we never looked at."""
     with _connect() as conn:
         rej = dict(conn.execute(
             "SELECT count(*) AS graded,"
             " sum(CASE WHEN alpha_net > 0 THEN 1 ELSE 0 END) AS missed"
-            " FROM picks WHERE arm='TEAM' AND approved=0 AND graded_at IS NOT NULL"
+            " FROM picks WHERE arm='TEAM' AND taken=0 AND alpha_net IS NOT NULL"
         ).fetchone())
         skp = dict(conn.execute(
             "SELECT count(*) AS graded, sum(CASE WHEN missed=1 THEN 1 ELSE 0 END) AS missed"

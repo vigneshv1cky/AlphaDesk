@@ -181,10 +181,18 @@ def drift_candidates(days: int) -> dict[str, list[dict]]:
     # reaction (total, extended-hours aware) split into the uncapturable gap and the
     # capturable drift. total IS the direction signal: the drift edge bets the observed
     # REACTION, not the result (a beat that sells off is not a long). Best-effort.
+    from alphadesk.config import session as market_session
     from alphadesk.ingest import prices
     moved = prices.moves_since_report(
         [{"symbol": e["symbol"], "report_date": e["report_date"],
           "session": e.get("session")} for e in reporters])
+    # The shadow A/B enters like a real pick: if the market is OPEN at sighting, the
+    # fill is the LIVE price now; else the next 9:30 open (resolved by the grader).
+    # (Recording the market session + live price here is what makes the A/B's entry
+    # clock identical to a booked pick's — see grade_reactions.)
+    mkt = market_session()
+    live_now = (prices.latest_prices([e["symbol"] for e in reporters])
+                if mkt == "OPEN" and reporters else {})
     out: dict[str, list[dict]] = {}
     for e in reporters:
         esym = e["symbol"]
@@ -199,10 +207,12 @@ def drift_candidates(days: int) -> dict[str, list[dict]]:
             store.record_reaction({
                 "symbol": esym, "report_date": e["report_date"][:10],
                 "session": e.get("session"),
+                "mkt_session": mkt,
                 "direction": "LONG" if total >= 0 else "SHORT",
                 "horizon_days": REACTION_AB_HORIZON_DAYS,
                 "reaction_total": round(total, 3),
                 "gate_passed": int(abs(total) >= MATERIAL_REACTION_PCT),
+                "entry_price": live_now.get(esym.upper()),
             })
         # GATE: the drift edge rides a VISIBLE reaction. No material move since the
         # report = no reaction to continue — a pre-print / no-reaction earnings binary is
