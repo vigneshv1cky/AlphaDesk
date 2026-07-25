@@ -404,6 +404,37 @@ export function FindTrades({
               These are <b className="text-foreground">research ideas, not trades</b> — nothing is
               bought. The scoreboard, not the AI&apos;s confidence, decides if any of it works.
             </p>
+            <pre className="mt-2 overflow-x-auto rounded-md bg-muted/40 p-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground">
+{`Find Trades run
+  │
+  ├─ SCAN     earnings movers (≥1.5% reaction) + 12h news
+  │            └ heavy earnings day → news poll skipped (lean)
+  │
+  ├─ REVIEW   open picks: fresh news → HOLD/EXIT (no prices shown)
+  │            └ code watcher guards target/stop every 180s
+  │
+  ├─ SCOUT    top ≤4 of ranked candidates (+ reason for every skip)
+  │
+  ├─ GATE     no real catalyst? → dropped & graded forward
+  │            └ earnings reports pass automatically
+  │
+  ├─ EVIDENCE — facts fetched in code, never from model memory
+  │    • price/volume/valuation + options-implied move
+  │    • earnings track record + analyst revisions (yfinance)
+  │    • supply-chain links: EDGAR 10-Ks, Polygon peers, news graph
+  │
+  ├─ DEBATE   researcher → critic (may flip) → fact-check
+  │            → rebuttal → judge commits LONG/SHORT
+  │
+  ├─ PLAN     entry now · target · stop (coherence-checked in code)
+  │
+  ├─ HEAD     ranks the slate · max 2 per sector+direction/day
+  │
+  └─ AFTERMATH
+       • watcher: closes at first target/stop touch (pure code)
+       • grader: alpha vs S&P at each call's horizon
+         — skips & rejects graded too`}
+            </pre>
           </div>
         </details>
 
