@@ -3,6 +3,7 @@ import { Ledger } from "@/components/Ledger"
 import { Earnings } from "@/components/Earnings"
 import { Activity } from "@/components/Activity"
 import { LiveTracker } from "@/components/LiveTracker"
+import { Sessions } from "@/components/Sessions"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 export function RightRail({
@@ -27,6 +28,9 @@ export function RightRail({
         <TabsTrigger value="live" className={trigger}>
           Live
         </TabsTrigger>
+        <TabsTrigger value="sessions" className={trigger}>
+          Sessions
+        </TabsTrigger>
         <TabsTrigger value="record" className={trigger}>
           Track record
         </TabsTrigger>
@@ -39,6 +43,9 @@ export function RightRail({
       </TabsList>
       <TabsContent value="live">
         <LiveTracker />
+      </TabsContent>
+      <TabsContent value="sessions">
+        <Sessions onSelect={onSelect} />
       </TabsContent>
       <TabsContent value="record">
         <Ledger stats={stats} onSelect={onSelect} />

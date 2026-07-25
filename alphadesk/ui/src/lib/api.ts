@@ -200,6 +200,44 @@ export interface EarningsRow {
   engagement_why?: string | null // the desk's own reason: judge summary / thesis / skip reason
 }
 
+// A pick as shown in the Sessions view (decision + lifecycle + outcome).
+export interface SessionPick {
+  id: number
+  ts: string
+  symbol: string
+  direction: "LONG" | "SHORT"
+  edge: string | null
+  verdict: string | null
+  approved: number
+  adjusted_score: number | null
+  confidence: number
+  session: string
+  horizon_days: number
+  plan_entry: number | null
+  plan_target: number | null
+  plan_stop: number | null
+  plan_note: string | null
+  entry_price: number | null
+  alpha_net: number | null
+  graded_at: string | null
+  exit_ts: string | null
+  exit_reason: string | null
+  exit_return_pct: number | null
+}
+
+export interface SessionAgg {
+  n: number
+  open: number
+  graded: number
+  wins: number
+  avg_alpha: number | null
+}
+
+export interface SessionsResponse {
+  sessions: { day: SessionPick[]; extended: SessionPick[]; night: SessionPick[] }
+  agg: { day: SessionAgg; extended: SessionAgg; night: SessionAgg }
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path)
   if (!res.ok) throw new Error(`${path}: ${res.status}`)
@@ -215,6 +253,7 @@ export const api = {
   sources: (days = 30) => get<{ sources: SourceStat[] }>(`/api/sources?days=${days}`),
   earnings: () =>
     get<{ upcoming: EarningsRow[]; reported: EarningsRow[] }>("/api/earnings"),
+  sessions: (days = 14) => get<SessionsResponse>(`/api/sessions?days=${days}`),
 }
 
 // The market runs on US Eastern; show all decision timestamps there.
