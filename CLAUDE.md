@@ -254,8 +254,8 @@ EDGE_HORIZON_SPILLOVER=1       # SPILLOVER/THEME/WORLD also 1: multi-day nature 
 ENTRY_GAP_SKIP_PCT=2.0         # always enter at the current price (market); a CLOSED-market call whose open gapped >this% from the planned price is NOT taken (stale). 0=off
 SCOUT_MAX_CANDIDATES=60        # how many (materiality-ranked) candidates reach the scout per run; raise for wider coverage (more tokens/fetches)
 AUTORUN_INTERVAL_HOURS=1       # dashboard mode auto-fires Find Trades every N hours within the window below (trading days); restart-safe (interval off the ledger's last run — EVERY run is recorded, incl. empty/failed ones, so the gate can't spin). <=0 = off
-AUTORUN_START_ET=09:35        # window start (a few min after 9:30 so BMO reporters are public + live pricing for the gap-guard)
-AUTORUN_END_ET=16:00         # window end; widen (e.g. 23:59) for around-the-clock. Hourly is cheap: the 24h repick cooldown means each run debates only NEW catalysts
+AUTORUN_START_ET=07:00        # window start (default 09:35; 07:00 adds the pre-open window — decisions anchor pre-market, fill at the open with the gap-guard)
+AUTORUN_END_ET=19:00         # window end (default 16:00; 19:00 adds the AMC-earnings reaction window — decisions anchor on the extended-hours reaction, fill at next open). Hourly is cheap: the 24h repick cooldown means each run debates only NEW catalysts. Every pick is session-stamped; stats()/alpha bucket performance BY SESSION (PRE|OPEN|AFTER|CLOSED)
 ```
 
 ## Key design notes

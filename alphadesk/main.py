@@ -435,6 +435,16 @@ def main() -> None:
                 print(f"  {name:7} {n:>4} {net:>9.2f}% {adj:>9.2f}% {drag:>7.2f}% {bstr:>7}")
             else:
                 print(f"  {name:7} {0:>4} {'—':>10} {'—':>10} {'—':>8} {'—':>7}")
+        # by market session — which session's calls actually pay (PRE/OPEN/AFTER/CLOSED)
+        sessions = sorted({r.get("session") or "?" for r in rows})
+        if sessions:
+            print(f"\n  by session (decision-time market session):")
+            print(f"  {'session':8} {'n':>4} {'mean net':>10} {'mean adj':>10} {'win%':>6}")
+            for s in sessions:
+                rs = [r for r in rows if (r.get("session") or "?") == s]
+                n, net, adj, _ = _agg(rs)
+                win = 100.0 * sum(1 for r in rs if r["alpha_net"] > 0) / n if n else 0
+                print(f"  {s:8} {n:>4} {net:>9.2f}% {adj:>9.2f}% {win:>5.0f}%")
         if not rows:
             print("\n  (no picks graded with both metrics yet — grade forward, then re-check).")
         else:

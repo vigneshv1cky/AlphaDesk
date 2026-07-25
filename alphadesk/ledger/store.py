@@ -408,7 +408,7 @@ def alpha_comparison() -> list[dict]:
     shows how much apparent alpha was really beta exposure / unpriced short borrow."""
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT direction, alpha_net, alpha_adj, beta, low_liquidity FROM picks"
+            "SELECT direction, session, alpha_net, alpha_adj, beta, low_liquidity FROM picks"
             " WHERE arm='TEAM' AND graded_at IS NOT NULL"
             "   AND alpha_net IS NOT NULL AND alpha_adj IS NOT NULL").fetchall()
     return [dict(r) for r in rows]
@@ -510,6 +510,7 @@ def stats() -> dict:
             ("arm", "arm"),
             ("horizon", "CASE WHEN horizon_days <= 2 THEN '1-2d' WHEN horizon_days <= 5 THEN '3-5d' ELSE '6-10d' END"),
             ("confidence", "CASE WHEN confidence < 50 THEN '<50' WHEN confidence < 70 THEN '50-70' ELSE '70+' END"),
+            ("session", "session"),   # PRE|OPEN|AFTER|CLOSED — which market session's calls pay
         ):
             rows = conn.execute(
                 f"SELECT {expr} AS bucket, count(*) AS n, count(alpha_net) AS graded,"
