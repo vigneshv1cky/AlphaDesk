@@ -18,8 +18,19 @@ itself forward against reality. **Research / paper only — no order execution.*
 > edge RIPPLE→**SPILLOVER**/NARRATIVE→**THEME**/DRIFT→**MOMENTUM**/WORLD_EVENT→**WORLD**;
 > verdict CONFIRM→**STRONG**/WEAKEN→**SOFT**/REJECT→**PASS**.
 
-All LLM calls run on the **Claude Max subscription** via `claude-agent-sdk` (the
-bundled Claude Code CLI). There is no Bedrock, no API key, no local model files.
+All LLM calls run through `llm.py`'s guarded stack, which dispatches to a
+pluggable **transport** (`config.MODEL_PROVIDER`): `claude-agent-sdk` (the
+bundled Claude Code CLI on a Claude Max subscription — the default), or an
+OpenAI-compatible HTTP API — **kimi** (Moonshot) or **deepseek** — with API
+keys. **ALL-OR-NOTHING by law: exactly ONE provider serves EVERY role in the
+process** — no per-role provider mixing, no silent cross-provider fallback (a
+missing key or bad provider name fails loud at import/call time, never a quiet
+route back to Claude). On an HTTP provider the Claude SDK is never even
+imported (lazy import inside `_one_shot_sdk`). Roles map to abstract tiers
+(opus/sonnet/haiku); each provider resolves tier → concrete model
+(`config.PROVIDER_MODELS`, env-overridable). v1 of the HTTP transport:
+web-grounded roles (connections, earnings_reader) answer parametrically (no
+tool loop yet) — a search shim plugs into `_one_shot_http` later.
 
 > The legacy `stock_sentiment/` bot (FinBERT + AWS Bedrock) was removed 2026-07-16.
 > AlphaDesk (`alphadesk/`) is the only system in this repo.
@@ -99,7 +110,8 @@ Polygon (financial news) + earnings drift (+ since-report move) + Alpaca real-ti
         │
    SCOUT (sonnet)  ── picks ≤5, reasons for every pick AND skip
         │
-   GATE (haiku)  ── drop picks with no real external catalyst BEFORE the debate (fail-open)
+   GATE (haiku)  ── drop picks with no real external catalyst BEFORE the debate (fail-open;
+     EARNINGS-sourced picks AUTO-PASS — a confirmed report is the catalyst, no call needed)
         │  per surviving pick, in parallel:
    2 NOTES (haiku): market (price+valuation+priced-in, incl. realized-vs-implied "spent move" ratio) · news
    + calibration prior (the desk's own graded scorecard, sample-gated at 8 trades)
@@ -110,14 +122,23 @@ Polygon (financial news) + earnings drift (+ since-report move) + Alpaca real-ti
    HEAD (opus) → head-to-head ranking (TAKE-ALL mode 2026-07-24: EVERY debated pick is booked as
      a position; `approved`/ranking kept as metadata to test if selection adds value; cap still trims correlated)
         │
-   LEDGER (SQLite/WAL) → GRADER (hourly, alpha_net vs SPY at own horizon)
+   LEDGER (SQLite/WAL) → GRADER (hourly, alpha_net vs SPY at own horizon; aborts the pass on a
+     SPY-data outage rather than grading benchmark-less; VOIDS rows that can never grade —
+     never-filled 'not-taken' past fill time, delisted symbols — instead of retrying forever)
         │
    POSITION WATCHER (~180s): walks intraday MINUTE bars for the first-touched level → close
-     at that level, gap-/order-aware (pure code); cheap give-back / near-target SCREEN →
-     selective opus REVIEW → HOLD/EXIT (close a spent move before it decays)
+     at that level, gap-/order-aware (PURE CODE — the only price-based exit; no LLM)
 ```
 
 ### Model tiering (`config.MODEL_MAP`, every role env-overridable `MODEL_<ROLE>`)
+
+Tiers are ABSTRACT — each transport resolves them to a concrete model
+(`config.PROVIDER_MODELS`): on `claude_sdk` the tier IS the CLI alias; on `kimi`
+ALL tiers default to `kimi-k2.6` (the k3 flagship is off by default — opt in via
+`KIMI_MODEL_OPUS=kimi-k3` or `MODEL_<ROLE>=kimi-k3`; `KIMI_K3_REASONING_EFFORT`
+caps its always-on reasoning, default low); on `deepseek`
+sonnet/haiku→`deepseek-chat`, opus→`deepseek-reasoner`. A `MODEL_<ROLE>` override may
+also name a concrete model directly (bypasses the tier ladder).
 
 - **haiku**: enrichment, notes/briefs, news_check, gate (high-volume extraction)
 - **sonnet**: scout, researcher, earnings_reader, plan
@@ -141,7 +162,13 @@ Guardrails, in order: model resolution (+ downgrade ladder) · injection defense
 cap (`LLM_MAX_INPUT_CHARS`) · schema validation + one retry, then safe default (a failed
 stage drops the candidate, never a phantom pick) · **universe whitelist** (invented
 tickers rejected — the key output-security limit) · concurrency semaphore
-(`LLM_MAX_CONCURRENCY`) + per-tool-call `max_budget_usd`/`max_turns` · token telemetry.
+(`LLM_MAX_CONCURRENCY`) + per-tool-call `max_budget_usd`/`max_turns` (SDK transport) ·
+token telemetry.
+
+Transports (`MODEL_PROVIDER`): `claude_sdk` (default — one persistent event loop for the
+CLI subprocess; per-call `max_budget_usd`) · `kimi` / `deepseek` (OpenAI-compatible
+`/chat/completions` via urllib; JSON-mode `response_format`; HTTP 429 feeds the same
+rate-limit ladder/breaker; per-provider base URL + key envs in `PROVIDER_ENDPOINTS`).
 
 ## File structure
 
@@ -161,13 +188,13 @@ alphadesk/
     workflow.py        research_run() — batch pipeline (desk CLI, scheduler, replay)
     debate.py          deliberate() — the shared Researcher→Critic→Judge core
     scout.py           all attention judgment, in one prompt (was triage.py)
-    gate.py            pre-debate catalyst screen — drop phantom setups (haiku, fail-open)
+    gate.py            pre-debate catalyst screen — drop phantom setups (haiku, fail-open); screen_picks shared by both pipelines, EARNINGS picks auto-pass (a confirmed report needs no check)
     notes.py           2 parallel haiku note subagents: market (incl. realized-vs-implied spent-move ratio), news (was briefs.py)
     connections.py     the Connections desk (web-grounded spillover mapping; was exposure.py)
     team.py            Researcher ⇄ Critic → Judge, + calibration_block, + head_ranking (was committee.py)
     loner.py           single-agent control arm (was solo.py)
-    plan.py            trade plan (entry/target/stop, agent) — entry ALWAYS a market fill at the current price (no resting limits); + level_crossed / exit_signal / realized_exit (pure-code exit physics) + the closed-market GAP-SKIP guard
-    review.py          position review — HOLD/EXIT on open TAKEs, per run + between-run watcher escalations (was reeval.py)
+    plan.py            trade plan (entry/target/stop, agent) — entry ALWAYS a market fill at the current price (no resting limits); + level_crossed / first_touch_exit / realized_exit (pure-code exit physics) + the closed-market GAP-SKIP guard
+    review.py          position review — price-BLIND (fresh news only): HOLD/EXIT on open TAKEs per run; price exits belong to the watcher, never to an LLM (was reeval.py)
     portfolio.py       paper portfolio manager — OPT-IN (PAPER_TRADING) reconciliation loop that routes booked picks to an Alpaca PAPER account (conviction-weighted, idempotent)
     news_check.py      same-story vs new-catalyst check on a recently-debated name
     earnings_reader.py web-grounded read of an actual earnings report
@@ -177,7 +204,7 @@ alphadesk/
   app/
     dashboard.py       FastAPI + Basic Auth + SSE endpoint + static SPA
     scheduler.py       hourly grader loop (v2); legacy 24/7 loop (run mode)
-  main.py              CLI entrypoint (dashboard/desk/world/grade/status/backfill/run) + position watcher (level cross + give-back screen → review)
+  main.py              CLI entrypoint (dashboard/desk/world/grade/status/backfill/run) + position watcher (level cross → first-touch exit, pure code)
   ui/                  React 19 + TS + Vite + shadcn/ui → built into app/static/
 ```
 
@@ -187,11 +214,27 @@ alphadesk/
 ALPACA_API_KEY=...            # market data + universe (paper keys fine)
 ALPACA_SECRET_KEY=...
 POLYGON_API_KEY=...           # financial news (optional)
+MODEL_PROVIDER=claude_sdk     # ONE provider for ALL roles: claude_sdk (default, Claude Max CLI) | kimi | deepseek
+KIMI_API_KEY=...              # or MOONSHOT_API_KEY — when MODEL_PROVIDER=kimi
+DEEPSEEK_API_KEY=...          # when MODEL_PROVIDER=deepseek
+# KIMI_BASE_URL / DEEPSEEK_BASE_URL — endpoint overrides (e.g. moonshot.cn / proxies)
+# KIMI_MODEL_{OPUS,SONNET,HAIKU} / DEEPSEEK_MODEL_{OPUS,SONNET,HAIKU} — tier→model overrides
+# LLM_HTTP_MAX_TOKENS=4096 — completion cap per HTTP call
+# NB: on HTTP providers, web-grounded roles (connections, earnings_reader) answer
+#     parametrically in v1 — no tool loop yet. Keep MODEL_PROVIDER=claude_sdk if you need them.
 ADMIN_USERNAME=admin          # dashboard Basic Auth (fail-closed if unset)
 ADMIN_PASSWORD=...
 ALPHADESK_DATA=~/.alphadesk   # ledger.db, universe.json, relationship cache
 SOLO_ARM_EVERY_N=0            # 0=off (lean default); set e.g. 6 to measure committee-vs-solo
 CHEAP_MODELS=1               # 1=downgrade the opus judgment roles (critic/judge/head/review/loner/connections) to sonnet — no opus, cheap hourly runs. 0=opus defaults. Per-role MODEL_<ROLE> overrides win
+LEAN_MODE=1                  # 1=cost rails: earnings-primary news gating, tighter news/scout/debate caps, trigger-only reviews. 0=full mode. Sub-knobs below each override individually
+LEAN_EARNINGS_SKIP_NEWS=5    # ≥ this many material drift reporters → skip the news poll entirely (earnings-primary run)
+LEAN_NEWS_HOURS=12           # news window cap when the poll does run (full: 24/48h)
+LEAN_NEWS_MAX_ARTICLES=100   # Polygon fetch cap (full: 200)
+LEAN_NEWS_MAX_SCAN=200       # raw Polygon scan cap (full: 400)
+LEAN_SCOUT_MAX_CANDIDATES=30 # scout window cap (full: 60; materiality ranking keeps the big movers)
+LEAN_MAX_DEBATES=4           # debates per run (full: 6)
+LEAN_REVIEW_TRIGGER_ONLY=1   # review an open position only on fresh news in the pool; else auto-HOLD (the 180s watcher guards target/stop in code, so nothing is unguarded)
 PAPER_TRADING=0              # 1=route booked picks to an Alpaca PAPER account (desk.portfolio reconciliation loop). OFF by default — nothing trades until you opt in
 PM_BASE_USD=1000             # conviction-weighted sizing: $ for a conviction-50 pick, scaled by adjusted_score
 PM_MAX_POSITION_USD=2500     # cap per position
@@ -206,43 +249,52 @@ EDGE_HORIZON_MOMENTUM=1        # PRE-COMMITTED grading horizon (fixed in advance
 EDGE_HORIZON_SPILLOVER=1       # SPILLOVER/THEME/WORLD also 1: multi-day nature handled on the INPUT (lookback) side, not the forward horizon; DEFAULT_EDGE_HORIZON_DAYS=1
 ENTRY_GAP_SKIP_PCT=2.0         # always enter at the current price (market); a CLOSED-market call whose open gapped >this% from the planned price is NOT taken (stale). 0=off
 SCOUT_MAX_CANDIDATES=60        # how many (materiality-ranked) candidates reach the scout per run; raise for wider coverage (more tokens/fetches)
-AUTORUN_INTERVAL_HOURS=1       # dashboard mode auto-fires Find Trades every N hours within the window below (trading days); restart-safe (interval off the ledger's last run). <=0 = off
+AUTORUN_INTERVAL_HOURS=1       # dashboard mode auto-fires Find Trades every N hours within the window below (trading days); restart-safe (interval off the ledger's last run — EVERY run is recorded, incl. empty/failed ones, so the gate can't spin). <=0 = off
 AUTORUN_START_ET=09:35        # window start (a few min after 9:30 so BMO reporters are public + live pricing for the gap-guard)
 AUTORUN_END_ET=16:00         # window end; widen (e.g. 23:59) for around-the-clock. Hourly is cheap: the 24h repick cooldown means each run debates only NEW catalysts
-# Exit-monitoring screens (tunable; the opus reviewer is the real filter — defaults escalate generously):
-EXIT_NEAR_TARGET_FRAC=0.85    # ≥ this much of the entry→target move captured → escalate to review
-EXIT_GIVEBACK_MIN_PEAK=4.0    # watch give-back only after the favorable move peaks above this % (below = noise)
-EXIT_GIVEBACK_FRAC=0.40       # faded ≥ this fraction of that peak → escalate (MFE-decay flag)
-EXIT_REVIEW_COOLDOWN_S=1800   # min seconds between reviews of the same open position
 ```
 
 ## Key design notes
 
 - **No order execution** — research/paper only until the ledger earns it.
+- **Lean mode (default ON, 2026-07-24)** — cost discipline while the system is unproven.
+  Earnings drift is the primary, cheapest, highest-signal channel, so: (1) a heavy earnings
+  slate (≥`LEAN_EARNINGS_SKIP_NEWS` reporters) skips the news poll entirely — earnings-primary
+  runs; (2) when news does poll, the window/fetch/scan are capped tighter; (3) the scout
+  window and debates-per-run shrink (materiality ranking means the cut is the tail, not the
+  movers); (4) open-position reviews need a TRIGGER (fresh news in the pool) — no trigger is an
+  auto-HOLD, and the 180s watcher still closes on level crosses, so nothing is unguarded.
+  `record_ingest` still logs the skipped poll (0 articles) so the source scorecard reflects
+  the throttling. `LEAN_MODE=0` restores full mode; every knob overrides independently.
 - **Self-improvement is grounded, not RL**: a numeric calibration scorecard is fed
   into agent prompts (dormant until ~8 graded trades); the real self-correction is the
   pre-committed **kill criteria** (drop the debate / an edge / the team if the
   ledger says they don't pay). No free-form "lessons" memory (persistent injection risk).
   NB: this is NOT the agent learning — the model is frozen; the loop builds evidence so
   *humans* retune. In-context feedback changing behavior is itself an unproven experiment.
-- **Anti-survivorship** — the ledger grades REJECTED picks (counterfactuals), and
+- **Anti-survivorship** — the ledger grades NOT-TAKEN picks (counterfactuals: keyed on
+  `taken=0`, NOT `approved=0` — in TAKE-ALL mode approved=0 picks are booked positions,
+  so counting them as 'missed winners' would double-count the main scorecard and tell
+  the desk it passed on things it holds), and
   `grader.grade_skips()` grades scout SKIPS too (directionless: a move vs SPY over
   `SKIP_GRADE_DAYS` above `SKIP_MISS_ABS_ALPHA`% = a dislocation we ignored). `team.
-  false_negative_block()` feeds the reject/skip miss-rate into scout + judge — sample-
+  false_negative_block()` feeds the not-taken/skip miss-rate into scout + judge — sample-
   gated, removable, tagged as an experiment.
 - **Miss diagnosis is conversational** — ask Claude "why did we miss X?"; it traces
   `store.symbol_traces` / `symbol_skips` and fixes data/prompt/bug. No UI tool for it.
 - **Pre-committed horizon** — the grading horizon is FIXED per edge in advance
-  (`config.pinned_horizon`, `EDGE_HORIZON_DAYS`), NOT chosen by the judge after seeing the
+  (`config.pinned_horizon`, `EDGE_HORIZON_DAYS`), NOT chosen by any agent after seeing the
   setup. SHORT-HORIZON daily-run mode (2026-07-24): ALL edges = 1 (strictly today→tomorrow) —
   the desk runs every day, so the forward CALL is always 1-day. The multi-day nature of
   SPILLOVER/THEME/WORLD is handled on the INPUT/lookback side (detect the buildup from days of
-  history — price 5d/20d/90d is already in every candidate; THEME mention-velocity keys on the
-  news window), NOT the horizon. Read the slow signal, bet the next day. Bump any edge via env. `debate.deliberate` sets `horizon =
-  pinned_horizon(edge_hint)` (the trade PLAN sizes to it too, so entry and grade stay
-  consistent); the loner control arm is pinned to the SAME horizon for an apples-to-apples
-  comparison; the judge prompt now judges whether the edge plays out WITHIN the fixed window
-  (a thesis needing longer → PASS, not a stretched clock). Removes the garden-of-forking-paths
+  history — price 5d/20d/90d is already baked into every candidate; THEME mention-velocity keys on the
+  news window), NOT the horizon. Read the slow signal, bet the next day. Bump any edge via env. `debate.deliberate` computes `horizon =
+  pinned_horizon(edge_hint)` UP FRONT and hands it to EVERY role (researcher, critic, rebuttal,
+  judge — and the trade PLAN, so entry and grade stay consistent): no agent picks a horizon,
+  the researcher/critic schemas carry no horizon field, and each prompt states the fixed window
+  to argue within (a thesis needing longer → weaker call/PASS, not a stretched clock). The loner
+  control arm is pinned to the SAME horizon in BOTH entry points (stream + workflow) for an
+  apples-to-apples comparison. Removes the garden-of-forking-paths
   (a catalyst bookable as a 1d or 10d call, only the chosen spec logged) so alpha_net is an
   honest out-of-sample number — and neutralises the horizon-shop the calibration buckets fed.
 - **Concentration cap** — `team.apply_concentration_cap` (run in `stream.py` after the Head
@@ -267,19 +319,24 @@ EXIT_REVIEW_COOLDOWN_S=1800   # min seconds between reviews of the same open pos
   earnings reporters with a sub-`MATERIAL_REACTION_PCT` reaction could be filtering noise
   OR discarding the quiet under-reactions that ARE the drift edge. So `earnings.
   drift_candidates` logs EVERY public reporter's reaction (passed AND dropped) to
-  `earnings_reactions`, and `grader.grade_reactions()` forward-grades both arms vs SPY in
-  the reaction direction (same Model-A entry + benchmark + friction as booked picks) over
-  `REACTION_AB_HORIZON_DAYS`. `abtest` buckets the graded rows by reaction size: if
-  forward alpha turns on at the threshold the gate is justified (and shows the right
-  threshold); if the dropped arm pays as well, the gate is cutting winners. No LLM cost —
-  a simultaneous, same-tape shadow A/B, dormant as evidence until the sample is real.
-- **Spent-move symmetry** — "how much of the expected move is left?" is asked at BOTH
-  ends. At ENTRY the market note gets an explicit realized-vs-implied ratio (today/5d
-  move ÷ options-implied move) plus the earnings since-report move, so a fully-repriced
-  setup reads "spent → pass" (the fix for entering a gap that already happened). At EXIT
-  the give-back screen closes a position once the *remaining* move plays out. Both are
-  evidence the agents weigh (not gates), and the ratio only fires where options data
-  exists (liquid names); thin names fall back to the qualitative priced-in read.
+  `earnings_reactions` — stamped with the MARKET session at sighting (`mkt_session`) and
+  the live price when sighted mid-session, so the entry clock is identical to a booked
+  pick (rows predating that stamp enter at the next open, skipping day-1 — read old
+  graded rows accordingly) — and `grader.grade_reactions()` forward-grades both arms vs
+  SPY in the reaction direction (same Model-A entry + benchmark + friction as booked
+  picks) over `REACTION_AB_HORIZON_DAYS`. `abtest` buckets the graded rows by reaction
+  size: if forward alpha turns on at the threshold the gate is justified (and shows the
+  right threshold); if the dropped arm pays as well, the gate is cutting winners. No LLM
+  cost — a simultaneous, same-tape shadow A/B, dormant as evidence until the sample is real.
+- **Spent-move read lives at ENTRY only** — at entry the market note gets an explicit
+  realized-vs-implied ratio (today/5d move ÷ options-implied move) plus the earnings
+  since-report move, so a fully-repriced setup reads "spent → pass" (the fix for entering
+  a gap that already happened). The EXIT side has no spent-move judgment: price exits are
+  owned entirely by the pure-code first-touch watcher (a spent move closes AT its target;
+  a wrong one at its stop), and the reviewer is shown no prices — it exits only on fresh
+  adverse NEWS (design law #2 applied to exits: price exits by code, thesis exits by
+  information). The entry ratio only fires where options data exists (liquid names);
+  thin names fall back to the qualitative priced-in read.
 - **Gap vs capturable drift** — `prices.moves_since_report` splits the move since a
   report into the uncapturable overnight **gap** (pre-report close → first post-report
   OPEN — repriced before you could act) and the **drift** (from that open — what you
@@ -298,28 +355,29 @@ EXIT_REVIEW_COOLDOWN_S=1800   # min seconds between reviews of the same open pos
   capped at `SCOUT_MAX_CANDIDATES` (60). Fixes the THRM +22.7% miss: a small-cap mover no longer
   gets truncated behind mega-caps with tiny reactions. `earnings.drift_candidates` exposes
   `reaction_pct` per candidate for the rank. Raise the cap for more coverage (more tokens/fetches).
-- **Position review (exits)** — the team only opens positions; three things close them
+- **Position review (exits)** — the team only opens positions; two things close them
   early, all research/paper (a ledger `exit_ts`/`exit_reason` stamp, never an order):
-  (1) each Find Trades run, BEFORE hunting new trades, the opus `review` agent re-checks
-  every open TAKE (`store.open_taken_picks`) vs price + fresh news → HOLD/EXIT, surfaced
-  first (you may have traded it); (2) the **position watcher** (`main._position_watch_loop`,
+  (1) each Find Trades run, BEFORE hunting new trades, the `review` agent re-checks
+  open TAKEs (`store.open_taken_picks`) — **shown NO prices at all** (not entry, not
+  current, not move, not momentum): it judges the thesis vs FRESH NEWS only and exits
+  solely on fresh adverse information (a quiet tape is an auto-HOLD). Price-based exits
+  belong to code, never an LLM; (2) the **position watcher** (`main._position_watch_loop`,
   ~180s) walks the intraday MINUTE-bar path (`prices.intraday_bars` →
   `plan.first_touch_exit`) and closes at the FIRST level actually touched — priced at that
   level, gap-aware (a level opened-through fills at the bar open), and order-aware (a bar
   spanning both target and stop books the adverse one); falls back to the spot-quote level
-  check only when bars are unavailable (pure code); (3) between runs, a cheap code
-  SCREEN (`plan.exit_signal`: near-target, or MFE give-back seeded from the persisted
-  `mfe_pct` so it survives restarts) flags a spent move and escalates that ONE position to
-  the same opus reviewer — so a played-out move is closed before the gain decays, not only
-  on the next run. HOLD is always the fail-safe default; escalation is throttled per
-  position (`EXIT_REVIEW_COOLDOWN_S`).
+  check only when bars are unavailable (pure code, the ONLY price-based exit). A spent
+  move closes AT its target; a wrong one at its stop; anything between keeps working to
+  the levels or the horizon. HOLD is always the fail-safe default.
 
 ## Tech debt / honest status
 
 - **Team core is converged** (`desk/debate.py`): both entry points run the same
   `deliberate()` async generator for the researcher→critic→judge→ledger-write sequence,
-  and now the same notes (market + news), so they no longer drift. Only the loner-arm
-  record is still lightly duplicated between them.
+  the same notes (market + news), the same gate (`gate.screen_picks`), and the same
+  scout-window helpers (`scout.headline_rows` / `scout.avg_sentiment`), so they no
+  longer drift. The loner arm is lightly duplicated between them but pinned to the
+  same horizon + inputs in both.
 - **Unproven.** The ledger clock is running but the sample is tiny and shows **no edge
   yet** (~28 graded as of 2026-07-22, direction ≈ 43% ≈ coin-flip, mean alpha negative —
   statistically indistinguishable from zero). The calibration prior and kill criteria stay
