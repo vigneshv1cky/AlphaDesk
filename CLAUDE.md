@@ -177,9 +177,11 @@ alphadesk/
   config.py            MODEL_MAP, caps, sessions, tradable universe (weekly Alpaca cache)
   llm.py               the guarded call stack — every LLM call goes here
   ingest/
-    news.py            Polygon poll → Haiku enrichment → candidates
+    news.py            Polygon poll → Haiku enrichment → candidates (+ persists text-evidenced relations to relation_facts)
     earnings.py        Nasdaq earnings calendar → post-earnings-drift candidates the moment a report is PUBLIC
                        (NOT gated on eps_actual, which lags a day — direction from the price reaction, not the result)
+    relations.py       relationship FACTS in code: SEC EDGAR 10-K customer/supplier disclosures (FTS + entity-decoded
+                       proximity parse — precise, sparse), Polygon related-companies peers, the news relation graph
     world.py           GDELT world-news (11-cat taxonomy) — OFF by default in Find Trades
                        (WORLD_MAX_CATEGORIES=0); still used by the scheduler + `world` CLI
     prices.py          lazy per-symbol context — real-time Alpaca last trade (yfinance history fallback); NO triggers, NO sweeps
@@ -190,14 +192,14 @@ alphadesk/
     scout.py           all attention judgment, in one prompt (was triage.py)
     gate.py            pre-debate catalyst screen — drop phantom setups (haiku, fail-open); screen_picks shared by both pipelines, EARNINGS picks auto-pass (a confirmed report needs no check)
     notes.py           2 parallel haiku note subagents: market (incl. realized-vs-implied spent-move ratio), news (was briefs.py)
-    connections.py     the Connections desk (web-grounded spillover mapping; was exposure.py)
+    connections.py     the Connections desk — CODE discovers relationships (ingest/relations: EDGAR 10-K customer disclosures + Polygon peers + the news relation graph), one LLM call judges direction/strength with the evidence; web search only as the discovery backstop
     team.py            Researcher ⇄ Critic → Judge, + calibration_block, + head_ranking (was committee.py)
     loner.py           single-agent control arm (was solo.py)
     plan.py            trade plan (entry/target/stop, agent) — entry ALWAYS a market fill at the current price (no resting limits); + level_crossed / first_touch_exit / realized_exit (pure-code exit physics) + the closed-market GAP-SKIP guard
     review.py          position review — price-BLIND (fresh news only): HOLD/EXIT on open TAKEs per run; price exits belong to the watcher, never to an LLM (was reeval.py)
     portfolio.py       paper portfolio manager — OPT-IN (PAPER_TRADING) reconciliation loop that routes booked picks to an Alpaca PAPER account (conviction-weighted, idempotent)
     news_check.py      same-story vs new-catalyst check on a recently-debated name
-    earnings_reader.py web-grounded read of an actual earnings report
+    earnings_reader.py earnings evidence: code-fetched FACTS only (beat/miss track record, revenue trend, analyst revisions — no LLM, no confabulation)
   ledger/
     store.py           SQLite/WAL: picks (+ exit/mfe/source cols), earnings, funnel, token_usage, relationships
     grader.py          forward grading vs SPY + MFE/MAE paths + skip-grading — pure code
@@ -220,8 +222,10 @@ DEEPSEEK_API_KEY=...          # when MODEL_PROVIDER=deepseek
 # KIMI_BASE_URL / DEEPSEEK_BASE_URL — endpoint overrides (e.g. moonshot.cn / proxies)
 # KIMI_MODEL_{OPUS,SONNET,HAIKU} / DEEPSEEK_MODEL_{OPUS,SONNET,HAIKU} — tier→model overrides
 # LLM_HTTP_MAX_TOKENS=4096 — completion cap per HTTP call
-# NB: on HTTP providers, web-grounded roles (connections, earnings_reader) answer
-#     parametrically in v1 — no tool loop yet. Keep MODEL_PROVIDER=claude_sdk if you need them.
+# KIMI_WEB_SEARCH=1 — builtin $web_search tool loop for kimi (needs KIMI_THINKING=disabled);
+#     falls back to parametric on failure. Used by the connections desk; earnings evidence
+#     is code-fetched facts only (see earnings_reader — no LLM in the number path)
+# NB: on HTTP providers without search, web-grounded roles answer parametrically.
 ADMIN_USERNAME=admin          # dashboard Basic Auth (fail-closed if unset)
 ADMIN_PASSWORD=...
 ALPHADESK_DATA=~/.alphadesk   # ledger.db, universe.json, relationship cache
