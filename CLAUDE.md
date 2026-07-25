@@ -243,6 +243,7 @@ PAPER_TRADING=0              # 1=route booked picks to an Alpaca PAPER account (
 PM_BASE_USD=1000             # conviction-weighted sizing: $ for a conviction-50 pick, scaled by adjusted_score
 PM_MAX_POSITION_USD=2500     # cap per position
 PM_MAX_POSITIONS=20          # max concurrent Alpaca positions (best conviction first)
+PM_EXTENDED_HOURS=1          # 1=PRE/AFTER window picks route as LIMIT orders at the decision price (extended_hours=True); the broker's actual fill is stamped back (broker_fill_price/ts) and becomes the ledger entry (grader + watcher prefer it). 0=all Model A (fills at the open)
 WORLD_MAX_CATEGORIES=0        # GDELT world news in Find Trades: 0=off (default); 4=full sweep every ~3 runs; 11=every run (slow)
 MATERIAL_REACTION_PCT=1.5     # earnings drift needs a visible reaction to be a directional candidate; below this % (live vs pre-report close) = skip
 REACTION_AB_HORIZON_DAYS=3    # shadow A/B: forward-grade EVERY reporter's reaction (passed AND dropped) over this horizon → `abtest` shows if the gate cuts winners
@@ -359,6 +360,14 @@ AUTORUN_END_ET=19:00         # window end (default 16:00; 19:00 adds the AMC-ear
   capped at `SCOUT_MAX_CANDIDATES` (60). Fixes the THRM +22.7% miss: a small-cap mover no longer
   gets truncated behind mega-caps with tiny reactions. `earnings.drift_candidates` exposes
   `reaction_pct` per candidate for the rank. Raise the cap for more coverage (more tokens/fetches).
+- **Extended-hours execution (opt-in, PM_EXTENDED_HOURS)** — Alpaca has no night
+  session (extended hours are 4:00–20:00 ET weekdays only, and market orders don't
+  fill off-hours). PRE/AFTER-window picks route as LIMIT orders at the decision price
+  with `extended_hours=True`; the fill-sync pass stamps the broker's actual fill
+  (`broker_fill_price/ts`) and it becomes the ledger's entry — grader benchmarks SPY
+  from the last close before the fill moment, and the watcher monitors off that entry,
+  so broker and ledger never disagree. CLOSED-window picks still queue for the open
+  (Model A). Day-session picks still use market orders.
 - **Position review (exits)** — the team only opens positions; two things close them
   early, all research/paper (a ledger `exit_ts`/`exit_reason` stamp, never an order):
   (1) each Find Trades run, BEFORE hunting new trades, the `review` agent re-checks

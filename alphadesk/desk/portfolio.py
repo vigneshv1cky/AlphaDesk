@@ -26,6 +26,7 @@ import threading
 from alphadesk.config import (
     PAPER_TRADING,
     PM_BASE_USD,
+    PM_EXTENDED_HOURS,
     PM_MAX_POSITION_USD,
     PM_MAX_POSITIONS,
 )
@@ -69,14 +70,22 @@ def _size_shares(pick: dict, price: float | None) -> int:
 
 def reconcile() -> dict:
     """Make the Alpaca paper account match the ledger's open-taken positions. Idempotent —
-    safe to call on a loop. Returns a summary dict."""
+    safe to call on a loop. Returns a summary dict.
+
+    Order construction by decision session (PM_EXTENDED_HOURS=1):
+      • OPEN     → market order (fills now)
+      • PRE/AFTER → LIMIT order at the decision price, extended_hours=True (weekday
+        extended sessions only — there is no night session on Alpaca)
+      • CLOSED   → nothing to route until the ledger has a fill (Model A: next open)
+    A fill-sync pass stamps the broker's actual fill (broker_fill_price/ts) — the
+    ledger's honest entry — and clears dead orders (expired/canceled) for re-route."""
     if not PAPER_TRADING:
         return {"enabled": False}
     client = _trading_client()
     if client is None:
         return {"enabled": True, "error": "no trading client"}
     from alpaca.trading.enums import OrderSide, TimeInForce
-    from alpaca.trading.requests import MarketOrderRequest
+    from alpaca.trading.requests import LimitOrderRequest, MarketOrderRequest
 
     try:
         positions = {p.symbol.upper(): p for p in client.get_all_positions()}
@@ -88,33 +97,71 @@ def reconcile() -> dict:
     open_syms = {p["symbol"].upper() for p in open_taken}
     opened = closed = 0
 
+    # FILL SYNC — resolve routed orders: stamp the broker's actual fill (the ledger's
+    # honest entry), clear dead orders so the entry pass can re-route them.
+    for pick in open_taken:
+        oid = pick.get("broker_order_id")
+        if not oid:
+            continue
+        try:
+            o = client.get_order_by_id(oid)
+        except Exception:
+            continue   # unknown/transient — retry next pass
+        state = str(getattr(o, "status", "") or "").lower()
+        if state == "filled":
+            px = float(getattr(o, "filled_avg_price", 0) or 0)
+            ts = str(getattr(o, "filled_at", "") or "")
+            if px and not pick.get("broker_fill_price"):
+                store.set_broker_fill(pick["id"], px, ts)
+            store.set_broker_order(pick["id"], oid, "filled", pick.get("broker_qty") or 0)
+            log.info("PM fill #%d %s @ %s", pick["id"], pick["symbol"], px or "?")
+        elif state in ("expired", "canceled", "rejected"):
+            store.set_broker_order(pick["id"], None, f"unfilled: {state}", 0)
+            log.info("PM order %s for #%d %s — cleared for re-route", state, pick["id"], pick["symbol"])
+
     # ENTRIES — open what the ledger has but Alpaca doesn't, best conviction first, capped.
     slots = len(positions)
     submitted: set[str] = set()
     for pick in sorted(open_taken, key=lambda p: -(p.get("adjusted_score") or 0)):
         sym = pick["symbol"].upper()
+        status = pick.get("broker_status") or ""
         if (sym in positions or sym in submitted or pick.get("broker_order_id")
-                or (pick.get("broker_status") or "").startswith("rejected")
-                or pick.get("entry_price") is None):   # already routed / rejected / not filled
+                or status.startswith("rejected") or status.startswith("filled")):
+            continue   # already routed / held / dead
+        price = pick.get("entry_price")
+        # Extended-hours pick with no fill yet: route a LIMIT order at the decision
+        # price (PRE/AFTER weekday sessions; PM_EXTENDED_HOURS). Else wait for the
+        # Model-A open fill.
+        limit_px = None
+        if price is None and PM_EXTENDED_HOURS and pick.get("session") in ("PRE", "AFTER"):
+            limit_px = pick.get("plan_entry")
+        if price is None and limit_px is None:
             continue
-        if slots >= PM_MAX_POSITIONS:
-            break
-        qty = _size_shares(pick, pick.get("entry_price"))
+        qty = _size_shares(pick, price or limit_px)
         if qty < 1:
             continue
         side = OrderSide.BUY if pick["direction"] == "LONG" else OrderSide.SELL
         try:
-            order = client.submit_order(MarketOrderRequest(
-                symbol=sym, qty=qty, side=side, time_in_force=TimeInForce.DAY))
-            store.set_broker_order(pick["id"], str(order.id), "submitted", qty)
+            if limit_px:
+                order = client.submit_order(LimitOrderRequest(
+                    symbol=sym, qty=qty, side=side, time_in_force=TimeInForce.DAY,
+                    limit_price=round(float(limit_px), 2), extended_hours=True))
+                store.set_broker_order(pick["id"], str(order.id), "submitted-ext", qty)
+                log.info("PM extended-hours LIMIT %s %s x%d @ %s", pick["direction"], sym, qty, limit_px)
+            else:
+                order = client.submit_order(MarketOrderRequest(
+                    symbol=sym, qty=qty, side=side, time_in_force=TimeInForce.DAY))
+                store.set_broker_order(pick["id"], str(order.id), "submitted", qty)
+                log.info("PM opened %s %s x%d (conv %s)", pick["direction"], sym, qty,
+                         pick.get("adjusted_score"))
             submitted.add(sym)
             slots += 1
             opened += 1
-            log.info("PM opened %s %s x%d (conv %s)", pick["direction"], sym, qty,
-                     pick.get("adjusted_score"))
         except Exception as exc:
             store.set_broker_order(pick["id"], None, f"rejected: {exc}", 0)
             log.warning("PM order REJECTED %s %s: %s", pick["direction"], sym, exc)
+        if slots >= PM_MAX_POSITIONS:
+            break
 
     # EXITS — close what Alpaca holds but the ledger has exited/graded (no longer
     # open-taken). ONLY positions the PM itself opened (broker_order_id stamped): an

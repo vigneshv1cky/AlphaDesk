@@ -267,8 +267,9 @@ def init() -> None:
             except sqlite3.OperationalError:
                 pass  # already migrated
         for col, decl in (("broker_order_id", "TEXT"), ("broker_status", "TEXT"),
-                          ("broker_qty", "REAL")):   # paper portfolio manager (Alpaca)
-            try:
+                          ("broker_qty", "REAL"),
+                          ("broker_fill_price", "REAL"), ("broker_fill_ts", "TEXT")):
+            try:   # paper portfolio manager (Alpaca); fill = the ledger entry when present
                 conn.execute(f"ALTER TABLE picks ADD COLUMN {col} {decl}")
             except sqlite3.OperationalError:
                 pass  # already migrated
@@ -748,6 +749,15 @@ def set_broker_order(pick_id: int, order_id: str | None, status: str,
             (order_id, status[:200], float(qty), int(pick_id)))
 
 
+def set_broker_fill(pick_id: int, price: float, ts: str) -> None:
+    """Stamp the broker's ACTUAL fill — the ledger's honest entry for this pick
+    (grader prefers it over the Model-A open fill when present)."""
+    with _lock, _connect() as conn:
+        conn.execute(
+            "UPDATE picks SET broker_fill_price=?, broker_fill_ts=? WHERE id=?",
+            (round(float(price), 4), str(ts)[:40], int(pick_id)))
+
+
 def pm_managed_symbols() -> set[str]:
     """Symbols the paper PM has ever routed to the broker — so reconcile() only ever
     CLOSES positions it opened itself, never a manual trade in the same account."""
@@ -797,7 +807,8 @@ def live_picks() -> list[dict]:
             "SELECT id, ts, symbol, direction, horizon_days, session, edge, verdict,"
             " approved, adjusted_score, confidence, taken, spy_price, entry_price,"
             " plan_entry, plan_target, plan_stop, plan_note, thesis, triage_reason,"
-            " order_type, mfe_pct, low_liquidity FROM picks"
+            " order_type, mfe_pct, low_liquidity, broker_order_id, broker_fill_price"
+            " FROM picks"
             " WHERE arm='TEAM' AND plan_entry IS NOT NULL"
             "   AND graded_at IS NULL AND exit_ts IS NULL"
             "   AND datetime(ts, '+' || (horizon_days + 2) || ' days') >= datetime('now')"

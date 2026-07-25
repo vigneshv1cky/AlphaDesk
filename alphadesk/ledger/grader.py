@@ -107,14 +107,31 @@ def _maybe_void(row: dict, df_missing: bool = False) -> bool:
 
 def _entry(row: dict, df):
     """(entry_day, entry_price) for a pick, or None if not determinable yet. Shared
-    by the horizon grade and the MFE/MAE path so both anchor identically. Uses the
-    Model-A fill clock (config.entry_fill_time) so a call fills at the next REGULAR
-    open — e.g. a pre-dawn (3am) call enters THAT day's 9:30, not a day late."""
+    by the horizon grade and the MFE/MAE path so both anchor identically. Entry
+    precedence: (1) the BROKER's actual fill when the PM routed the pick (stamped
+    broker_fill_price/ts — the honest entry, incl. extended-hours limit fills);
+    (2) a live price for OPEN-session decisions; (3) the Model-A fill clock (next
+    regular open) for closed-market decisions."""
     import pandas as pd
 
     from alphadesk.config import entry_fill_time
 
     days = df.index.normalize().unique()
+
+    # 1. Broker fill — the PM routed this pick and it filled (possibly in extended
+    # hours). Entry day = the fill's trading day, price = the actual fill price.
+    bf = row.get("broker_fill_price")
+    if bf and row.get("broker_fill_ts"):
+        try:
+            fdt = pd.Timestamp(row["broker_fill_ts"]).tz_convert(ET)
+        except (ValueError, TypeError):
+            fdt = None
+        if fdt is not None:
+            cand = days[days <= fdt.normalize()]
+            if len(cand):
+                return cand[-1], float(bf)
+
+    # 2. OPEN-session picks filled LIVE at the decision (entry_price stamped then).
 
     # OPEN-session picks filled LIVE at the decision (entry_price stamped then).
     if row["session"] == "OPEN" and row["entry_price"] is not None:
@@ -225,14 +242,26 @@ def _entry_and_outcomes(row: dict, df, spy) -> dict | None:
             s_entry_day = s_entry_c[0]
             s_after = sdays[sdays > s_entry_day]
             if len(s_after) >= horizon:
-                # Match SPY's entry bar to the stock's fill: OPEN-session picks fill
-                # intraday at a live price → benchmark from the entry-day CLOSE; closed-
-                # market picks fill at the next 9:30 OPEN → benchmark from that OPEN.
-                # (Keying on entry_price-is-None was the bug: the watcher stamps
-                # entry_price on closed picks too, flipping them to CLOSE and silently
-                # dropping SPY's day-0 open→close move from every closed-market grade.)
-                spy_leg = "Close" if row["session"] == "OPEN" else "Open"
-                s_entry = float(spy.loc[spy.index.normalize() == s_entry_day, spy_leg].iloc[0])
+                broker_ts = row.get("broker_fill_ts")
+                if row.get("broker_fill_price") and broker_ts:
+                    # Broker-filled (possibly extended-hours): benchmark from the last
+                    # SPY close at/before the actual fill moment — the closest tradable
+                    # benchmark point (pre-market fill → yesterday's close; after-hours
+                    # fill → today's close; regular-hours fill → today's close).
+                    import pandas as pd
+                    fdt = pd.Timestamp(broker_ts).tz_convert(ET)
+                    bc = sdays[sdays <= fdt.normalize()]
+                    s_entry = float(spy.loc[spy.index.normalize() == bc[-1], "Close"].iloc[0]) \
+                        if len(bc) else float(spy.loc[spy.index.normalize() == s_entry_day, "Close"].iloc[0])
+                else:
+                    # Match SPY's entry bar to the stock's fill: OPEN-session picks fill
+                    # intraday at a live price → benchmark from the entry-day CLOSE; closed-
+                    # market picks fill at the next 9:30 OPEN → benchmark from that OPEN.
+                    # (Keying on entry_price-is-None was the bug: the watcher stamps
+                    # entry_price on closed picks too, flipping them to CLOSE and silently
+                    # dropping SPY's day-0 open→close move from every closed-market grade.)
+                    spy_leg = "Close" if row["session"] == "OPEN" else "Open"
+                    s_entry = float(spy.loc[spy.index.normalize() == s_entry_day, spy_leg].iloc[0])
                 s_exit = float(spy.loc[spy.index.normalize() == s_after[horizon - 1], "Close"].iloc[0])
                 spy_ret = (s_exit - s_entry) / s_entry * 100
                 out["spy_ret_horizon"] = round(spy_ret, 3)

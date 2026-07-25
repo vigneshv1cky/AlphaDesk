@@ -111,9 +111,11 @@ async def _serve() -> None:
                     # resolve its entry from the fill-day OHLC. Market → the open; limit
                     # → its level if price reached it (stamp entry_price so live P&L /
                     # exits measure from the real fill), else the limit never triggered
-                    # → NOT TAKEN (no fill, no P&L).
+                    # → NOT TAKEN (no fill, no P&L). Broker-routed picks (PM) are
+                    # skipped — the PM owns their fill (broker_fill_price).
                     now = now_et()
                     unfilled = [p for p in open_pos if p.get("entry_price") is None
+                                and not p.get("broker_order_id")
                                 and (ft := entry_fill_time(p["ts"], p.get("session"))) and ft <= now]
                     not_taken_ids: set[int] = set()
                     if unfilled:
@@ -146,9 +148,11 @@ async def _serve() -> None:
                     # not-yet-filled limits (entry_price is NULL); exiting those would
                     # stamp realized P&L off plan_entry as a phantom fill. (The run-level
                     # review uses open_taken_picks, which already filters taken=1; the
-                    # between-run watcher must match it.)
+                    # between-run watcher must match it.) A broker fill counts as filled.
                     monitorable = [p for p in open_pos if p["id"] not in not_taken_ids
-                                   and p.get("taken") and p.get("entry_price") is not None
+                                   and p.get("taken")
+                                   and (p.get("entry_price") is not None
+                                        or p.get("broker_fill_price") is not None)
                                    and p.get("plan_target") and p.get("plan_stop")]
                     live_ids = {p["id"] for p in open_pos}
                     for stale in [i for i in last_check if i not in live_ids]:
@@ -160,7 +164,8 @@ async def _serve() -> None:
                         spy_now = quotes.get("SPY")
                         for p in monitorable:
                             cur = quotes.get(p["symbol"].upper())
-                            entry = p.get("entry_price") or p.get("plan_entry")
+                            entry = (p.get("entry_price") or p.get("broker_fill_price")
+                                     or p.get("plan_entry"))
                             # Walk the true intraday PATH since we last looked (first sight:
                             # since the fill) to find the FIRST level touched — priced AT the
                             # level, gap-aware, and order-aware when a bar spans both. This

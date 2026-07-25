@@ -245,6 +245,13 @@ PAPER_TRADING = os.environ.get("PAPER_TRADING", "0") not in ("0", "", "false", "
 PM_BASE_USD = float(os.environ.get("PM_BASE_USD", "1000"))            # $ for a conviction-50 position
 PM_MAX_POSITION_USD = float(os.environ.get("PM_MAX_POSITION_USD", "2500"))
 PM_MAX_POSITIONS = int(os.environ.get("PM_MAX_POSITIONS", "20"))
+# Extended-hours execution (PRE/AFTER weekday sessions only — there is NO night
+# session on Alpaca): submit LIMIT orders (extended_hours=True) at the decision
+# price instead of waiting for the open. The broker's actual fill is stamped back
+# (broker_fill_price/ts) and becomes the ledger entry, so grader and broker agree.
+# Regular-hours picks still use market orders; night/weekend picks still queue for
+# the open (Model A). 0 = always Model A.
+PM_EXTENDED_HOURS = os.environ.get("PM_EXTENDED_HOURS", "0") not in ("0", "", "false", "False", "no")
 
 
 def pinned_horizon(edge: str | None) -> int:
