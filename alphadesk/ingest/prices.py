@@ -265,6 +265,89 @@ def get_options_context(symbol: str) -> Optional[dict]:
     return out
 
 
+_earn_ctx_cache: dict[str, tuple[float, dict | None]] = {}
+_EARN_CTX_TTL_S = 3600
+
+
+def get_earnings_context(symbol: str) -> Optional[dict]:
+    """Code-fetched earnings FACTS for the debate's earnings brief — no LLM, zero
+    confabulation surface: the company's recent beat/miss track record, quarterly
+    revenue/income trend, and analyst estimate + revision direction (post-report
+    revisions are literally the drift mechanism). Best-effort via yfinance, cached
+    1h, None when nothing usable. Replaces what an LLM would otherwise narrate
+    from memory (the COCO/TSLA confabulation cases)."""
+    sym = symbol.upper()
+    with _cache_lock:
+        hit = _earn_ctx_cache.get(sym)
+        if hit and time.time() - hit[0] < _EARN_CTX_TTL_S:
+            return hit[1]
+
+    def _num(v, nd=2):
+        try:
+            f = float(v)
+            return round(f, nd) if f == f else None   # NaN != NaN
+        except (TypeError, ValueError):
+            return None
+
+    out: dict = {}
+    try:
+        import yfinance as yf
+        tk = yf.Ticker(sym)
+        try:   # beat/miss TRACK RECORD (last 4 reported quarters)
+            ed = tk.earnings_dates
+            if ed is not None and not ed.empty:
+                rep = ed.dropna(subset=["Reported EPS"]).head(4)
+                hist = [{"date": str(getattr(d, "date", lambda: d)())[:10],
+                         "eps_estimate": _num(r.get("EPS Estimate")),
+                         "eps_actual": _num(r.get("Reported EPS")),
+                         "surprise_pct": _num(r.get("Surprise(%)"))}
+                        for d, r in rep.iterrows()]
+                if hist:
+                    beats = sum(1 for h in hist if (h["surprise_pct"] or 0) > 0)
+                    out["report_history"] = hist
+                    out["beat_streak"] = f"{beats}/{len(hist)} beats"
+        except Exception:
+            pass
+        try:   # quarterly revenue / net income trend
+            q = tk.quarterly_income_stmt
+            if q is not None and not q.empty:
+                if "Total Revenue" in q.index:
+                    revs = [float(v) for v in q.loc["Total Revenue"].tolist()[:4] if v == v]
+                    if len(revs) >= 2 and revs[1]:
+                        out["revenue_qoq_pct"] = round((revs[0] - revs[1]) / abs(revs[1]) * 100, 2)
+                        out["revenue_last4_bn"] = [round(v / 1e9, 2) for v in revs]
+                if "Net Income" in q.index:
+                    out["net_income_last4_bn"] = [
+                        round(float(v) / 1e9, 2) for v in q.loc["Net Income"].tolist()[:4] if v == v]
+        except Exception:
+            pass
+        try:   # analyst estimate trajectory + revisions (the drift fuel)
+            t = tk.get_eps_trend()
+            if t is not None and not t.empty and "current" in t.columns:
+                r0 = t.iloc[0]
+                cur, d30 = _num(r0.get("current")), _num(r0.get("30daysAgo"))
+                if cur is not None:
+                    out["next_q_eps_estimate"] = cur
+                    if d30:
+                        out["estimate_30d_change_pct"] = round((cur - d30) / abs(d30) * 100, 2)
+        except Exception:
+            pass
+        try:
+            rv = tk.get_eps_revisions()
+            if rv is not None and not rv.empty:
+                r0 = rv.iloc[0]
+                out["revisions_30d"] = {"up": int(r0.get("upLast30days") or 0),
+                                        "down": int(r0.get("downLast30days") or 0)}
+        except Exception:
+            pass
+    except Exception as exc:
+        log.debug("earnings context failed %s: %s", sym, exc)
+    result = out or None
+    with _cache_lock:
+        _earn_ctx_cache[sym] = (time.time(), result)
+    return result
+
+
 _earn_move_cache: dict[str, Any] = {"ts": 0.0, "key": None, "data": {}}
 
 

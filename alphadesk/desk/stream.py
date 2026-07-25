@@ -507,13 +507,12 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
                         loop.run_in_executor(None, notes.market_brief, sym, price_ctx, fundamentals, arts, decision_id, opts),
                         loop.run_in_executor(None, notes.news_brief, sym, arts, decision_id),
                     ))
-                    # If this pick just reported, read the ACTUAL report (cached per
-                    # event) — guidance/tone drive the drift. Only for picked names.
+                    # If this pick just reported, attach the earnings evidence block —
+                    # pure code-fetched FACTS (track record, revenue trend, revisions).
                     erow = await loop.run_in_executor(None, store.earnings_row, sym, EARNINGS_DRIFT_DAYS)
                     if erow:
-                        read = await loop.run_in_executor(None, earnings_reader.get_or_read, erow, f"eread-{sym}")
-                        if read:
-                            briefs.append({"kind": "earnings", "summary": read, "key_facts": []})
+                        briefs.append(await loop.run_in_executor(
+                            None, earnings_reader.earnings_block, erow, f"eread-{sym}"))
                     for b in briefs:
                         await ev_q.put(_ev("brief", symbol=sym, **b))
 
