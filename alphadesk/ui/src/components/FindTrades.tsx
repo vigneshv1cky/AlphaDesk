@@ -353,16 +353,56 @@ export function FindTrades({
 
         <details className="mt-3 text-xs text-muted-foreground">
           <summary className="cursor-pointer select-none">How this works</summary>
-          <div className="mt-1.5 space-y-1 border-l-2 border-border pl-3">
+          <div className="mt-1.5 space-y-1.5 border-l-2 border-border pl-3">
             <p>
-              A <b className="text-foreground">researcher</b> argues the case, a{" "}
-              <b className="text-foreground">critic</b> pushes back, a{" "}
-              <b className="text-foreground">judge</b> rules, and a{" "}
-              <b className="text-foreground">head</b> ranks the survivors.
+              <b className="text-foreground">1 · Scan</b> — every company that reported earnings
+              (moved ≥1.5% on the print) + the last 12h of real news. Heavy earnings day? The
+              news scan is skipped — reports are the best signal.
             </p>
             <p>
+              <b className="text-foreground">2 · Review</b> — your open picks are re-checked
+              first, on <i>fresh news only</i> (the reviewer never sees prices; a code watcher
+              guards target/stop).
+            </p>
+            <p>
+              <b className="text-foreground">3 · Scout</b> — one pass over all candidates picks
+              the few worth a full debate, with a reason for every pick and every skip. A name
+              debated in the last 24h is skipped unless genuinely new news landed.
+            </p>
+            <p>
+              <b className="text-foreground">4 · Gate</b> — drops picks with no real, dated,
+              externally-reported catalyst (rumors and price-chatter die here; earnings reports
+              pass automatically).
+            </p>
+            <p>
+              <b className="text-foreground">5 · Evidence</b> — facts fetched in code, never
+              narrated from memory: price/volume/valuation, the options-implied move, earnings
+              track record + analyst revisions, and supply-chain links with filing citations
+              (deep scan).
+            </p>
+            <p>
+              <b className="text-foreground">6 · Debate</b> — a{" "}
+              <b className="text-foreground">researcher</b> argues the case, a{" "}
+              <b className="text-foreground">critic</b> attacks it (and can flip the call), code
+              fact-checks the numbers, the researcher replies, and a{" "}
+              <b className="text-foreground">judge</b> commits: LONG or SHORT with conviction.
+            </p>
+            <p>
+              <b className="text-foreground">7 · Plan</b> — entry at the current price, a
+              realistic target, and a stop that invalidates the idea.
+            </p>
+            <p>
+              <b className="text-foreground">8 · Head</b> — ranks the slate head-to-head; at
+              most 2 picks per sector+direction per day (no stacked bets).
+            </p>
+            <p>
+              <b className="text-foreground">9 · Aftermath</b> — every 3 minutes, code walks the
+              price bars and closes at the first target/stop touched. Later, every call is
+              graded vs the S&amp;P 500 at its own horizon — including the skips and rejects.
+            </p>
+            <p className="pt-1">
               These are <b className="text-foreground">research ideas, not trades</b> — nothing is
-              bought. Every idea is later scored against the S&amp;P 500.
+              bought. The scoreboard, not the AI&apos;s confidence, decides if any of it works.
             </p>
           </div>
         </details>
