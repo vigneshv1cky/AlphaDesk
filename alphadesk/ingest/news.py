@@ -260,6 +260,20 @@ def poll(since: datetime) -> tuple[int, dict[str, list[dict]]]:
 
     enriched = enrich(raw)
 
+    # Persist the enrichment's text-evidenced inter-company relations into the
+    # accumulating fact graph (the connections desk reads it before any LLM
+    # search) — these used to evaporate with the article dicts.
+    try:
+        n_facts = store.save_relation_facts([
+            {"from_sym": r["a"], "to_sym": r["b"], "rel": r["rel"],
+             "evidence": r.get("evidence_url")}
+            for art in enriched for r in art.get("relations", [])
+        ])
+        if n_facts:
+            log.info("Persisted %d new relation facts", n_facts)
+    except Exception as exc:
+        log.warning("relation-fact persistence failed: %s", exc)
+
     candidates: dict[str, list[dict]] = {}
     dropped = 0
     for art in enriched:

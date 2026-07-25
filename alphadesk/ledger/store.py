@@ -99,6 +99,22 @@ CREATE TABLE IF NOT EXISTS relationships (
 );
 CREATE INDEX IF NOT EXISTS idx_rel_from ON relationships (from_sym);
 
+-- News-stated inter-company relations (a SUPPLIES|COMPETES|PARTNERS b), extracted
+-- by the enrichment from article TEXT and carrying the article URL as evidence.
+-- The accumulating fact graph the connections desk reads before any LLM search.
+CREATE TABLE IF NOT EXISTS relation_facts (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    first_seen TEXT NOT NULL,
+    last_seen  TEXT NOT NULL,
+    from_sym   TEXT NOT NULL,
+    to_sym     TEXT NOT NULL,
+    rel        TEXT NOT NULL,        -- SUPPLIES | COMPETES | PARTNERS
+    evidence   TEXT,                 -- article URL
+    UNIQUE(from_sym, to_sym, rel) ON CONFLICT IGNORE
+);
+CREATE INDEX IF NOT EXISTS idx_relfact_from ON relation_facts (from_sym);
+CREATE INDEX IF NOT EXISTS idx_relfact_to ON relation_facts (to_sym);
+
 CREATE TABLE IF NOT EXISTS token_usage (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     ts          TEXT NOT NULL,
@@ -150,9 +166,9 @@ CREATE TABLE IF NOT EXISTS earnings (
 );
 CREATE INDEX IF NOT EXISTS idx_earnings_date ON earnings (report_date);
 
--- One web-grounded read per earnings event (results/guidance/reaction), cached so
--- we never re-web-search the same report across runs. Separate from `earnings` so
--- calendar refreshes (ON CONFLICT REPLACE) don't wipe the read.
+-- LEGACY/unused: one web-grounded read per earnings event. The earnings brief is
+-- now pure code-fetched facts (desk/earnings_reader.earnings_block) — no LLM read
+-- exists to cache. Table kept for existing DBs; no longer written.
 CREATE TABLE IF NOT EXISTS earnings_reads (
     symbol      TEXT NOT NULL,
     report_date TEXT NOT NULL,
@@ -630,6 +646,41 @@ def get_relationships(from_sym: str, days: int = 7) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def save_relation_facts(rows: list[dict]) -> int:
+    """Persist news-stated relations (from_sym -rel-> to_sym, evidence URL).
+    First sighting inserts; repeats just refresh last_seen. Returns new inserts."""
+    if not rows:
+        return 0
+    now = _now()
+    n = 0
+    with _lock, _connect() as conn:
+        for r in rows:
+            a, b, rel = (r.get("from_sym") or "").upper(), (r.get("to_sym") or "").upper(), r.get("rel")
+            if not (a and b and rel):
+                continue
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO relation_facts"
+                " (first_seen, last_seen, from_sym, to_sym, rel, evidence)"
+                " VALUES (?,?,?,?,?,?)",
+                (now, now, a, b, rel, (r.get("evidence") or "")[:300]))
+            n += cur.rowcount or 0
+            conn.execute(
+                "UPDATE relation_facts SET last_seen=? WHERE from_sym=? AND to_sym=? AND rel=?",
+                (now, a, b, rel))
+    return n
+
+
+def get_relation_facts(symbol: str) -> list[dict]:
+    """All news-stated relations touching `symbol` (either side), freshest first."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT from_sym, to_sym, rel, evidence, last_seen FROM relation_facts"
+            " WHERE from_sym = ? OR to_sym = ? ORDER BY last_seen DESC LIMIT 30",
+            (symbol.upper(), symbol.upper()),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def last_debate(symbol: str) -> dict | None:
     """The most recent team debate for `symbol` (ts + what it was about) — so a
     later run can tell 'same story' from a genuinely new catalyst."""
@@ -1005,23 +1056,6 @@ def earnings_row(symbol: str, days: int = 4) -> dict | None:
             " ORDER BY report_date DESC LIMIT 1", (symbol.upper(), _et_date(-int(days)), _et_date(0)),
         ).fetchone()
     return dict(row) if row else None
-
-
-def get_earnings_read(symbol: str, report_date: str) -> str | None:
-    """Cached web-grounded read for one earnings event (None if not yet read)."""
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT report_read FROM earnings_reads WHERE symbol=? AND report_date=?",
-            (symbol.upper(), report_date),
-        ).fetchone()
-    return row["report_read"] if row else None
-
-
-def save_earnings_read(symbol: str, report_date: str, read: str) -> None:
-    with _lock, _connect() as conn:
-        conn.execute(
-            "INSERT INTO earnings_reads (symbol, report_date, report_read, ts) VALUES (?,?,?,?)",
-            (symbol.upper(), report_date, read, _now()))
 
 
 def add_run(kind: str, top_picks: list[dict]) -> None:
