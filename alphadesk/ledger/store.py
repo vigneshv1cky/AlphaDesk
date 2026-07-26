@@ -277,6 +277,11 @@ def init() -> None:
             conn.execute("ALTER TABLE earnings_reactions ADD COLUMN mkt_session TEXT")
         except sqlite3.OperationalError:
             pass  # already migrated
+        for col, decl in (("hedge_of", "INTEGER"),):
+            try:   # macro hedge — companion SHORT protecting a LONG through overnight shock
+                conn.execute(f"ALTER TABLE picks ADD COLUMN {col} {decl}")
+            except sqlite3.OperationalError:
+                pass  # already migrated
 
 
 def _now() -> str:
@@ -731,7 +736,8 @@ def open_taken_picks() -> list[dict]:
         rows = conn.execute(
             "SELECT id, ts, symbol, direction, horizon_days, adjusted_score, confidence,"
             " edge, thesis, session, entry_price, spy_price, plan_entry, plan_target, plan_stop,"
-            " triage_reason, low_liquidity, mfe_pct, broker_order_id, broker_status FROM picks"
+            " triage_reason, low_liquidity, mfe_pct, broker_order_id, broker_status,"
+            " hedge_of, arm FROM picks"
             " WHERE taken=1 AND exit_ts IS NULL AND graded_at IS NULL"
             "   AND datetime(ts, '+' || (horizon_days + 3) || ' days') >= datetime('now')"
             " ORDER BY id DESC",
@@ -766,6 +772,27 @@ def pm_managed_symbols() -> set[str]:
             "SELECT DISTINCT symbol FROM picks WHERE broker_order_id IS NOT NULL"
         ).fetchall()
     return {r["symbol"].upper() for r in rows}
+
+
+def open_hedge_for(parent_id: int) -> dict | None:
+    """The still-open hedge (if any) protecting a parent position. None if no hedge
+    exists or it was already closed."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM picks WHERE hedge_of=? AND exit_ts IS NULL AND graded_at IS NULL LIMIT 1",
+            (int(parent_id),),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def open_hedges() -> list[dict]:
+    """All still-open hedges — for the watcher to monitor and close when parents exit."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM picks WHERE hedge_of IS NOT NULL AND exit_ts IS NULL"
+            " AND graded_at IS NULL ORDER BY id"
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def recent_team_picks(days: int = 30) -> list[dict]:
@@ -807,9 +834,10 @@ def live_picks() -> list[dict]:
             "SELECT id, ts, symbol, direction, horizon_days, session, edge, verdict,"
             " approved, adjusted_score, confidence, taken, spy_price, entry_price,"
             " plan_entry, plan_target, plan_stop, plan_note, thesis, triage_reason,"
-            " order_type, mfe_pct, low_liquidity, broker_order_id, broker_fill_price"
+            " order_type, mfe_pct, low_liquidity, broker_order_id, broker_fill_price,"
+            " hedge_of, arm"
             " FROM picks"
-            " WHERE arm='TEAM' AND plan_entry IS NOT NULL"
+            " WHERE arm IN ('TEAM','HEDGE') AND plan_entry IS NOT NULL"
             "   AND graded_at IS NULL AND exit_ts IS NULL"
             "   AND datetime(ts, '+' || (horizon_days + 2) || ' days') >= datetime('now')"
             " ORDER BY approved DESC, id DESC",

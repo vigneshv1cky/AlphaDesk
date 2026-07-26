@@ -1,103 +1,7 @@
 import { useEffect, useState } from "react"
 import { api, etDateTime, exitDate, fmtAlpha, type Pick } from "@/lib/api"
 import { dirWord, plainEdge, plainVerdict } from "@/lib/plain"
-import { Badge } from "@/components/ui/badge"
-import { Card, CardContent } from "@/components/ui/card"
-import { Separator } from "@/components/ui/separator"
-import { Skeleton } from "@/components/ui/skeleton"
-import { ArrowDown, ArrowUp, X } from "lucide-react"
-
-const ROLE_STYLES: Record<string, string> = {
-  scout: "border-l-yellow-500",
-  brief: "border-l-zinc-500",
-  researcher: "border-l-blue-500",
-  critic: "border-l-red-500",
-  judge: "border-l-green-500",
-  flag: "border-l-orange-500",
-  loner: "border-l-purple-500",
-}
-
-function Bubble({
-  role,
-  who,
-  children,
-}: {
-  role: keyof typeof ROLE_STYLES
-  who: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className={`rounded-md border border-l-4 ${ROLE_STYLES[role]} bg-card p-3 text-sm`}>
-      <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        {who}
-      </div>
-      {children}
-    </div>
-  )
-}
-
-function TheCall({ pick }: { pick: Pick }) {
-  const long = pick.direction === "LONG"
-  return (
-    <Card className="border-2">
-      <CardContent className="space-y-2 pt-4">
-        <div className="flex items-center gap-2 text-lg font-bold">
-          {long ? (
-            <ArrowUp className="h-5 w-5 text-green-600 dark:text-green-400" />
-          ) : (
-            <ArrowDown className="h-5 w-5 text-red-600 dark:text-red-400" />
-          )}
-          <span className={long ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>{dirWord(pick.direction)}</span>
-          <span>{pick.symbol}</span>
-          <span className="text-sm font-normal text-muted-foreground">
-            hold ~{pick.horizon_days} trading days (≈ until{" "}
-            {exitDate(pick.ts, pick.session, pick.horizon_days)})
-          </span>
-        </div>
-        <div className="text-sm text-muted-foreground">
-          buy at {pick.entry_price ? `$${pick.entry_price}` : "next market open"} · confidence{" "}
-          {Math.round(pick.adjusted_score ?? pick.score)}/100
-        </div>
-        {pick.plan_entry != null && pick.plan_target != null && pick.plan_stop != null && (
-          <div className="rounded-md bg-muted/50 px-2.5 py-2 text-sm">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-              <span className="font-semibold">
-                {long ? "Buy" : "Short"} ${pick.plan_entry}
-              </span>
-              <span className="text-muted-foreground">·</span>
-              <span>
-                target <span className="font-medium text-green-600 dark:text-green-400">${pick.plan_target}</span>
-              </span>
-              <span className="text-muted-foreground">·</span>
-              <span>
-                stop <span className="font-medium text-red-600 dark:text-red-400">${pick.plan_stop}</span>
-              </span>
-            </div>
-            {pick.plan_note && <p className="mt-1 text-muted-foreground">{pick.plan_note}</p>}
-          </div>
-        )}
-        <div className="text-sm">
-          {pick.approved ? (
-            <Badge className="bg-green-600">Conviction call</Badge>
-          ) : (
-            <Badge variant="secondary">Thin lean (tracked)</Badge>
-          )}{" "}
-          {pick.alpha_net !== null && (
-            <Badge variant="outline" className={pick.alpha_net > 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
-              vs S&P 500 {fmtAlpha(pick.alpha_net)}
-            </Badge>
-          )}{" "}
-          {pick.alpha_adj !== null && (
-            <Badge variant="outline" className={pick.alpha_adj > 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
-              β-adj {fmtAlpha(pick.alpha_adj)}
-              {pick.beta != null ? ` (β ${pick.beta.toFixed(2)})` : ""}
-            </Badge>
-          )}
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
+import { X } from "lucide-react"
 
 export function PickSheet({
   pickId,
@@ -130,6 +34,8 @@ export function PickSheet({
 
   if (pickId === null) return null
 
+  const long = pick?.direction === "LONG"
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -141,129 +47,199 @@ export function PickSheet({
         onClick={onClose}
         aria-hidden="true"
       />
-      <div className="relative z-10 flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl">
-        <div className="flex items-start justify-between gap-3 border-b border-border p-4">
+      <div className="relative z-10 flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl">
+        <div className="flex items-start justify-between gap-3 border-b border-zinc-700 px-4 py-3">
           <div className="min-w-0">
-            <div className="text-base font-semibold tracking-tight">
-              #{pick?.id ?? pickId}
-              {pick && <> · {pick.symbol}</>}
+            <div className="font-mono text-sm">
+              <span className="text-zinc-500">#{pick?.id ?? pickId}</span>
+              {pick && (
+                <>
+                  {" "}
+                  <span className={long ? "text-emerald-400" : "text-red-400"}>
+                    {dirWord(pick.direction)}
+                  </span>{" "}
+                  <span className="font-bold text-zinc-200">{pick.symbol}</span>
+                  <span className="text-zinc-600"> · {pick.arm === "LONER" ? "Loner" : "Team"}</span>
+                  {pick.edge && <span className="text-zinc-600"> · {plainEdge(pick.edge)}</span>}
+                  <span className="text-zinc-600"> · {etDateTime(pick.ts)} ET</span>
+                </>
+              )}
             </div>
-            {pick && (
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                <Badge variant="secondary">{pick.arm === "LONER" ? "Loner" : "Team"}</Badge>
-                {pick.edge && <Badge variant="secondary">{plainEdge(pick.edge)}</Badge>}
-                <Badge variant="secondary">{etDateTime(pick.ts)} ET</Badge>
-              </div>
-            )}
           </div>
           <button
             onClick={onClose}
             aria-label="Close"
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="grid h-7 w-7 shrink-0 place-items-center rounded text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto p-4">
+        <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto p-4 font-mono text-sm leading-relaxed">
           {!pick ? (
-            <div className="space-y-3">
-              <Skeleton className="h-24 w-full" />
-              <Skeleton className="h-16 w-full" />
-              <Skeleton className="h-16 w-full" />
-            </div>
+            <div className="text-zinc-500 animate-pulse">Loading…</div>
           ) : (
             <div className="space-y-3">
-              <TheCall pick={pick} />
-              <div className="text-center text-xs text-muted-foreground">
-                confidence {Math.round(pick.score)} → {pick.adjusted_score ?? "—"} after the debate ·{" "}
-                {plainVerdict(pick.verdict) || "—"}
-              </div>
-              <Separator />
-
-              {pick.triage_reason && (
-                <Bubble role="scout" who="Shortlist — why we looked at it">
-                  {pick.triage_reason}
-                </Bubble>
-              )}
-
-              {(pick.briefs ?? []).map((b, i) => (
-                <Bubble key={i} role="brief" who={`${b.kind} note`}>
-                  <p>{b.summary}</p>
-                  {b.key_facts && b.key_facts.length > 0 && (
-                    <ul className="mt-1.5 list-disc pl-4 text-muted-foreground">
-                      {b.key_facts.map((f, j) => (
-                        <li key={j}>{typeof f === "string" ? f : f.fact}</li>
-                      ))}
-                    </ul>
+              {/* ── THE CALL ── */}
+              <div>
+                <div className="text-zinc-500 mb-1">── The Call ──</div>
+                <div>
+                  <span className={long ? "text-emerald-400" : "text-red-400"}>
+                    [{dirWord(pick.direction).toUpperCase()}]
+                  </span>{" "}
+                  <span className="text-zinc-200 font-bold">{pick.symbol}</span>
+                  <span className="text-zinc-600"> · ~{pick.horizon_days}d</span>
+                  <span className="text-zinc-600"> · until {exitDate(pick.ts, pick.session, pick.horizon_days)}</span>
+                </div>
+                <div className="text-zinc-500">
+                  entry {pick.entry_price ? `$${pick.entry_price}` : "next open"} · confidence{" "}
+                  {Math.round(pick.adjusted_score ?? pick.score)}/100{" "}
+                  {pick.verdict && <span>· {plainVerdict(pick.verdict)}</span>}{" "}
+                  {pick.approved ? (
+                    <span className="text-emerald-400">· APPROVED</span>
+                  ) : (
+                    <span className="text-zinc-500">· thin lean</span>
                   )}
-                </Bubble>
-              ))}
+                </div>
+                {pick.plan_entry != null && pick.plan_target != null && pick.plan_stop != null && (
+                  <div className="text-zinc-500">
+                    plan: entry ${pick.plan_entry} · target ${pick.plan_target} · stop ${pick.plan_stop}
+                    {pick.plan_note && <span className="text-zinc-600"> · {pick.plan_note}</span>}
+                  </div>
+                )}
+                {pick.alpha_net !== null && (
+                  <div className="text-zinc-500">
+                    vs S&P: {fmtAlpha(pick.alpha_net)}
+                    {pick.alpha_adj !== null && (
+                      <span> · β-adj: {fmtAlpha(pick.alpha_adj)}{pick.beta != null ? ` (β ${pick.beta.toFixed(2)})` : ""}</span>
+                    )}
+                  </div>
+                )}
+              </div>
 
-              {pick.thesis && (
-                <Bubble role="researcher" who="The case — researcher">
-                  <p>{pick.thesis}</p>
-                  <p className="mt-1.5 text-muted-foreground">
-                    confidence {Math.round(pick.score)}/100 · hold ~{pick.horizon_days} days
-                  </p>
-                </Bubble>
+              <div className="border-t border-zinc-800" />
+
+              {/* ── SCOUT ── */}
+              {pick.triage_reason && (
+                <div>
+                  <div className="text-zinc-500 mb-1">── Why we looked ──</div>
+                  <div>
+                    <span className="text-yellow-400 font-semibold">[SCOUT]</span>{" "}
+                    <span className="text-zinc-400">{pick.triage_reason}</span>
+                  </div>
+                </div>
               )}
 
-              {(pick.debate?.concerns ?? []).map((c, i) => (
-                <Bubble key={i} role="critic" who={`The pushback #${i + 1} — critic`}>
-                  <p className="font-medium">{c.claim}</p>
-                  <p className="mt-1 text-muted-foreground">{c.evidence}</p>
-                </Bubble>
-              ))}
+              {/* ── BRIEFS ── */}
+              {(pick.briefs ?? []).length > 0 && (
+                <div>
+                  <div className="text-zinc-500 mb-1">── Evidence ──</div>
+                  {(pick.briefs ?? []).map((b, i) => (
+                    <div key={i}>
+                      <span className="text-zinc-400 font-semibold">[NOTE:{b.kind}]</span>{" "}
+                      <span className="text-zinc-300">{b.summary}</span>
+                      {b.key_facts && b.key_facts.length > 0 && (
+                        <div className="text-zinc-500 ml-4">
+                          {b.key_facts.map((f, j) => (
+                            <div key={j}>· {typeof f === "string" ? f : f.fact}</div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
 
+              {/* ── THESIS ── */}
+              {pick.thesis && (
+                <div>
+                  <div className="text-zinc-500 mb-1">── Researcher ──</div>
+                  <div>
+                    <span className="text-blue-400 font-semibold">[THESIS]</span>{" "}
+                    <span className="text-zinc-300">{pick.thesis}</span>
+                  </div>
+                  <div className="text-zinc-500 ml-4">
+                    confidence {Math.round(pick.score)}/100 · ~{pick.horizon_days}d
+                  </div>
+                </div>
+              )}
+
+              {/* ── CRITIC ── */}
+              {(pick.debate?.concerns ?? []).length > 0 && (
+                <div>
+                  <div className="text-zinc-500 mb-1">── Critic ──</div>
+                  {(pick.debate?.concerns ?? []).map((c, i) => (
+                    <div key={i}>
+                      <span className="text-red-400 font-semibold">[CRITIC #{i + 1}]</span>{" "}
+                      <span className="text-zinc-200">{c.claim}</span>
+                      <div className="text-zinc-500 ml-4">{c.evidence}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* ── CRITIC STANCE ── */}
               {pick.debate?.critic_stance && pick.debate.critic_stance !== "SUPPORT" && (
-                <Bubble role="critic" who="Critic's counter-call">
+                <div>
+                  <span className="text-fuchsia-400 font-semibold">[CRITIC]</span>{" "}
                   {pick.debate.critic_stance === "FLIP" ? (
-                    <p className="font-medium">
+                    <span className="text-zinc-200">
                       Reverse: {dirWord(pick.debate.proposed_direction)} →{" "}
-                      <span className={pick.debate.counter_direction === "LONG" ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
+                      <span className={pick.debate.counter_direction === "LONG" ? "text-emerald-400" : "text-red-400"}>
                         {dirWord(pick.debate.counter_direction)}
                       </span>
-                    </p>
+                    </span>
                   ) : (
-                    <p className="font-medium">Stand aside — no edge either way</p>
+                    <span className="text-zinc-200">Stand aside — no edge either way</span>
                   )}
                   {pick.debate.counter && (
-                    <p className="mt-1 text-muted-foreground">{pick.debate.counter}</p>
+                    <div className="text-zinc-500 ml-4">{pick.debate.counter}</div>
                   )}
-                </Bubble>
+                </div>
               )}
 
-              {(pick.debate?.fact_flags ?? []).map((f, i) => (
-                <Bubble key={i} role="flag" who="Fact-check">
-                  {f}
-                </Bubble>
-              ))}
+              {/* ── FACT CHECK ── */}
+              {(pick.debate?.fact_flags ?? []).length > 0 && (
+                <div>
+                  {(pick.debate?.fact_flags ?? []).map((f, i) => (
+                    <div key={i}>
+                      <span className="text-orange-400 font-semibold">[FACT]</span>{" "}
+                      <span className="text-zinc-300">{f}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
 
+              {/* ── REBUTTAL ── */}
               {pick.debate?.rebuttal && (
-                <Bubble role="researcher" who="The researcher's reply">
-                  <p>{pick.debate.rebuttal.rebuttal}</p>
-                  <p className="mt-1.5 text-muted-foreground">
-                    updated confidence {pick.debate.rebuttal.revised_score}/100 · agreed with the
-                    pushback: {pick.debate.rebuttal.concede ? "yes" : "no"}
-                  </p>
-                </Bubble>
+                <div>
+                  <div className="text-zinc-500 mb-1">── Researcher's Reply ──</div>
+                  <div>
+                    <span className="text-blue-400 font-semibold">[REPLY]</span>{" "}
+                    <span className="text-zinc-300">{pick.debate.rebuttal.rebuttal}</span>
+                  </div>
+                  <div className="text-zinc-500 ml-4">
+                    score → {pick.debate.rebuttal.revised_score}/100 · conceded: {pick.debate.rebuttal.concede ? "yes" : "no"}
+                  </div>
+                </div>
               )}
 
+              {/* ── JUDGE ── */}
               {pick.debate?.arbiter_summary && (
-                <Bubble role="judge" who="The decision — judge">
-                  <p>{pick.debate.arbiter_summary}</p>
-                  <p className="mt-1.5 text-muted-foreground">
+                <div>
+                  <div className="text-zinc-500 mb-1">── Judge ──</div>
+                  <div>
+                    <span className="text-emerald-400 font-semibold">[JUDGE]</span>{" "}
+                    <span className="text-zinc-300">{pick.debate.arbiter_summary}</span>
+                  </div>
+                  <div className="text-zinc-500 ml-4">
                     final confidence {pick.adjusted_score}/100 · {plainVerdict(pick.verdict)} ·{" "}
-                    {pick.approved ? "Suggested" : "Skipped"}
-                  </p>
-                </Bubble>
-              )}
-
-              {pick.arm === "LONER" && (
-                <Bubble role="loner" who="Second opinion — works alone">
-                  Reviewed the same evidence on its own, without the team's debate.
-                </Bubble>
+                    {pick.approved ? "APPROVED" : "thin lean"}
+                    {pick.debate?.flipped && (
+                      <span className="text-fuchsia-400"> · REVERSED by critic</span>
+                    )}
+                  </div>
+                </div>
               )}
             </div>
           )}

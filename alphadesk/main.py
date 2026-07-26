@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import logging
 import sys
+import time
 
 
 def _setup_logging() -> None:
@@ -84,7 +85,12 @@ async def _serve() -> None:
         actually touched, priced at that level, gap-/order-aware. Price exits
         belong to code (no judgment, no 'spent move' second-guessing — a spent
         move closes at its target, a wrong one at its stop); news-driven exits
-        belong to the run-level reviewer, which is shown no prices at all."""
+        belong to the run-level reviewer, which is shown no prices at all.
+
+        Session-aware: OPEN hours get full bar-based monitoring + Model-A fill
+        resolution; PRE/AFTER hours get spot-price monitoring for extended-hours-
+        filled positions (broker fills — no intraday bars in extended hours); CLOSED
+        hours skip monitoring entirely."""
         from alphadesk.config import (
             LIMIT_FILL_BUFFER_PCT,
             LIMIT_FILL_MIN_CUSHION_FRAC,
@@ -103,10 +109,44 @@ async def _serve() -> None:
         loop = asyncio.get_running_loop()
         log = logging.getLogger("alphadesk.watch")
         last_check: dict[int, object] = {}   # pick_id → ET ts we last walked bars up to
+        _fill_quality_flagged: set[int] = set()  # picks we've already warned about (one-shot)
+        _macro_last_check_ts: float = 0.0   # throttle macro shock checks to once per 10 min
         while True:
             try:
-                if market_session() == "OPEN":   # Model A: only fill/exit in regular hours (skip thin pre/after-market)
+                sess = market_session()
+                if sess == "CLOSED":
+                    pass   # no monitoring outside market windows
+                elif sess == "OPEN":
+                    # ── FULL-SESSION monitoring: Model-A fill resolution + bar-based
+                    # exits + spot fallback. ──
                     open_pos = await loop.run_in_executor(None, store.live_picks)
+                    quotes: dict[str, float] = {}
+                    spy_now: float | None = None
+                    # ── Fill-quality diagnostic: one-shot check for extended-hours
+                    # fills that diverged significantly from the regular-session open.
+                    # Thin extended-hours liquidity can produce fills at non-representative
+                    # prices — this warns (doesn't change execution) so we can audit.
+                    quality_check = [p for p in open_pos
+                                     if p["id"] not in _fill_quality_flagged
+                                     and p.get("broker_fill_price")
+                                     and p.get("session") in ("PRE", "AFTER")
+                                     and p.get("broker_fill_ts")]
+                    if quality_check:
+                        q_syms = sorted({p["symbol"] for p in quality_check})
+                        q_quotes = await loop.run_in_executor(
+                            None, prices.latest_prices, q_syms)
+                        for p in quality_check:
+                            _fill_quality_flagged.add(p["id"])
+                            cur = q_quotes.get(p["symbol"].upper())
+                            fill_px = float(p["broker_fill_price"])
+                            if cur and fill_px:
+                                div = abs(cur - fill_px) / fill_px * 100
+                                if div > 2.0:
+                                    log.warning(
+                                        "Fill-quality: #%d %s ext-hours fill @ %.2f is "
+                                        "%.1f%% from current price %.2f — possibly thin "
+                                        "extended-hours fill",
+                                        p["id"], p["symbol"], fill_px, div, cur)
                     # Model A fill: once a closed-market pick's 9:30 open has passed,
                     # resolve its entry from the fill-day OHLC. Market → the open; limit
                     # → its level if price reached it (stamp entry_price so live P&L /
@@ -206,6 +246,181 @@ async def _serve() -> None:
                             # no LLM escalation on price action (a spent move closes at
                             # its target; a wrong one at its stop; anything in between
                             # keeps working to the levels or the horizon).
+
+                    # ── HEDGE CLEANUP: close any hedge whose parent has exited ──
+                    hedges = await loop.run_in_executor(None, store.open_hedges)
+                    for h in hedges:
+                        parent_id = h.get("hedge_of")
+                        if not parent_id:
+                            continue
+                        parent_still_open = any(
+                            p["id"] == parent_id for p in open_pos
+                            if p.get("exit_ts") is None
+                        )
+                        if parent_still_open:
+                            continue
+                        cur = quotes.get(h["symbol"].upper())
+                        exit_px = cur if cur else (h.get("entry_price") or h.get("plan_entry"))
+                        if not exit_px:
+                            continue
+                        direction = h.get("direction", "SHORT")
+                        entry = h.get("entry_price") or h.get("plan_entry")
+                        perf = realized_exit(direction, entry, exit_px,
+                                             h.get("spy_price"), spy_now,
+                                             bool(h.get("low_liquidity")))
+                        reason = f"hedge closed: parent #{parent_id} exited"
+                        await loop.run_in_executor(
+                            None, lambda hid=h["id"], r=reason, pf=perf:
+                            store.record_exit(hid, r, **pf))
+                        log.info("Hedge closed #%d %s @ %s (parent #%d exited, %s%% vs SPY)",
+                                 h["id"], h["symbol"], exit_px, parent_id,
+                                 perf.get("exit_alpha"))
+                elif sess in ("PRE", "AFTER"):
+                    # ── EXTENDED-HOURS monitoring: spot-price only for broker-filled
+                    # positions (no intraday bars exist in extended hours). Model-A
+                    # fill resolution waits for the OPEN session. ──
+                    open_pos = await loop.run_in_executor(None, store.live_picks)
+                    # Only monitor positions that already HAVE a fill (broker fill from
+                    # extended-hours limit orders or already-stamped entry_price) — unfilled
+                    # closed-market picks have nothing to monitor until the open.
+                    ext_filled = [p for p in open_pos
+                                  if p.get("taken")
+                                  and (p.get("entry_price") is not None
+                                       or p.get("broker_fill_price") is not None)
+                                  and p.get("plan_target") and p.get("plan_stop")]
+                    if ext_filled:
+                        quotes = await loop.run_in_executor(
+                            None, prices.latest_prices,
+                            [p["symbol"] for p in ext_filled] + ["SPY"])
+                        spy_now = quotes.get("SPY")
+                        for p in ext_filled:
+                            cur = quotes.get(p["symbol"].upper())
+                            if cur is None:
+                                continue
+                            entry = (p.get("entry_price") or p.get("broker_fill_price")
+                                     or p.get("plan_entry"))
+                            hit = level_crossed(p["direction"], cur,
+                                                p["plan_target"], p["plan_stop"])
+                            if hit:
+                                label = "target hit" if hit == "target" else "stopped out"
+                                exit_px = p["plan_target"] if hit == "target" else p["plan_stop"]
+                                reason = f"{label} @ {exit_px} (ext-hours spot {hit})"
+                                perf = realized_exit(p["direction"], entry, exit_px,
+                                                     p.get("spy_price"), spy_now,
+                                                     bool(p.get("low_liquidity")))
+                                await loop.run_in_executor(
+                                    None, lambda pid=p["id"], r=reason, pf=perf:
+                                    store.record_exit(pid, r, **pf))
+                                log.info("Auto-exit #%d %s %s — %s (%s%% vs SPY) [ext-hours]",
+                                         p["id"], p["symbol"], p["direction"], reason,
+                                         perf.get("exit_alpha"))
+                # ── MACRO SHOCK DETECTION (every session, cooldown-limited): code
+                # detects significant VIX/rate dislocations. In OPEN hours: flag
+                # positions for the reviewer on the next run. In PRE/AFTER hours:
+                # auto-exit flagged positions at the current spot price — if we know
+                # a gap is coming at the open, exiting now at an extended-hours price
+                # is better than waiting for the 9:30 bloodbath. ──
+                now_ts = time.time()
+                if now_ts - _macro_last_check_ts > 600:   # once per 10 min (TTL-aligned)
+                    _macro_last_check_ts = now_ts
+                    try:
+                        from alphadesk.ingest.prices import macro_shock_check
+                        shock = await loop.run_in_executor(None, macro_shock_check)
+                        if shock:
+                            log.warning("Macro shock detected [%s]: %s", sess, shock["summary"])
+                            open_taken = await loop.run_in_executor(
+                                None, store.open_taken_picks)
+                            if open_taken:
+                                from alphadesk.desk.macro import macro_review as mr
+                                flagged = await loop.run_in_executor(
+                                    None, mr, shock, open_taken)
+                                if flagged:
+                                    if sess in ("PRE", "AFTER"):
+                                        # Book companion SHORT hedges for flagged longs.
+                                        # A hedge captures the overnight gap — if the long
+                                        # was wrong, the hedge gains; if the shock was a
+                                        # false alarm, the stop cuts the hedge at -3%.
+                                        # Never double-hedge the same parent.
+                                        f_syms = sorted({f["symbol"] for f in flagged})
+                                        f_quotes = await loop.run_in_executor(
+                                            None, prices.latest_prices,
+                                            f_syms + ["SPY"])
+                                        spy_now = f_quotes.get("SPY")
+                                        for f in flagged:
+                                            pid = f["pick_id"]
+                                            p = next((p for p in open_taken
+                                                      if p["id"] == pid), None)
+                                            if not p:
+                                                continue
+                                            # Skip if already hedged
+                                            existing = await loop.run_in_executor(
+                                                None, store.open_hedge_for, pid)
+                                            if existing:
+                                                log.info("Macro hedge: #%d %s already hedged by #%d",
+                                                         pid, p["symbol"], existing["id"])
+                                                continue
+                                            cur = f_quotes.get(f["symbol"].upper())
+                                            if not cur:
+                                                continue
+                                            from alphadesk.desk.macro import book_hedge
+                                            h_id = await loop.run_in_executor(
+                                                None, book_hedge, p, cur,
+                                                shock["summary"], sess, spy_now)
+                                            if h_id:
+                                                log.warning(
+                                                    "Macro-hedged #%d %s LONG with SHORT #%d @ %s [%s]: %s",
+                                                    pid, p["symbol"], h_id, cur, sess,
+                                                    f["concern"])
+                                        # ── MACRO SCOUT: find new positions to profit
+                                        # from the shock, not just hedge existing ones ──
+                                        try:
+                                            from alphadesk.desk.macro import (
+                                                macro_scout, macro_trade,
+                                            )
+                                            movers = await loop.run_in_executor(
+                                                None, prices.movers, 15)
+                                            scout_picks = await loop.run_in_executor(
+                                                None, macro_scout, shock, movers)
+                                            for sp in scout_picks:
+                                                sym = sp["symbol"]
+                                                px = f_quotes.get(sym.upper())
+                                                if not px:
+                                                    # Try fetching price for this symbol
+                                                    sq = await loop.run_in_executor(
+                                                        None, prices.latest_prices,
+                                                        [sym])
+                                                    px = sq.get(sym.upper())
+                                                if not px:
+                                                    continue
+                                                # Skip if already held (long or hedged)
+                                                sym_upper = sym.upper()
+                                                already_held = any(
+                                                    p["symbol"].upper() == sym_upper
+                                                    for p in open_taken
+                                                )
+                                                if already_held:
+                                                    log.info("Macro scout: skipping %s — already held", sym)
+                                                    continue
+                                                trade = await loop.run_in_executor(
+                                                    None, macro_trade, sym,
+                                                    sp["reason"], sp["direction"],
+                                                    px, shock, spy_now)
+                                                if trade:
+                                                    tid = await loop.run_in_executor(
+                                                        None, store.record_pick, trade)
+                                                    log.warning(
+                                                        "Macro trade #%d %s %s @ %s — %s",
+                                                        tid, sym, sp["direction"],
+                                                        px, sp["reason"][:80])
+                                        except Exception as exc:
+                                            log.debug("Macro scout failed: %s", exc)
+                                    else:
+                                        for f in flagged:
+                                            log.warning(
+                                                "Macro-flagged #%d %s: %s — REVIEW on next run",
+                                                f["pick_id"], f["symbol"], f["concern"])
+                    except Exception as exc:
+                        log.debug("Macro shock check failed: %s", exc)
             except Exception as exc:
                 log.error("position watch error: %s", exc)
             from alphadesk.app import scheduler

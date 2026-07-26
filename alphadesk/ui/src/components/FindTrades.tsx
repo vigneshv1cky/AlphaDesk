@@ -1,8 +1,6 @@
 import { useRef, useState } from "react"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
-import { ArrowDown, ArrowUp, Loader2, Search } from "lucide-react"
+import { Loader2, Search } from "lucide-react"
 import { dirUp, dirWord, plainEdge, plainVerdict } from "@/lib/plain"
 import type { Plan } from "@/lib/api"
 
@@ -63,214 +61,75 @@ interface BoardRow {
   plan?: Plan | null
 }
 
-const ACCENT: Record<string, string> = {
-  exposure_shock: "border-l-cyan-500",
-  exposure_candidate: "border-l-cyan-500",
-  triage_pick: "border-l-yellow-500",
-  gate: "border-l-zinc-400 opacity-70",
-  brief: "border-l-zinc-400 dark:border-l-zinc-500",
-  thesis: "border-l-blue-500",
-  concern: "border-l-red-500",
-  counter: "border-l-fuchsia-500",
-  fact_flag: "border-l-orange-500",
-  rebuttal: "border-l-blue-500",
-  decision: "border-l-emerald-500",
-  plan: "border-l-indigo-500",
-}
-
-// "Buy at 253.80 · target 380 · stop 359.50 · multi-day" — the actionable levels.
-function PlanLine({ plan, direction }: { plan: Plan; direction?: string }) {
-  const action = dirUp(direction) ? "Buy" : "Short"
-  return (
-    <div className="mt-1.5 rounded-md bg-muted/50 px-2 py-1.5 text-xs">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-        <span className="font-semibold">
-          {action} ${plan.entry}
-        </span>
-        <span className="text-muted-foreground">·</span>
-        <span>
-          target <span className="font-medium text-emerald-600 dark:text-emerald-400">${plan.target}</span>
-        </span>
-        <span className="text-muted-foreground">·</span>
-        <span>
-          stop <span className="font-medium text-red-600 dark:text-red-400">${plan.stop}</span>
-        </span>
-        <span className="text-muted-foreground">· {plan.hold}</span>
-      </div>
-      <p className="mt-1 text-muted-foreground">{plan.note}</p>
-    </div>
-  )
-}
-
-function Tag({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return (
-    <span className={`text-[10px] font-semibold uppercase tracking-wider ${className}`}>
-      {children}
-    </span>
-  )
-}
-
-// A tree-structured section: a header, then a CONTINUOUS vertical rail running the
-// full height of the section, with a horizontal tick branching into each card —
-// so the live run reads like a file tree instead of broken per-card glyphs.
-function TreeSection({ head, children }: { head: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <div className="mt-4">
-      {head}
-      <div className="ml-1.5 mt-2 border-l-2 border-border/70 pl-3">
-        <div className="space-y-2 pt-0.5">{children}</div>
-      </div>
-    </div>
-  )
-}
-
-function TreeRow({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="relative">
-      <span className="absolute -left-3 top-3.5 h-[2px] w-3 bg-border/70" />
-      <div className="min-w-0">{children}</div>
-    </div>
-  )
-}
-
-function Line({ ev }: { ev: Ev }) {
-  const cls = `rounded-md border border-l-4 ${ACCENT[ev.type] ?? "border-l-border"} bg-card p-2.5 text-sm`
-  switch (ev.type) {
-    case "exposure_shock":
-      return (
-        <div className={cls}>
-          <Tag className="text-cyan-600 dark:text-cyan-400">Looking for companies affected by {ev.symbol}</Tag>
-        </div>
-      )
-    case "exposure_candidate":
-      return (
-        <div className={cls}>
-          <Tag className="text-cyan-600 dark:text-cyan-400">
-            Knock-on: {ev.shock} → {ev.symbol}
-          </Tag>{" "}
-          <span className={dirUp(ev.direction) ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}>
-            {dirWord(ev.direction)}
-          </span>{" "}
-          <Badge variant="secondary">{ev.strength}</Badge>
-          <p className="mt-1 text-muted-foreground">{ev.chain}</p>
-        </div>
-      )
-    case "triage_pick":
-      return (
-        <div className={cls}>
-          <Tag className="text-yellow-600 dark:text-yellow-400">Shortlisted {ev.symbol}</Tag>{" "}
-          <Badge variant="secondary" className="ml-1">
-            {plainEdge(ev.edge)}
-          </Badge>
-          <p className="mt-1 text-muted-foreground">{ev.reason}</p>
-        </div>
-      )
-    case "gate":
-      return (
-        <div className={cls}>
-          <Tag className="text-muted-foreground">Gated out · {ev.symbol}</Tag>
-          <p className="mt-1 text-muted-foreground">
-            no verifiable catalyst — skipped before the debate. {ev.reason}
-          </p>
-        </div>
-      )
-    case "brief":
-      return (
-        <div className={cls}>
-          <Tag className="text-muted-foreground">
-            {ev.kind} note · {ev.symbol}
-          </Tag>
-          <p className="mt-1">{ev.summary}</p>
-        </div>
-      )
-    case "thesis":
-      return (
-        <div className={cls}>
-          <Tag className="text-blue-600 dark:text-blue-400">The case for {ev.symbol}</Tag>
-          <p className="mt-1">
-            <b className={dirUp(ev.direction) ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}>
-              {dirWord(ev.direction)}
-            </b>{" "}
-            · hold ~{ev.horizon_days} days · confidence {ev.score}/100
-          </p>
-        </div>
-      )
-    case "concern":
-      return (
-        <div className={cls}>
-          <Tag className="text-red-600 dark:text-red-400">The pushback · {ev.symbol}</Tag>
-          <p className="mt-1 font-medium">{ev.claim}</p>
-          <p className="text-muted-foreground">{ev.evidence}</p>
-        </div>
-      )
-    case "counter":
-      return (
-        <div className={cls}>
-          <Tag className="text-fuchsia-600 dark:text-fuchsia-400">
-            {ev.stance === "FLIP" ? `Critic reverses the call · ${ev.symbol}` : `Critic: stand aside · ${ev.symbol}`}
-          </Tag>
-          {ev.stance === "FLIP" && (
-            <p className="mt-1">
-              <span className="text-muted-foreground line-through">{dirWord(ev.proposed_from)}</span>{" "}
-              →{" "}
-              <b className={dirUp(ev.counter_direction) ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}>
-                {dirWord(ev.counter_direction)}
-              </b>
-            </p>
-          )}
-          <p className="mt-1 text-muted-foreground">{ev.counter}</p>
-        </div>
-      )
-    case "fact_flag":
-      return (
-        <div className={cls}>
-          <Tag className="text-orange-600 dark:text-orange-400">Fact-check</Tag>
-          <p className="mt-1">{ev.text}</p>
-        </div>
-      )
-    case "rebuttal":
-      return (
-        <div className={cls}>
-          <Tag className="text-blue-600 dark:text-blue-400">Researcher's reply · {ev.symbol}</Tag>
-          <p className="mt-1">
-            updated confidence {ev.revised_score}/100 · agreed with the pushback:{" "}
-            {ev.concede ? "yes" : "no"}
-          </p>
-        </div>
-      )
-    case "decision":
-      return (
-        <div className={cls}>
-          <Tag className="text-emerald-600 dark:text-emerald-400">Decision · {ev.symbol}</Tag>
-          <p className="mt-1">
-            {ev.approved ? "✅ Conviction call" : "◦ Thin lean (tracked)"} ·{" "}
-            {plainVerdict(ev.verdict)} · confidence {ev.conviction}/100
-            {ev.flipped && <span className="text-fuchsia-600 dark:text-fuchsia-400"> · reversed by critic</span>}
-          </p>
-          <p className="text-muted-foreground">{ev.summary}</p>
-        </div>
-      )
-    case "plan":
-      return (
-        <div className={cls}>
-          <Tag className="text-indigo-600 dark:text-indigo-400">Trade plan · {ev.symbol}</Tag>
-          {ev.entry != null && ev.target != null && ev.stop != null && (
-            <PlanLine
-              plan={{
-                entry: ev.entry,
-                target: ev.target,
-                stop: ev.stop,
-                note: ev.note ?? "",
-                hold: ev.hold ?? "",
-              }}
-              direction={ev.direction}
-            />
-          )}
-        </div>
-      )
-    default:
-      return null
+function TermLine({ ev }: { ev: Ev }) {
+  const tags: Record<string, [string, string]> = {
+    triage_pick:    ["SCOUT",  "text-yellow-400"],
+    gate:           ["GATE",   "text-zinc-500"],
+    brief:          ["NOTE",   "text-zinc-400"],
+    thesis:         ["THESIS", "text-blue-400"],
+    concern:        ["CRITIC", "text-red-400"],
+    counter:        ["CRITIC", "text-fuchsia-400"],
+    fact_flag:      ["FACT",   "text-orange-400"],
+    rebuttal:       ["REPLY",  "text-blue-400"],
+    decision:       ["JUDGE",  "text-emerald-400"],
+    plan:           ["PLAN",   "text-indigo-400"],
+    exposure_shock: ["CHAIN",  "text-cyan-400"],
+    exposure_candidate: ["CHAIN", "text-cyan-400"],
+    debate_start:   ["DEBATE", "text-indigo-200"],
   }
+  const [tag, color] = tags[ev.type] ?? ["EVENT", "text-zinc-500"]
+  let body = ""
+  switch (ev.type) {
+    case "debate_start":
+      body = `${ev.symbol} \u00b7 ${plainEdge(ev.edge)}`
+      break
+    case "triage_pick":
+      body = `Shortlisted ${ev.symbol} \u00b7 ${plainEdge(ev.edge)} \u2014 ${ev.reason ?? ""}`
+      break
+    case "gate":
+      body = `${ev.symbol} gated out: ${ev.reason ?? ""}`
+      break
+    case "brief":
+      body = `${ev.symbol}: ${ev.summary ?? ""}`
+      break
+    case "thesis":
+      body = `${dirWord(ev.direction)} ${ev.symbol} \u00b7 ${ev.score}/100 \u00b7 ${ev.horizon_days}d`
+      break
+    case "concern":
+      body = `${ev.symbol}: ${ev.claim ?? ""}`
+      break
+    case "counter":
+      body = ev.stance === "FLIP"
+        ? `${ev.symbol} flip: ${ev.proposed_from} \u2192 ${ev.counter_direction}`
+        : `${ev.symbol} stand aside`
+      break
+    case "fact_flag":
+      body = ev.text ?? ""
+      break
+    case "rebuttal":
+      body = `${ev.symbol}: score \u2192 ${ev.revised_score}/100 (concede: ${ev.concede ? "yes" : "no"})`
+      break
+    case "decision":
+      body = `${ev.symbol} \u00b7 ${ev.approved ? "APPROVED" : "thin lean"} \u00b7 ${plainVerdict(ev.verdict)} \u00b7 ${ev.conviction}/100${ev.flipped ? " \u00b7 REVERSED by critic" : ""}`
+      break
+    case "plan":
+      body = `${ev.symbol}: entry ${ev.entry} \u00b7 target ${ev.target} \u00b7 stop ${ev.stop}`
+      break
+    case "exposure_shock":
+      body = `Looking for companies affected by ${ev.symbol}`
+      break
+    case "exposure_candidate":
+      body = `${ev.shock} \u2192 ${ev.symbol} ${dirWord(ev.direction)} \u00b7 ${ev.strength}`
+      break
+    default:
+      body = JSON.stringify(ev)
+  }
+  return (
+    <div className="font-mono text-sm leading-relaxed">
+      <span className={`font-semibold ${color}`}>[{tag}]</span>{" "}
+      <span className="text-zinc-300">{body}</span>
+    </div>
+  )
 }
 
 export function FindTrades({
@@ -288,6 +147,7 @@ export function FindTrades({
   const [positions, setPositions] = useState<Ev[]>([])
   const [deep, setDeep] = useState(false)
   const esRef = useRef<EventSource | null>(null)
+  const termRef = useRef<HTMLDivElement | null>(null)
 
   function setRun(b: boolean) {
     setRunning(b)
@@ -330,7 +190,7 @@ export function FindTrades({
   const takes = board?.filter((b) => b.take).length ?? 0
 
   return (
-    <Card className="overflow-hidden">
+    <div className="overflow-hidden rounded-lg border bg-card text-card-foreground shadow-sm p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
@@ -437,138 +297,157 @@ export function FindTrades({
           </div>
         )}
 
-        {positions.length > 0 && (
-          <TreeSection
-            head={
-              <div className="text-sm font-semibold">
-                Your open picks
-                <span className="ml-1 font-normal text-muted-foreground">
-                  — re-checked ({positions.filter((p) => p.type === "position_exit").length} to sell)
-                </span>
-              </div>
-            }
-          >
-            {positions.map((p, i) => {
-              const exit = p.type === "position_exit"
-              return (
-                <TreeRow key={i}>
-                  <div
-                    className={`rounded-md border border-l-4 bg-card p-2.5 text-sm ${
-                      exit ? "border-l-red-500" : "border-l-emerald-600"
-                    }`}
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge className={exit ? "bg-red-600 text-white" : "bg-emerald-600 text-white"}>
-                        {exit ? "Sell now" : "Keep"}
-                      </Badge>
-                      <span className={dirUp(p.direction) ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}>
-                        {dirWord(p.direction)}
-                      </span>
-                      <span className="font-bold">{p.symbol}</span>
-                      <span className="text-muted-foreground">~{p.horizon_days}-day pick</span>
-                      {exit && p.entry != null && p.now != null && (
-                        <span className="text-muted-foreground">
-                          · {p.entry} → {p.now}
+        {(running || feed.length > 0 || positions.length > 0 || board) && (
+          <div className="mt-3 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950">
+            <div
+              ref={termRef}
+              className="no-scrollbar max-h-[600px] overflow-y-auto px-4 py-3 font-mono text-sm leading-relaxed space-y-3"
+            >
+              {/* ── POSITION REVIEWS ── */}
+              {positions.length > 0 && (
+                <div>
+                  <div className="text-zinc-500 mb-1">
+                    ── Open Picks Review ({positions.filter((p) => p.type === "position_exit").length} to exit) ──
+                  </div>
+                  {positions.map((p, i) => {
+                    const exit = p.type === "position_exit"
+                    return (
+                      <div key={i}>
+                        <span className={`font-semibold ${exit ? "text-red-400" : "text-emerald-400"}`}>
+                          [{exit ? "EXIT" : "HOLD"}]
+                        </span>{" "}
+                        <span className={dirUp(p.direction) ? "text-emerald-300" : "text-red-300"}>
+                          {dirWord(p.direction)}
+                        </span>{" "}
+                        <span className="text-zinc-200 font-semibold">{p.symbol}</span>
+                        <span className="text-zinc-600"> · ~{p.horizon_days}d</span>
+                        {exit && p.entry != null && p.now != null && (
+                          <span className="text-zinc-600"> · {p.entry} → {p.now}</span>
+                        )}
+                        <div className="text-zinc-500 ml-4">{p.reason}</div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* ── PIPELINE ── */}
+              {(() => {
+                const pre = feed.filter((e) => e.type === "triage_pick" || e.type === "gate"
+                  || e.type === "exposure_shock" || e.type === "exposure_candidate")
+                if (!pre.length) return null
+                return (
+                  <div>
+                    <div className="border-t border-zinc-800 pt-3" />
+                    <div className="text-zinc-500 mb-1">── Pipeline ──</div>
+                    {pre.map((ev, i) => <TermLine key={i} ev={ev} />)}
+                  </div>
+                )
+              })()}
+
+              {/* ── HEAD / BOARD ── */}
+              {board && (
+                <div>
+                  <div className="border-t border-zinc-800 pt-3" />
+                  <div className="text-zinc-500 mb-1">
+                    ── Head Ranking ({takes} suggested) ──
+                  </div>
+                  {chief && (
+                    <div className="text-amber-400/80 mb-1">{chief}</div>
+                  )}
+                  {board.map((r, i) => (
+                    <div key={r.id}>
+                      <span className="text-zinc-600">#{i + 1}</span>{" "}
+                      <span className={`font-semibold ${r.take ? "text-emerald-400" : "text-zinc-500"}`}>
+                        [{r.take ? "TAKE" : "SKIP"}]
+                      </span>{" "}
+                      <span className={dirUp(r.direction) ? "text-emerald-300" : "text-red-300"}>
+                        {dirWord(r.direction)}
+                      </span>{" "}
+                      <span className="text-zinc-200 font-semibold">{r.symbol}</span>
+                      <span className="text-zinc-600"> · {plainEdge(r.edge)}</span>
+                      <span className="text-zinc-600"> · conf {r.conviction}</span>
+                      <span className="text-zinc-600"> · ~{r.horizon_days}d</span>
+                      {r.flipped && <span className="text-fuchsia-400"> · reversed</span>}
+                      {r.plan && (
+                        <span className="text-zinc-600">
+                          {" "}· entry {r.plan.entry} · target {r.plan.target} · stop {r.plan.stop}
                         </span>
                       )}
+                      {r.summary && (
+                        <div className="text-zinc-500 ml-4">{r.summary}</div>
+                      )}
+                      {r.chief_reason && (
+                        <div className="text-amber-400/70 ml-4">{r.chief_reason}</div>
+                      )}
                     </div>
-                    <p className="mt-1 text-muted-foreground">{p.reason}</p>
+                  ))}
+                  {board.length === 0 && (
+                    <div className="text-zinc-500">Nothing worth acting on.</div>
+                  )}
+                </div>
+              )}
+
+              {/* ── DEBATE FEED ── */}
+              {(() => {
+                const debateEvents = feed.filter((e) =>
+                  e.type === "debate_start" || e.type === "brief" || e.type === "thesis"
+                  || e.type === "concern" || e.type === "counter" || e.type === "fact_flag"
+                  || e.type === "rebuttal" || e.type === "decision" || e.type === "plan"
+                )
+                if (!debateEvents.length) return null
+                const headers: Record<string, Ev> = {}
+                const items: Record<string, Ev[]> = {}
+                const flippedSyms: Set<string> = new Set()
+                for (const ev of debateEvents) {
+                  const sym = ev.symbol ?? ""
+                  if (!sym) continue
+                  if (ev.type === "debate_start") {
+                    headers[sym] = ev
+                    if (!items[sym]) items[sym] = []
+                  } else {
+                    if (!items[sym]) items[sym] = []
+                    items[sym].push(ev)
+                    if (ev.type === "decision" && ev.flipped) {
+                      flippedSyms.add(sym)
+                    }
+                  }
+                }
+                const order = debateEvents
+                  .filter((e) => e.type === "debate_start")
+                  .map((e) => e.symbol ?? "")
+                  .filter((s, i, a) => s && a.indexOf(s) === i)
+                return (
+                  <div>
+                    <div className="border-t border-zinc-800 pt-3" />
+                    <div className="text-zinc-500 mb-1">── Debates ──</div>
+                    {order.map((sym) => (
+                      <div key={sym}>
+                        {headers[sym] && <TermLine ev={headers[sym]} />}
+                        {(items[sym]?.length ?? 0) > 0 && (
+                          <div className="border-l border-zinc-800 ml-1.5 pl-2.5">
+                            {items[sym].map((ev, ei) => (
+                              <div key={ei} className="flex items-baseline gap-1">
+                                <TermLine ev={ev} />
+                                {ev.type === "thesis" && flippedSyms.has(sym) && (
+                                  <span className="text-fuchsia-400/70">(reversed)</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                </TreeRow>
-              )
-            })}
-          </TreeSection>
-        )}
+                )
+              })()}
 
-        {board && (
-          <TreeSection
-            head={
-              <div className="text-sm font-semibold">
-                Best ideas{" "}
-                <span className="font-normal text-muted-foreground">
-                  ({takes} worth acting on)
-                </span>
-              </div>
-            }
-          >
-            {chief && (
-              <TreeRow>
-                <div className="rounded-md border border-l-4 border-l-amber-500 bg-amber-500/5 p-3">
-                  <Tag className="text-amber-600 dark:text-amber-400">Final call — comparing all the ideas</Tag>
-                  <p className="mt-1 text-sm">{chief}</p>
-                </div>
-              </TreeRow>
-            )}
-            {board.map((r, i) => (
-              <TreeRow key={r.id}>
-              <div
-                className={`rounded-md border p-2.5 text-sm ${
-                  r.take ? "border-emerald-600/60 bg-emerald-500/5" : "opacity-70"
-                }`}
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-muted-foreground">#{i + 1}</span>
-                  {r.direction === "LONG" ? (
-                    <ArrowUp className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                  ) : (
-                    <ArrowDown className="h-4 w-4 text-red-600 dark:text-red-400" />
-                  )}
-                  <span
-                    className={`font-bold ${
-                      dirUp(r.direction) ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
-                    }`}
-                  >
-                    {dirWord(r.direction)}
-                  </span>
-                  <span className="font-bold">{r.symbol}</span>
-                  {r.flipped && (
-                    <Badge className="bg-fuchsia-600 text-white">reversed</Badge>
-                  )}
-                  <Badge variant="secondary">{plainEdge(r.edge)}</Badge>
-                  <span className="text-muted-foreground">hold ~{r.horizon_days}d</span>
-                  <span className="text-muted-foreground">conf {r.conviction}</span>
-                  {r.take ? (
-                    <Badge className="ml-auto bg-emerald-600 text-white">Suggested</Badge>
-                  ) : (
-                    <Badge variant="outline" className="ml-auto">
-                      Skip
-                    </Badge>
-                  )}
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">{r.summary}</p>
-                {r.plan && <PlanLine plan={r.plan} direction={r.direction} />}
-                {r.chief_reason && (
-                  <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
-                    <span className="font-medium">Final call:</span> {r.chief_reason}
-                  </p>
-                )}
-              </div>
-              </TreeRow>
-            ))}
-            {board.length === 0 && (
-              <p className="text-sm text-muted-foreground">Nothing worth acting on this time.</p>
-            )}
-          </TreeSection>
+              {!running && feed.length === 0 && positions.length === 0 && !board && (
+                <div className="text-zinc-500">No results this run.</div>
+              )}
+            </div>
+          </div>
         )}
-
-        {feed.length > 0 && (
-          <TreeSection
-            head={
-              <div className="text-sm font-semibold">
-                Live debate feed{" "}
-                <span className="font-normal text-muted-foreground">
-                  ({feed.length} event{feed.length === 1 ? "" : "s"})
-                </span>
-              </div>
-            }
-          >
-            {feed.map((ev, i) => (
-              <TreeRow key={i}>
-                <Line ev={ev} />
-              </TreeRow>
-            ))}
-          </TreeSection>
-        )}
-    </Card>
+    </div>
   )
 }

@@ -88,7 +88,9 @@ def market_brief(symbol: str, price_ctx: dict | None, fundamentals: dict | None,
                  options: dict | None = None) -> dict:
     """One call covering the three code-fact dimensions that used to be three
     briefs: technicals, valuation, and the priced-in / still-developing read."""
+    from alphadesk.ingest.prices import macro_snapshot as notes_macro
     payload = {
+        "macro": notes_macro() or "macro data unavailable",
         "price": price_ctx or "none",
         "fundamentals": fundamentals or "none",
         "options": options or "none",
@@ -118,7 +120,13 @@ def market_brief(symbol: str, price_ctx: dict | None, fundamentals: dict | None,
         "has already covered the market's implied move — ≳1.5 means the move is likely "
         "SPENT (the easy repricing is done → fade risk, size down or pass), while ≲0.5 "
         "means it has barely moved vs what's priced (repricing may be AHEAD → the drift "
-        "the desk wants). State the spent/ahead read plainly.",
+        "the desk wants). State the spent/ahead read plainly. "
+        "MACRO CONTEXT: the 'macro' block gives the current rate/volatility "
+        "backdrop (US 10Y yield + 1-month delta, VIX + 1-month delta). Note whether "
+        "the macro backdrop HELPS or HURTS this specific name — e.g. rising rates "
+        "are a headwind for duration-sensitive growth names, falling rates remove a "
+        "drag, elevated VIX raises the bar for risk-on bets. This is background for "
+        "the debate, not a standalone edge — keep the focus on the company catalyst.",
         "Data:\n" + wrap_data("market", json.dumps(payload, default=str)),
         decision_id,
     )

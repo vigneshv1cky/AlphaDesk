@@ -252,6 +252,10 @@ PM_MAX_POSITIONS = int(os.environ.get("PM_MAX_POSITIONS", "20"))
 # Regular-hours picks still use market orders; night/weekend picks still queue for
 # the open (Model A). 0 = always Model A.
 PM_EXTENDED_HOURS = os.environ.get("PM_EXTENDED_HOURS", "0") not in ("0", "", "false", "False", "no")
+# Auto-hedge TEAM LONGs with confidence below this threshold. The hedge is a companion
+# SHORT that captures the gap if the thesis is wrong. 0 = off (default). Set e.g. 35
+# to protect thin-conviction positions.
+HEDGE_CONFIDENCE_THRESHOLD = float(os.environ.get("HEDGE_CONFIDENCE_THRESHOLD", "0"))
 
 
 def pinned_horizon(edge: str | None) -> int:

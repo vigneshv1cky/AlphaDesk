@@ -548,6 +548,166 @@ def latest_prices(symbols: list[str]) -> dict[str, float]:
     return out
 
 
+_macro_cache: dict | None = None
+_macro_cache_lock = threading.Lock()
+_macro_cache_ts: float = 0.0
+_MACRO_CACHE_TTL_S = 600  # 10 min — macro data moves slowly
+
+
+def macro_snapshot() -> dict:
+    """Code-fetched macro facts — no interpretation, no LLM. Uses yfinance for
+    ^TNX (10Y yield), ^VIX, plus a rate-proxy from the Fed funds rate. Cached
+    for TTL seconds per run (macro data is slow-moving). Returns {} on failure."""
+    global _macro_cache, _macro_cache_ts
+    now = time.time()
+    if _macro_cache is not None and (now - _macro_cache_ts) < _MACRO_CACHE_TTL_S:
+        return _macro_cache
+    with _macro_cache_lock:
+        if _macro_cache is not None and (now - _macro_cache_ts) < _MACRO_CACHE_TTL_S:
+            return _macro_cache
+        try:
+            import yfinance as yf
+            tickers = yf.download(["^TNX", "^VIX", "^IRX"], period="30d", interval="1d",
+                                  progress=False, auto_adjust=True, group_by="ticker")
+            out: dict = {}
+            for sym, label in [("^TNX", "us10y_pct"), ("^VIX", "vix"),
+                               ("^IRX", "fed_funds_proxy_pct")]:
+                try:
+                    series = tickers[sym]["Close"] if isinstance(
+                        tickers.columns, type(tickers.columns)) and sym in tickers.columns.get_level_values(0) \
+                        else tickers["Close"]
+                    series = series.dropna()
+                    if len(series) >= 1:
+                        out[label] = round(float(series.iloc[-1]), 2)
+                    if len(series) >= 21:
+                        out[f"{label}_1m_ago"] = round(float(series.iloc[-21]), 2)
+                        out[f"{label}_1m_delta"] = round(float(series.iloc[-1] - series.iloc[-21]), 2)
+                except Exception:
+                    pass
+            _macro_cache = out
+            _macro_cache_ts = now
+            return out
+        except Exception as exc:
+            log.debug("macro_snapshot failed: %s", exc)
+            return {}
+
+
+def macro_context_line() -> str:
+    """One-line macro backdrop for agent prompts — code-fetched facts, no judgment."""
+    m = macro_snapshot()
+    parts = []
+    if m.get("us10y_pct") is not None:
+        delta = m.get("us10y_1m_delta")
+        d_str = f" ({delta:+.1f}pp 1m)" if delta is not None else ""
+        parts.append(f"US 10Y yield: {m['us10y_pct']}%{d_str}")
+    if m.get("fed_funds_proxy_pct") is not None:
+        parts.append(f"Fed funds (proxy): {m['fed_funds_proxy_pct']}%")
+    if m.get("vix") is not None:
+        parts.append(f"VIX: {m['vix']}")
+    fomc = fomc_context_line()
+    if fomc:
+        parts.append(fomc)
+    if not parts:
+        return ""
+    return "Macro backdrop: " + " | ".join(parts)
+
+
+_macro_prev: dict[str, float] = {}
+
+
+_FOMC_2026 = [
+    ((1, 27), (1, 28)),
+    ((3, 17), (3, 18)),
+    ((4, 28), (4, 29)),
+    ((6, 16), (6, 17)),
+    ((7, 28), (7, 29)),
+    ((9, 15), (9, 16)),
+    ((10, 27), (10, 28)),
+    ((12, 8), (12, 9)),
+]
+
+
+def _is_fomc_day(dt) -> int:
+    """0 = not an FOMC day, 1 = day 1 (decision day, ~2pm), 2 = day 2 only."""
+    month, day = dt.month, dt.day
+    for (m1, d1), (m2, d2) in _FOMC_2026:
+        if month == m1 and day == d1:
+            return 1
+        if month == m2 and day == d2:
+            return 2
+    return 0
+
+
+def fomc_days_until(dt) -> int | None:
+    """Days until the next FOMC decision day (day 1). None if past the last meeting.
+    Returns 0 on a decision day. Negative means we're inside a meeting (day 2) and
+    the decision was yesterday."""
+    month, day = dt.month, dt.day
+    for (m1, d1), (m2, d2) in _FOMC_2026:
+        meet_start = dt.replace(month=m1, day=d1)
+        try:
+            days = (meet_start - dt.replace(hour=0, minute=0, second=0, microsecond=0)).days
+        except ValueError:
+            continue
+        if days >= 0:
+            return days
+        if month == m2 and day == d2:
+            return -1
+    return None
+
+
+def fomc_context_line() -> str:
+    """FOMC awareness for agent prompts — code-fetched facts, no judgment."""
+    from alphadesk.config import ET, now_et
+    now = now_et()
+    fomc_day = _is_fomc_day(now)
+    days_until = fomc_days_until(now)
+    if fomc_day == 1:
+        return "FOMC: DECISION DAY TODAY — statement + press conference at ~2pm ET. Do NOT open new positions into this binary event."
+    if fomc_day == 2:
+        return "FOMC: meeting day 2 (decision was yesterday). Markets are digesting the outcome."
+    if days_until is not None and days_until <= 1:
+        return "FOMC: decision tomorrow — do NOT open new positions ahead of the event."
+    if days_until is not None and days_until <= 3:
+        return f"FOMC: decision in {days_until} days — market may front-run or de-risk. Size down on rate-sensitive names."
+    return ""
+
+
+def macro_shock_check() -> dict | None:
+    """Detect significant macro dislocations since the last check. Pure code:
+    VIX spike >20% or 10Y move >15bp = a macro shock worth reviewing open
+    positions against. Returns None if nothing material changed, else a dict
+    with 'summary' (one-line description of what moved) and 'data' (the full
+    snapshot). Thread-safe via the macro cache lock."""
+    cur = macro_snapshot()
+    global _macro_prev
+    shocks: list[str] = []
+    prev_us10y = _macro_prev.get("us10y_pct")
+    prev_vix = _macro_prev.get("vix")
+    cur_us10y = cur.get("us10y_pct")
+    cur_vix = cur.get("vix")
+
+    if prev_vix is not None and cur_vix is not None:
+        vix_move = (cur_vix - prev_vix) / prev_vix * 100
+        if vix_move > 20:
+            shocks.append(f"VIX surged {vix_move:.0f}% ({prev_vix} → {cur_vix})")
+        elif vix_move < -15:
+            shocks.append(f"VIX dropped {abs(vix_move):.0f}% ({prev_vix} → {cur_vix})")
+
+    if prev_us10y is not None and cur_us10y is not None:
+        bp_move = abs(cur_us10y - prev_us10y) * 100
+        if bp_move > 15:
+            direction = "up" if cur_us10y > prev_us10y else "down"
+            shocks.append(f"US 10Y moved {bp_move:.0f}bp {direction} ({prev_us10y}% → {cur_us10y}%)")
+
+    _macro_prev = {k: v for k, v in cur.items()
+                   if k in ("us10y_pct", "vix", "fed_funds_proxy_pct") and v is not None}
+
+    if not shocks:
+        return None
+    return {"summary": "; ".join(shocks), "snapshot": cur}
+
+
 def movers(limit: int = 10) -> list[dict[str, Any]]:
     """Top movers FYI ranking from Alpaca's screener — a fact, not a filter."""
     try:

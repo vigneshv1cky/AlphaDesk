@@ -107,9 +107,12 @@ def run_scout(window: dict[str, dict], movers: list[dict]) -> dict:
         }))
     from alphadesk.config import market_context_line
     from alphadesk.desk.team import false_negative_block
+    from alphadesk.ingest.prices import macro_context_line as scout_macro_line
     fn = false_negative_block()
+    macro = scout_macro_line()
     user = (
         market_context_line() + "\n\n"
+        + (f"{macro}\n\n" if macro else "")
         + (f"{fn}\n\n" if fn else "")
         + "Candidate window:\n" + wrap_data("candidates", "\n".join(lines))
         + "\n\nToday's top movers (FYI ranking — investigate only if you judge it worthwhile):\n"

@@ -99,6 +99,13 @@ def reconcile() -> dict:
 
     # FILL SYNC — resolve routed orders: stamp the broker's actual fill (the ledger's
     # honest entry), clear dead orders so the entry pass can re-route them.
+    # Extended-hours limit orders that expired may have done so because the price gapped
+    # far from the limit — if the gap exceeds ENTRY_GAP_SKIP_PCT the thesis rested on
+    # a stale price and the pick is NOT-TAKEN rather than re-routed into a worse fill.
+    from alphadesk.config import ENTRY_GAP_SKIP_PCT
+    from alphadesk.ingest.prices import latest_prices as pm_latest_prices
+
+    ext_syms_needing_price: set[str] = set()
     for pick in open_taken:
         oid = pick.get("broker_order_id")
         if not oid:
@@ -116,8 +123,39 @@ def reconcile() -> dict:
             store.set_broker_order(pick["id"], oid, "filled", pick.get("broker_qty") or 0)
             log.info("PM fill #%d %s @ %s", pick["id"], pick["symbol"], px or "?")
         elif state in ("expired", "canceled", "rejected"):
-            store.set_broker_order(pick["id"], None, f"unfilled: {state}", 0)
-            log.info("PM order %s for #%d %s — cleared for re-route", state, pick["id"], pick["symbol"])
+            limit_px = pick.get("plan_entry")
+            if (limit_px and ENTRY_GAP_SKIP_PCT > 0
+                    and pick.get("session") in ("PRE", "AFTER")):
+                ext_syms_needing_price.add(pick["symbol"].upper())
+                pick["_gap_limit_px"] = limit_px   # stash for the gap check below
+            else:
+                store.set_broker_order(pick["id"], None, f"unfilled: {state}", 0)
+                log.info("PM order %s for #%d %s — cleared for re-route", state,
+                         pick["id"], pick["symbol"])
+
+    # Gap-skip check for expired extended-hours limits: if the current price has
+    # diverged >ENTRY_GAP_SKIP_PCT from the limit, the thesis rested on a stale
+    # price → mark NOT-TAKEN (don't re-route into a worse fill).
+    if ext_syms_needing_price:
+        cur_prices = pm_latest_prices(list(ext_syms_needing_price))
+        for pick in open_taken:
+            limit_px = pick.pop("_gap_limit_px", None)
+            if limit_px is None:
+                continue
+            cur = cur_prices.get(pick["symbol"].upper())
+            if cur and abs(cur - limit_px) / limit_px > ENTRY_GAP_SKIP_PCT / 100.0:
+                reason = (f"not taken: ext-hours limit {limit_px} expired — price gapped "
+                          f"to {cur} ({abs(cur - limit_px) / limit_px * 100:.1f}% from "
+                          f"decision price, >{ENTRY_GAP_SKIP_PCT}% threshold)")
+                store.set_broker_order(pick["id"], None, reason, 0)
+                store.record_exit(pick["id"], reason)
+                log.info("PM gap-skip #%d %s: limit %s expired, price now %s — not taken",
+                         pick["id"], pick["symbol"], limit_px, cur)
+            else:
+                store.set_broker_order(pick["id"], None,
+                                       f"unfilled: {pick.get('broker_status', 'expired')}", 0)
+                log.info("PM order unfilled for #%d %s — cleared for re-route (gap within threshold)",
+                         pick["id"], pick["symbol"])
 
     # ENTRIES — open what the ledger has but Alpaca doesn't, best conviction first, capped.
     slots = len(positions)

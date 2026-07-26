@@ -14,8 +14,8 @@ export const plainEdge = (e?: string | null): string =>
 export const plainVerdict = (v?: string | null): string =>
   ({ STRONG: "High conviction", SOFT: "Moderate", PASS: "Thin lean" })[v ?? ""] ?? v ?? ""
 
-// LONG = buy, expecting the price to RISE. SHORT = bet the price FALLS.
-export const dirWord = (d?: string): string => (d === "LONG" ? "Buy" : "Short")
+// LONG = expecting the price to RISE. SHORT = betting the price FALLS.
+export const dirWord = (d?: string): string => (d === "LONG" ? "Long" : "Short")
 export const dirUp = (d?: string): boolean => d === "LONG"
 export const dirHint = (d?: string): string =>
   d === "LONG" ? "expecting the price to rise" : "betting the price falls"
