@@ -65,7 +65,7 @@ function TermLine({ ev }: { ev: Ev }) {
   const tags: Record<string, [string, string]> = {
     triage_pick:    ["SCOUT",  "text-yellow-400"],
     gate:           ["GATE",   "text-zinc-500"],
-    brief:          ["NOTE",   "text-zinc-400"],
+    brief:          ["NOTE",   "text-zinc-700 dark:text-zinc-400"],
     thesis:         ["THESIS", "text-blue-400"],
     concern:        ["CRITIC", "text-red-400"],
     counter:        ["CRITIC", "text-fuchsia-400"],
@@ -125,9 +125,9 @@ function TermLine({ ev }: { ev: Ev }) {
       body = JSON.stringify(ev)
   }
   return (
-    <div className="font-mono text-sm leading-relaxed">
+    <div className="font-mono leading-relaxed">
       <span className={`font-semibold ${color}`}>[{tag}]</span>{" "}
-      <span className="text-zinc-300">{body}</span>
+      <span className="text-zinc-800 dark:text-zinc-300">{body}</span>
     </div>
   )
 }
@@ -298,10 +298,10 @@ export function FindTrades({
         )}
 
         {(running || feed.length > 0 || positions.length > 0 || board) && (
-          <div className="mt-3 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950">
+          <div className="mt-3 overflow-hidden rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950">
             <div
               ref={termRef}
-              className="no-scrollbar max-h-[600px] overflow-y-auto px-4 py-3 font-mono text-sm leading-relaxed space-y-3"
+              className="no-scrollbar max-h-[600px] overflow-y-auto px-4 py-3 font-mono text-[13px] leading-relaxed space-y-3"
             >
               {/* ── POSITION REVIEWS ── */}
               {positions.length > 0 && (
@@ -319,10 +319,10 @@ export function FindTrades({
                         <span className={dirUp(p.direction) ? "text-emerald-300" : "text-red-300"}>
                           {dirWord(p.direction)}
                         </span>{" "}
-                        <span className="text-zinc-200 font-semibold">{p.symbol}</span>
-                        <span className="text-zinc-600"> · ~{p.horizon_days}d</span>
+                        <span className="text-zinc-900 dark:text-zinc-200 font-semibold">{p.symbol}</span>
+                        <span className="text-zinc-500 dark:text-zinc-600"> · ~{p.horizon_days}d</span>
                         {exit && p.entry != null && p.now != null && (
-                          <span className="text-zinc-600"> · {p.entry} → {p.now}</span>
+                          <span className="text-zinc-500 dark:text-zinc-600"> · {p.entry} → {p.now}</span>
                         )}
                         <div className="text-zinc-500 ml-4">{p.reason}</div>
                       </div>
@@ -338,7 +338,7 @@ export function FindTrades({
                 if (!pre.length) return null
                 return (
                   <div>
-                    <div className="border-t border-zinc-800 pt-3" />
+                    <div className="border-t border-zinc-200 dark:border-zinc-800 pt-3" />
                     <div className="text-zinc-500 mb-1">── Pipeline ──</div>
                     {pre.map((ev, i) => <TermLine key={i} ev={ev} />)}
                   </div>
@@ -348,7 +348,7 @@ export function FindTrades({
               {/* ── HEAD / BOARD ── */}
               {board && (
                 <div>
-                  <div className="border-t border-zinc-800 pt-3" />
+                  <div className="border-t border-zinc-200 dark:border-zinc-800 pt-3" />
                   <div className="text-zinc-500 mb-1">
                     ── Head Ranking ({takes} suggested) ──
                   </div>
@@ -357,20 +357,21 @@ export function FindTrades({
                   )}
                   {board.map((r, i) => (
                     <div key={r.id}>
-                      <span className="text-zinc-600">#{i + 1}</span>{" "}
+                      {i > 0 && <div className="border-t border-zinc-800 my-1" />}
+                      <span className="text-zinc-500 dark:text-zinc-600">#{i + 1}</span>{" "}
                       <span className={`font-semibold ${r.take ? "text-emerald-400" : "text-zinc-500"}`}>
                         [{r.take ? "TAKE" : "SKIP"}]
                       </span>{" "}
                       <span className={dirUp(r.direction) ? "text-emerald-300" : "text-red-300"}>
                         {dirWord(r.direction)}
                       </span>{" "}
-                      <span className="text-zinc-200 font-semibold">{r.symbol}</span>
-                      <span className="text-zinc-600"> · {plainEdge(r.edge)}</span>
-                      <span className="text-zinc-600"> · conf {r.conviction}</span>
-                      <span className="text-zinc-600"> · ~{r.horizon_days}d</span>
+                      <span className="text-zinc-900 dark:text-zinc-200 font-semibold">{r.symbol}</span>
+                      <span className="text-zinc-500 dark:text-zinc-600"> · {plainEdge(r.edge)}</span>
+                      <span className="text-zinc-500 dark:text-zinc-600"> · conf {r.conviction}</span>
+                      <span className="text-zinc-500 dark:text-zinc-600"> · ~{r.horizon_days}d</span>
                       {r.flipped && <span className="text-fuchsia-400"> · reversed</span>}
                       {r.plan && (
-                        <span className="text-zinc-600">
+                        <span className="text-zinc-500 dark:text-zinc-600">
                           {" "}· entry {r.plan.entry} · target {r.plan.target} · stop {r.plan.stop}
                         </span>
                       )}
@@ -419,13 +420,14 @@ export function FindTrades({
                   .filter((s, i, a) => s && a.indexOf(s) === i)
                 return (
                   <div>
-                    <div className="border-t border-zinc-800 pt-3" />
+                    <div className="border-t border-zinc-200 dark:border-zinc-800 pt-3" />
                     <div className="text-zinc-500 mb-1">── Debates ──</div>
-                    {order.map((sym) => (
+                    {order.map((sym, oi) => (
                       <div key={sym}>
+                        {oi > 0 && <div className="border-t border-zinc-800 my-1" />}
                         {headers[sym] && <TermLine ev={headers[sym]} />}
                         {(items[sym]?.length ?? 0) > 0 && (
-                          <div className="border-l border-zinc-800 ml-1.5 pl-2.5">
+                          <div className="border-l border-zinc-300 dark:border-zinc-800 ml-1.5 pl-2.5">
                             {items[sym].map((ev, ei) => (
                               <div key={ei} className="flex items-baseline gap-1">
                                 <TermLine ev={ev} />

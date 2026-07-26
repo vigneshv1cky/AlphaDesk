@@ -5,11 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AlphaDesk</title>
     <script>
-      // Apply the saved theme before paint to avoid a flash. Default: dark.
+      // Apply saved theme or system preference before paint.
       (function () {
         try {
-          if ((localStorage.getItem("theme") || "dark") === "dark")
+          var t = localStorage.getItem("theme");
+          if (t === "dark" || (t !== "light" && t !== "system" && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
             document.documentElement.classList.add("dark");
+          }
         } catch (e) {
           document.documentElement.classList.add("dark");
         }

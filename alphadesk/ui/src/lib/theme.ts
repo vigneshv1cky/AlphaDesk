@@ -1,24 +1,33 @@
 import { useState } from "react"
 
-export type Theme = "light" | "dark"
+export type Theme = "light" | "dark" | "system"
 
-function current(): Theme {
-  return document.documentElement.classList.contains("dark") ? "dark" : "light"
+function resolveSystem(): "light" | "dark" {
+  if (window.matchMedia("(prefers-color-scheme: dark)").matches) return "dark"
+  return "light"
 }
 
-// Toggle .dark on <html>, persist the choice. Initial theme is applied by the
-// inline script in index.html (default dark) so there's no flash on load.
+function applied(): Theme {
+  try {
+    const raw = localStorage.getItem("theme")
+    if (raw === "light" || raw === "dark" || raw === "system") return raw
+  } catch { /* ignore */ }
+  return "system"
+}
+
+function apply(t: Theme) {
+  const dark = t === "dark" || (t === "system" && resolveSystem() === "dark")
+  document.documentElement.classList.toggle("dark", dark)
+}
+
 export function useTheme(): [Theme, () => void] {
-  const [theme, setTheme] = useState<Theme>(current)
-  const toggle = () => {
-    const next: Theme = theme === "dark" ? "light" : "dark"
-    document.documentElement.classList.toggle("dark", next === "dark")
-    try {
-      localStorage.setItem("theme", next)
-    } catch {
-      /* ignore */
-    }
+  const [theme, setTheme] = useState<Theme>(applied)
+  const cycle = () => {
+    const order: Theme[] = ["light", "dark", "system"]
+    const next = order[(order.indexOf(theme) + 1) % order.length]
+    apply(next)
+    try { localStorage.setItem("theme", next) } catch { /* ignore */ }
     setTheme(next)
   }
-  return [theme, toggle]
+  return [theme, cycle]
 }

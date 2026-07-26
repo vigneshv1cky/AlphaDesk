@@ -47,7 +47,7 @@ export function PickSheet({
         onClick={onClose}
         aria-hidden="true"
       />
-      <div className="relative z-10 flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl">
+      <div className="relative z-10 flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 shadow-2xl">
         <div className="flex items-start justify-between gap-3 border-b border-zinc-700 px-4 py-3">
           <div className="min-w-0">
             <div className="font-mono text-sm">
@@ -58,7 +58,7 @@ export function PickSheet({
                   <span className={long ? "text-emerald-400" : "text-red-400"}>
                     {dirWord(pick.direction)}
                   </span>{" "}
-                  <span className="font-bold text-zinc-200">{pick.symbol}</span>
+                  <span className="font-bold text-zinc-900 dark:text-zinc-200">{pick.symbol}</span>
                   <span className="text-zinc-600"> · {pick.arm === "LONER" ? "Loner" : "Team"}</span>
                   {pick.edge && <span className="text-zinc-600"> · {plainEdge(pick.edge)}</span>}
                   <span className="text-zinc-600"> · {etDateTime(pick.ts)} ET</span>
@@ -69,7 +69,7 @@ export function PickSheet({
           <button
             onClick={onClose}
             aria-label="Close"
-            className="grid h-7 w-7 shrink-0 place-items-center rounded text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
+            className="grid h-7 w-7 shrink-0 place-items-center rounded text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-900 dark:text-zinc-200"
           >
             <X className="h-4 w-4" />
           </button>
@@ -87,7 +87,7 @@ export function PickSheet({
                   <span className={long ? "text-emerald-400" : "text-red-400"}>
                     [{dirWord(pick.direction).toUpperCase()}]
                   </span>{" "}
-                  <span className="text-zinc-200 font-bold">{pick.symbol}</span>
+                  <span className="text-zinc-900 dark:text-zinc-200 font-bold">{pick.symbol}</span>
                   <span className="text-zinc-600"> · ~{pick.horizon_days}d</span>
                   <span className="text-zinc-600"> · until {exitDate(pick.ts, pick.session, pick.horizon_days)}</span>
                 </div>
@@ -137,7 +137,7 @@ export function PickSheet({
                   {(pick.briefs ?? []).map((b, i) => (
                     <div key={i}>
                       <span className="text-zinc-400 font-semibold">[NOTE:{b.kind}]</span>{" "}
-                      <span className="text-zinc-300">{b.summary}</span>
+                      <span className="text-zinc-800 dark:text-zinc-300">{b.summary}</span>
                       {b.key_facts && b.key_facts.length > 0 && (
                         <div className="text-zinc-500 ml-4">
                           {b.key_facts.map((f, j) => (
@@ -156,7 +156,7 @@ export function PickSheet({
                   <div className="text-zinc-500 mb-1">── Researcher ──</div>
                   <div>
                     <span className="text-blue-400 font-semibold">[THESIS]</span>{" "}
-                    <span className="text-zinc-300">{pick.thesis}</span>
+                    <span className="text-zinc-800 dark:text-zinc-300">{pick.thesis}</span>
                   </div>
                   <div className="text-zinc-500 ml-4">
                     confidence {Math.round(pick.score)}/100 · ~{pick.horizon_days}d
@@ -171,7 +171,7 @@ export function PickSheet({
                   {(pick.debate?.concerns ?? []).map((c, i) => (
                     <div key={i}>
                       <span className="text-red-400 font-semibold">[CRITIC #{i + 1}]</span>{" "}
-                      <span className="text-zinc-200">{c.claim}</span>
+                      <span className="text-zinc-900 dark:text-zinc-200">{c.claim}</span>
                       <div className="text-zinc-500 ml-4">{c.evidence}</div>
                     </div>
                   ))}
@@ -183,14 +183,14 @@ export function PickSheet({
                 <div>
                   <span className="text-fuchsia-400 font-semibold">[CRITIC]</span>{" "}
                   {pick.debate.critic_stance === "FLIP" ? (
-                    <span className="text-zinc-200">
+                    <span className="text-zinc-900 dark:text-zinc-200">
                       Reverse: {dirWord(pick.debate.proposed_direction)} →{" "}
                       <span className={pick.debate.counter_direction === "LONG" ? "text-emerald-400" : "text-red-400"}>
                         {dirWord(pick.debate.counter_direction)}
                       </span>
                     </span>
                   ) : (
-                    <span className="text-zinc-200">Stand aside — no edge either way</span>
+                    <span className="text-zinc-900 dark:text-zinc-200">Stand aside — no edge either way</span>
                   )}
                   {pick.debate.counter && (
                     <div className="text-zinc-500 ml-4">{pick.debate.counter}</div>
@@ -204,7 +204,7 @@ export function PickSheet({
                   {(pick.debate?.fact_flags ?? []).map((f, i) => (
                     <div key={i}>
                       <span className="text-orange-400 font-semibold">[FACT]</span>{" "}
-                      <span className="text-zinc-300">{f}</span>
+                      <span className="text-zinc-800 dark:text-zinc-300">{f}</span>
                     </div>
                   ))}
                 </div>
@@ -216,7 +216,7 @@ export function PickSheet({
                   <div className="text-zinc-500 mb-1">── Researcher's Reply ──</div>
                   <div>
                     <span className="text-blue-400 font-semibold">[REPLY]</span>{" "}
-                    <span className="text-zinc-300">{pick.debate.rebuttal.rebuttal}</span>
+                    <span className="text-zinc-800 dark:text-zinc-300">{pick.debate.rebuttal.rebuttal}</span>
                   </div>
                   <div className="text-zinc-500 ml-4">
                     score → {pick.debate.rebuttal.revised_score}/100 · conceded: {pick.debate.rebuttal.concede ? "yes" : "no"}
@@ -230,7 +230,7 @@ export function PickSheet({
                   <div className="text-zinc-500 mb-1">── Judge ──</div>
                   <div>
                     <span className="text-emerald-400 font-semibold">[JUDGE]</span>{" "}
-                    <span className="text-zinc-300">{pick.debate.arbiter_summary}</span>
+                    <span className="text-zinc-800 dark:text-zinc-300">{pick.debate.arbiter_summary}</span>
                   </div>
                   <div className="text-zinc-500 ml-4">
                     final confidence {pick.adjusted_score}/100 · {plainVerdict(pick.verdict)} ·{" "}

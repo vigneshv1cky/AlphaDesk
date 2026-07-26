@@ -10,7 +10,7 @@ import { useTheme } from "@/lib/theme"
 import { FindTrades } from "@/components/FindTrades"
 import { PickSheet } from "@/components/PickSheet"
 import { RightRail } from "@/components/RightRail"
-import { Moon, Sun } from "lucide-react"
+import { Moon, Monitor, Sun } from "lucide-react"
 
 function Kpi({ label, value, tone }: { label: string; value: string; tone?: number | null }) {
   const color = tone == null ? "" : tone > 0 ? "text-emerald-600 dark:text-emerald-400" : tone < 0 ? "text-red-600 dark:text-red-400" : ""
@@ -80,10 +80,11 @@ export default function App() {
             <Kpi label="AI today" value={burn > 0 ? `${Math.round(burn / 1000)}k` : "0"} />
             <button
               onClick={toggleTheme}
-              aria-label="Toggle light / dark"
+              aria-label="Toggle theme"
+              title={theme === "dark" ? "Dark" : theme === "light" ? "Light" : "System"}
               className="grid h-8 w-8 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:text-foreground"
             >
-              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              {theme === "dark" ? <Moon className="h-4 w-4" /> : theme === "light" ? <Sun className="h-4 w-4" /> : <Monitor className="h-4 w-4" />}
             </button>
           </div>
         </div>
