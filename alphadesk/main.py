@@ -464,15 +464,28 @@ async def _serve() -> None:
                 in_window = (now.weekday() < 5
                              and (now.hour, now.minute) >= (s_h, s_m)
                              and (now.hour, now.minute) < (e_h, e_m))
-                last = None
-                lt = store.last_run_time("FIND_TRADES")
-                if lt:
-                    try:
-                        last = datetime.fromisoformat(lt).astimezone(ET)
-                    except (ValueError, TypeError):
-                        last = None
-                if in_window and not running and (last is None or (now - last) >= interval):
-                    running = True
+                # Align to clock: next run at the next interval boundary after the
+                # window start. A run at 4:17 fires at 5:00, not 5:17. Drift-free.
+                window_start = now.replace(hour=s_h, minute=s_m, second=0, microsecond=0)
+                mins_since_start = (now - window_start).total_seconds() / 60
+                next_slot = window_start + timedelta(
+                    hours=(int(mins_since_start // (AUTORUN_INTERVAL_HOURS * 60)) + 1)
+                    * AUTORUN_INTERVAL_HOURS)
+                # Guard: fire at the clock-aligned boundary regardless of manual runs.
+                # Only skip if THIS exact slot already ran (restart-safety).
+                if in_window and not running and now >= next_slot:
+                    slot_key = next_slot.strftime("%Y-%m-%dT%H:%M")
+                    lt = store.last_run_time("FIND_TRADES")
+                    last_slot = None
+                    if lt:
+                        try:
+                            last_dt = datetime.fromisoformat(lt).astimezone(ET)
+                            last_slot = last_dt.replace(minute=int(last_dt.minute // 60) * 60,
+                                                        second=0, microsecond=0)
+                        except (ValueError, TypeError):
+                            pass
+                    if last_slot is None or last_slot < next_slot:
+                        running = True
                     try:
                         log.info("Auto-run: firing Find Trades")
                         from alphadesk.desk.stream import stream_find_trades

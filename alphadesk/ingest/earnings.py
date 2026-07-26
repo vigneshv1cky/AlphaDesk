@@ -85,15 +85,15 @@ def run_at(report_iso: str, session: str | None) -> str | None:
 
 def reported_public(report_iso: str, session: str | None) -> datetime | None:
     """The ET moment a report becomes PUBLIC — the boundary between 'reporting
-    soon' and 'just reported'. BMO/DAY names are public by the 9:30 open of their
-    report day; AMC names after the 16:00 close. So a BMO/DAY name reporting today
-    flips to 'just reported' at 9:30 today (time-aware — not gated on when Nasdaq
-    backfills the actual EPS)."""
+    soon' and 'just reported'. BMO/DAY names are public at 4:00 ET (pre-market
+    start, when extended-hours trading begins); AMC names after the 16:00 close.
+    So a BMO name reporting today flips to 'just reported' at 4:00 today — tradeable
+    in the pre-market session."""
     try:
         d = datetime.fromisoformat(report_iso[:10])   # date-only key
     except (ValueError, TypeError):
         return None
-    hour, minute = (16, 0) if session == "AMC" else (9, 30)
+    hour, minute = (16, 0) if session == "AMC" else (4, 0)
     return datetime(d.year, d.month, d.day, hour, minute, tzinfo=ET)
 
 
