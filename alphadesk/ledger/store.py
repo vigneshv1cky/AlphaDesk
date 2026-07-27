@@ -838,7 +838,6 @@ def live_picks() -> list[dict]:
             " hedge_of, arm"
             " FROM picks"
             " WHERE arm IN ('TEAM','HEDGE') AND plan_entry IS NOT NULL"
-            "   AND taken=1"
             "   AND graded_at IS NULL AND exit_ts IS NULL"
             "   AND datetime(ts, '+' || (horizon_days + 2) || ' days') >= datetime('now')"
             " ORDER BY approved DESC, id DESC",
