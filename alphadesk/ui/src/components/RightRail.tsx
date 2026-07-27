@@ -3,7 +3,6 @@ import { Ledger } from "@/components/Ledger"
 import { Earnings } from "@/components/Earnings"
 import { Activity } from "@/components/Activity"
 import { LiveTracker } from "@/components/LiveTracker"
-import { Sessions } from "@/components/Sessions"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 export function RightRail({
@@ -26,10 +25,7 @@ export function RightRail({
           Live
         </TabsTrigger>
         <TabsTrigger value="record" className={trigger}>
-          Track record
-        </TabsTrigger>
-        <TabsTrigger value="sessions" className={trigger}>
-          Sessions
+          History
         </TabsTrigger>
         <TabsTrigger value="calendar" className={trigger}>
           Calendar
@@ -43,9 +39,6 @@ export function RightRail({
       </TabsContent>
       <TabsContent value="record">
         <Ledger stats={stats} onSelect={onSelect} />
-      </TabsContent>
-      <TabsContent value="sessions">
-        <Sessions onSelect={onSelect} />
       </TabsContent>
       <TabsContent value="calendar">
         <Earnings earnings={earnings} />

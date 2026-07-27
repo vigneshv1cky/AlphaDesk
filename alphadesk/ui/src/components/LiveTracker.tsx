@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { api, etDateTime, groupByDayKey, type LivePick } from "@/lib/api"
 import { dirUp } from "@/lib/plain"
 import { InfoTip } from "@/components/InfoTip"
 import { Card } from "@/components/ui/card"
-import { ArrowDown, ArrowUp, RefreshCw } from "lucide-react"
+import { ArrowDown, ArrowUp, RefreshCw, X } from "lucide-react"
 
 // Where the price sits on the stop→target track, plus the entry tick.
 function Track({ p }: { p: LivePick }) {
@@ -56,6 +56,8 @@ export function LiveTracker() {
   const [rows, setRows] = useState<LivePick[]>([])
   const [market, setMarket] = useState("")
   const [loaded, setLoaded] = useState(false)
+  const [recentExits, setRecentExits] = useState<LivePick[]>([])
+  const prevIds = useRef<Set<number>>(new Set())
 
   useEffect(() => {
     let alive = true
@@ -64,6 +66,19 @@ export function LiveTracker() {
         .live()
         .then((d) => {
           if (!alive) return
+          const newIds = new Set(d.live.map((p: LivePick) => p.id))
+          // Detect disappeared picks — they were exited by the watcher
+          const gone: LivePick[] = []
+          for (const id of prevIds.current) {
+            if (!newIds.has(id)) {
+              const old = rows.find(r => r.id === id)
+              if (old) gone.push(old)
+            }
+          }
+          if (gone.length > 0) {
+            setRecentExits(prev => [...gone, ...prev].slice(0, 10))
+          }
+          prevIds.current = newIds
           setRows(d.live)
           setMarket(d.market)
           setLoaded(true)
@@ -77,14 +92,8 @@ export function LiveTracker() {
     }
   }, [])
 
-  if (loaded && rows.length === 0) {
-    return (
-      <Card className="text-sm text-muted-foreground">
-        No open picks to track. Run <span className="font-medium text-foreground">Find Trades</span> —
-        picks with a plan show up here and update live.
-      </Card>
-    )
-  }
+  const dismissExit = (id: number) => setRecentExits(prev => prev.filter(e => e.id !== id))
+  const dismissAllExits = () => setRecentExits([])
 
   return (
     <div className="space-y-3">
@@ -96,7 +105,58 @@ export function LiveTracker() {
         </span>
       </div>
 
-      {groupByDayKey(rows, (p) => p.ts).map((g) => (
+      {recentExits.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+              Just exited
+            </span>
+            <button onClick={dismissAllExits} className="ml-auto text-xs text-muted-foreground hover:text-foreground">
+              clear
+            </button>
+          </div>
+          {recentExits.map((p) => (
+            <Card key={`exit-${p.id}`} className="border-amber-200 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/30 space-y-2">
+              <div className="flex items-center gap-2">
+                {dirUp(p.direction) ? (
+                  <ArrowUp className="h-4 w-4 shrink-0 text-zinc-400" />
+                ) : (
+                  <ArrowDown className="h-4 w-4 shrink-0 text-zinc-400" />
+                )}
+                <span className="text-sm font-bold text-muted-foreground">{p.symbol}</span>
+                <span className="text-xs text-muted-foreground">
+                  {p.direction} · exited · {etDateTime(new Date().toISOString())}
+                </span>
+                <button onClick={() => dismissExit(p.id)} className="ml-auto grid h-5 w-5 place-items-center rounded text-muted-foreground hover:text-foreground">
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+              {p.plan_entry != null && p.plan_target != null && p.plan_stop != null && (
+                <div className="flex justify-between text-[11px] text-muted-foreground">
+                  <span>entry ${p.plan_entry}</span>
+                  <span>
+                    {p.pnl_pct != null ? (
+                      <span className={(p.pnl_pct ?? 0) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}>
+                        exit {(p.pnl_pct ?? 0) >= 0 ? "+" : ""}{p.pnl_pct}%
+                      </span>
+                    ) : null}
+                  </span>
+                </div>
+              )}
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {loaded && rows.length === 0 && recentExits.length === 0 ? (
+        <Card className="text-sm text-muted-foreground">
+          No open picks to track. Run <span className="font-medium text-foreground">Find Trades</span> —
+          picks with a plan show up here and update live.
+        </Card>
+      ) : (
+        rows.length > 0 && (
+          <>
+            {groupByDayKey(rows, (p) => p.ts).map((g) => (
         <div key={g.key} className="space-y-3">
           <div className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
             Chosen {g.label}
@@ -157,9 +217,12 @@ export function LiveTracker() {
             </div>
               </Card>
             )
-          })}
+          }          )}
         </div>
       ))}
+          </>
+        )
+      )}
     </div>
   )
 }

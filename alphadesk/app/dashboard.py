@@ -340,10 +340,8 @@ def api_timelines(days: int = 30):
     from alphadesk.config import session as market_session
     from alphadesk.ingest import prices
     rows = store.recent_team_picks(days)
-    # Track Record shows closed picks only: graded, exited, or not-taken.
-    # Open taken positions belong in Live, not here.
-    rows = [r for r in rows
-            if r.get("graded_at") or r.get("exit_ts") or not r.get("taken")]
+    # Track Record: only exited picks by default. Open positions belong in Live.
+    rows = [r for r in rows if r.get("exit_ts")]
     by_sym: dict[str, list[dict]] = {}
     for r in rows:
         by_sym.setdefault(r["symbol"], []).append(r)
