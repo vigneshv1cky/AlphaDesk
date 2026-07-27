@@ -33,7 +33,10 @@ _SYSTEM = (
     "makes over that many days.\n"
     "  • stop — the invalidation: the price that says the thesis is wrong. Place it "
     "beyond normal daily noise but keep the risk sane (a tighter stop for a "
-    "single-day hold, more room for a multi-day one).\n"
+    "single-day hold, more room for a multi-day one). CRITICAL: the reward "
+    "(target→entry distance) must be AT LEAST as large as the risk (entry→stop "
+    "distance). Do NOT set a stop wider than the target — a plan where you risk "
+    "more than you target will be REJECTED by the coherence rails.\n"
     "  • note — ONE plain-English line telling a trader exactly what to do.\n"
     "COHERENCE (required): for LONG, stop < entry < target. For SHORT, "
     "target < entry < stop. Entry MUST equal the current price.\n"
@@ -66,6 +69,11 @@ def _coherent(direction: str, entry: float, target: float, stop: float,
         return False  # target implausibly far — not a real objective for a days-long swing
     if abs(stop - entry) / entry > 0.30:
         return False  # stop so wide it can't invalidate — an effectively stopless plan
+    from alphadesk.config import MIN_RISK_REWARD_RATIO
+    reward = abs(target - entry) / entry
+    risk = abs(stop - entry) / entry
+    if risk > 0 and reward / risk < MIN_RISK_REWARD_RATIO:
+        return False  # reward smaller than risk → negative expected value
     return True
 
 

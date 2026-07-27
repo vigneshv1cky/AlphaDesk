@@ -198,6 +198,10 @@ DEFAULT_EDGE_HORIZON_DAYS = int(os.environ.get("DEFAULT_EDGE_HORIZON_DAYS", "1")
 # than this %, the setup rested on a stale price → NOT TAKEN (re-evaluate live next run). This
 # is the WAB failure mode (planned on a pre-gap price, market opened elsewhere). 0 disables.
 ENTRY_GAP_SKIP_PCT = float(os.environ.get("ENTRY_GAP_SKIP_PCT", "2.0"))
+# Minimum risk/reward ratio for trade plans: reward (target→entry) must be at least
+# this × risk (stop→entry). 1.0 = reward >= risk. Rejects sub-1.0 plans so losses
+# can't systematically outweigh wins even at 50% win rate.
+MIN_RISK_REWARD_RATIO = float(os.environ.get("MIN_RISK_REWARD_RATIO", "1.0"))
 # Scout coverage: how many candidates reach the scout (and get a price-context fetch). The
 # window is now ranked by MATERIALITY (earnings reaction size, else news intensity), NOT
 # market cap — so the biggest movers are seen first instead of being truncated behind
