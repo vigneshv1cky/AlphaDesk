@@ -581,54 +581,19 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
         else:
             yield item
 
-    # Chief — genuine head-to-head comparison across every debated idea
-    # (not just sorting isolated conviction numbers). One Opus call.
-    if len(board) >= 1:
-        yield _ev("status", msg="Head comparing all opportunities head-to-head…")
-        try:
-            chief = await loop.run_in_executor(
-                None, lambda: team.head_ranking(board, "chief"))
-            ranking = {r["symbol"].upper(): r for r in chief.get("ranked", [])}
-            order = {r["symbol"].upper(): i for i, r in enumerate(chief.get("ranked", []))}
-            for row in board:
-                cr = ranking.get(row["symbol"].upper())
-                row["chief_reason"] = cr["reason"] if cr else ""
-                # TAKE EVERY debated pick — book every call the desk surfaces as a real
-                # position, not just the Head's conviction picks. The judge's `approved`
-                # flag and the Head's ranking are KEPT as metadata, so you can still test
-                # later whether that selection would have added value. Also makes Live
-                # all-real-positions (no tracked/booked split).
-                row["take"] = True
-            board.sort(key=lambda r: order.get(r["symbol"].upper(), 999))
-            capped = await loop.run_in_executor(None, team.apply_concentration_cap, board)
-            for row in board:                 # persist sector/cluster for risk + evidence dedup
-                if row.get("sector"):
-                    store.update_pick(row["id"], sector=row["sector"], cluster=row["cluster"])
-            store.add_run("FIND_TRADES", board)
-            store.mark_taken([r["id"] for r in board if r.get("take")])  # open positions to review next run
-            _pending_run_picks = []   # run finalised — keep its picks
-            if capped:
-                yield _ev("status", msg="Concentration cap — held back "
-                          + ", ".join(f"{r['symbol']} ({r['cap_reason']})" for r in capped))
-            yield _ev("chief", board=board, summary=chief.get("summary", ""))
-            yield _ev("done", board=board)
-            return
-        except LLMError as exc:
-            log.warning("Chief synthesis failed (%s) — falling back to score sort", exc)
-
-    # fallback: no Chief → sort isolated scores
+    # TAKE-ALL: every debated pick is a position. Sort best-first (approved,
+    # then conviction) so the concentration cap keeps the strongest of a cluster.
     for row in board:
-        row["take"] = True   # take every pick (see Head path)
+        row["take"] = True
         row["chief_reason"] = ""
     board.sort(key=lambda r: (not r["approved"], -abs(r["conviction"] - 50)))
     capped = await loop.run_in_executor(None, team.apply_concentration_cap, board)
     for row in board:
         if row.get("sector"):
             store.update_pick(row["id"], sector=row["sector"], cluster=row["cluster"])
-    store.add_run("FIND_TRADES", board)   # record the run here too — the autorun's
-                                          # interval gate + daily cap key off it
+    store.add_run("FIND_TRADES", board)
     store.mark_taken([r["id"] for r in board if r.get("take")])
-    _pending_run_picks = []   # run finalised — keep its picks
+    _pending_run_picks = []
     if capped:
         yield _ev("status", msg="Concentration cap — held back "
                   + ", ".join(f"{r['symbol']} ({r['cap_reason']})" for r in capped))

@@ -827,8 +827,10 @@ def picks_for_path(days: int = 20) -> list[dict]:
 
 
 def live_picks() -> list[dict]:
-    """Open picks carrying a trade plan, still inside their horizon window (not
-    graded, not exited) — the set to track live against the current price."""
+    """Open TAKEN picks carrying a trade plan, still inside their horizon window
+    (not graded, not exited) — the set to track live against the current price.
+    taken=0 picks (counterfactuals the Head passed on or the concentration cap held
+    back) are excluded — they are not real positions and can't be live-monitored."""
     with _connect() as conn:
         rows = conn.execute(
             "SELECT id, ts, symbol, direction, horizon_days, session, edge, verdict,"
@@ -838,6 +840,7 @@ def live_picks() -> list[dict]:
             " hedge_of, arm"
             " FROM picks"
             " WHERE arm IN ('TEAM','HEDGE') AND plan_entry IS NOT NULL"
+            "   AND taken = 1"
             "   AND graded_at IS NULL AND exit_ts IS NULL"
             "   AND datetime(ts, '+' || (horizon_days + 2) || ' days') >= datetime('now')"
             " ORDER BY approved DESC, id DESC",
