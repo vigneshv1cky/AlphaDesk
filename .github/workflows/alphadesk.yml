@@ -71,3 +71,24 @@ jobs:
           echo 'ds_api_key      = "test"' >> terraform.tfvars
       - run: terraform init -backend=false
       - run: terraform validate
+
+  deploy:
+    name: Deploy to GCP
+    needs: [backend, frontend, terraform]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to VM
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.GCP_VM_IP }}
+          username: vignesh
+          key: ${{ secrets.GCP_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/alphadesk
+            sudo git pull origin main
+            sudo pip install -r requirements.txt
+            sudo systemctl restart alphadesk
+            echo "Deployed — service restarted"
+            sudo journalctl -u alphadesk --no-pager -n 3
