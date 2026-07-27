@@ -94,6 +94,7 @@ async def _serve() -> None:
         from alphadesk.config import (
             LIMIT_FILL_BUFFER_PCT,
             LIMIT_FILL_MIN_CUSHION_FRAC,
+            WATCH_INTERVAL_S,
             entry_fill_time,
             now_et,
         )
@@ -425,7 +426,7 @@ async def _serve() -> None:
                 log.error("position watch error: %s", exc)
             from alphadesk.app import scheduler
             scheduler.beat()   # 180s liveness for /healthz (grader's hourly beat is too coarse)
-            await asyncio.sleep(180)   # ~3 min; a hit closes the paper position
+            await asyncio.sleep(WATCH_INTERVAL_S)   # configurable; default 60s
 
     async def _autorun_loop():
         """Auto-fire Find Trades every AUTORUN_INTERVAL_HOURS within [START, END] ET on

@@ -256,6 +256,8 @@ PM_EXTENDED_HOURS = os.environ.get("PM_EXTENDED_HOURS", "0") not in ("0", "", "f
 # SHORT that captures the gap if the thesis is wrong. 0 = off (default). Set e.g. 35
 # to protect thin-conviction positions.
 HEDGE_CONFIDENCE_THRESHOLD = float(os.environ.get("HEDGE_CONFIDENCE_THRESHOLD", "0"))
+# Position watcher interval (seconds) — how often the watcher checks stops/targets.
+WATCH_INTERVAL_S = int(os.environ.get("WATCH_INTERVAL_S", "60"))
 
 
 def pinned_horizon(edge: str | None) -> int:
