@@ -389,9 +389,8 @@ def api_timelines(days: int = 30):
                    else latest["direction"] if latest["graded_at"] is None else "CLOSED")
         changed = len({e["direction"] for e in evs}) > 1 or any(e["exit_ts"] for e in evs)
         symbols.append({"symbol": sym, "current": current, "changed": changed,
-                        "last_ts": latest["ts"], "events": events})
-    symbols.sort(key=lambda s: s["last_ts"], reverse=True)           # recent first…
-    symbols.sort(key=lambda s: 0 if s["current"] in ("LONG", "SHORT") else 1)  # …open on top
+                        "last_ts": latest.get("exit_ts") or latest["ts"], "events": events})
+    symbols.sort(key=lambda s: s["last_ts"] or "", reverse=True)
     return {"symbols": symbols, "market": market_session()}
 
 
