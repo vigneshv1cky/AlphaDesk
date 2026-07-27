@@ -62,7 +62,7 @@ export function PickSheet({
                   <span className="text-zinc-600"> · {pick.arm === "LONER" ? "Loner" : "Team"}</span>
                   {pick.edge && <span className="text-zinc-600"> · {plainEdge(pick.edge)}</span>}
                   <span className="text-zinc-600"> · {etDateTime(pick.ts)} ET</span>
-                  <span className="text-zinc-600"> · {pick.session === "PRE" ? "pre-market" : pick.session === "AFTER" ? "after-hours" : pick.session === "OPEN" ? "regular hours" : "overnight"}</span>
+                  <span className="text-zinc-600"> · {pick.session === "PRE" ? "pre-market" : pick.session === "AFTER" ? "after-hours" : pick.session === "OPEN" ? "regular hours" : "entered at open"}</span>
                 </>
               )}
             </div>

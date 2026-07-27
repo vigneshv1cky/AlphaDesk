@@ -139,7 +139,7 @@ export function LiveTracker() {
                   p.session === "PRE" || p.session === "AFTER" ? "text-blue-600 dark:text-blue-400" :
                   "text-zinc-500"
                 }`}>
-                  · {p.session === "PRE" ? "pre-market" : p.session === "AFTER" ? "after-hours" : p.session === "OPEN" ? "regular" : "overnight"}
+                  · {p.session === "PRE" ? "pre-market" : p.session === "AFTER" ? "after-hours" : p.session === "OPEN" ? "regular" : "entered at open"}
                 </span>
                 {p.status === "pending" && (
                   <span className="ml-1 text-amber-600 dark:text-amber-400">· pending</span>

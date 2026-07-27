@@ -309,19 +309,22 @@ def _is_not_taken(exit_ts: str | None, exit_reason: str | None, fill) -> bool:
 def api_sessions(days: int = 14):
     """Picks grouped by the market window they were DECIDED in — day market
     (regular hours), extended market (pre + after-hours), night market
-    (overnight/weekend) — with per-window aggregates. Open positions appear in
-    their window with open status (carried over day to day)."""
+    (overnight/weekend) — with per-window aggregates. Only resolved outcomes:
+    graded, exited, or not-taken. Open positions belong in Live, not here."""
     GROUP = {"OPEN": "day", "PRE": "extended", "AFTER": "extended", "CLOSED": "night"}
     out: dict[str, list] = {"day": [], "extended": [], "night": []}
     for r in store.recent_team_picks(days=days):
-        out.setdefault(GROUP.get(r.get("session") or "", "night"), []).append(r)
+        # Track record: only resolved outcomes (graded, exited, or not-taken).
+        # Open positions are tracked in Live, not in the record.
+        if r.get("graded_at") or r.get("exit_ts") or not r.get("taken"):
+            out.setdefault(GROUP.get(r.get("session") or "", "night"), []).append(r)
     agg = {}
     for g, rows in out.items():
         rows.sort(key=lambda r: r["ts"], reverse=True)
         graded = [x for x in rows if x.get("alpha_net") is not None]
         agg[g] = {
             "n": len(rows),
-            "open": sum(1 for x in rows if not x.get("exit_ts") and not x.get("graded_at")),
+            "open": 0,
             "graded": len(graded),
             "wins": sum(1 for x in graded if x["alpha_net"] > 0),
             "avg_alpha": round(sum(x["alpha_net"] for x in graded) / len(graded), 2) if graded else None,
