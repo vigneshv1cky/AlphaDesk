@@ -134,6 +134,13 @@ export function LiveTracker() {
                 {p.order_type === "limit" ? "limit @ $" + p.plan_entry + " · " : ""}
                 {p.status === "pending" ? "fills " : "entered "}
                 {etDateTime(p.entry_ts)}
+                <span className={`ml-1 ${
+                  p.session === "OPEN" ? "text-emerald-600 dark:text-emerald-400" :
+                  p.session === "PRE" || p.session === "AFTER" ? "text-blue-600 dark:text-blue-400" :
+                  "text-zinc-500"
+                }`}>
+                  · {p.session === "PRE" ? "pre-market" : p.session === "AFTER" ? "after-hours" : p.session === "OPEN" ? "regular" : "overnight"}
+                </span>
                 {p.status === "pending" && (
                   <span className="ml-1 text-amber-600 dark:text-amber-400">· pending</span>
                 )}

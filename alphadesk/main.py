@@ -475,7 +475,6 @@ async def _serve() -> None:
                 current_slot = window_start + timedelta(
                     hours=elapsed * AUTORUN_INTERVAL_HOURS)
                 if in_window and not running and now >= current_slot:
-                    slot_key = current_slot.strftime("%Y-%m-%dT%H:%M")
                     lt = store.last_run_time("FIND_TRADES")
                     last_slot = None
                     if lt:
@@ -487,14 +486,14 @@ async def _serve() -> None:
                             pass
                     if last_slot is None or last_slot < current_slot:
                         running = True
-                    try:
-                        log.info("Auto-run: firing Find Trades")
-                        from alphadesk.desk.stream import stream_find_trades
-                        async for _ev in stream_find_trades(hours=24.0):
-                            pass
-                        log.info("Auto-run complete")
-                    finally:
-                        running = False
+                        try:
+                            log.info("Auto-run: firing Find Trades")
+                            from alphadesk.desk.stream import stream_find_trades
+                            async for _ev in stream_find_trades(hours=24.0):
+                                pass
+                            log.info("Auto-run complete")
+                        finally:
+                            running = False
             except Exception as exc:
                 log.error("auto-run error: %s", exc)
             await asyncio.sleep(60)   # check each minute
