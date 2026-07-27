@@ -343,7 +343,8 @@ def api_timelines(days: int = 30):
 
     symbols = []
     for sym, evs in by_sym.items():
-        evs.sort(key=lambda e: e["id"])
+        # Sort by most recent activity: exit_ts first, then ts, latest on top
+        evs.sort(key=lambda e: e.get("exit_ts") or e.get("ts") or "", reverse=True)
         events = []
         for e in evs:
             # a close stamped BEFORE the position could fill (pre-open) is a CANCEL,
