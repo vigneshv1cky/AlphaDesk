@@ -167,12 +167,13 @@ function EventRow({ e, onSelect }: { e: TimelineEvent; onSelect: (id: number) =>
       {up ? <ArrowUp className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" /> : <ArrowDown className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />}
       <span className={`text-sm font-semibold ${up ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>{dirWord(e.direction)}</span>
       <span className="font-mono text-xs tabular-nums text-muted-foreground">
-        {e.state === "not_taken" ? "Not taken" : <>
-          {etDateTime(e.entry_ts)}
-          {e.exit_ts && (
-            <span className="text-muted-foreground/70"> → {etDateTime(e.exit_ts)}</span>
-          )}
-        </>}
+        {e.state === "not_taken"
+          ? <span className="text-muted-foreground/70">passed · {etDateTime(e.entry_ts)}</span>
+          : <>{etDateTime(e.entry_ts)}
+              {e.exit_ts && (
+                <span className="text-muted-foreground/70"> → {etDateTime(e.exit_ts)}</span>
+              )}
+            </>}
       </span>
       <span className="ml-auto shrink-0">
         <Outcome e={e} />
