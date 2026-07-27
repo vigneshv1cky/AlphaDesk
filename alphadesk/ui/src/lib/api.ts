@@ -74,6 +74,13 @@ export interface Pick {
   alpha_adj: number | null // beta-adjusted + borrow-aware alpha (the honest number, alongside alpha_net)
   beta: number | null // stock's beta vs SPY (trailing daily returns, clamped 0–3)
   graded_at: string | null
+  exit_ts: string | null
+  exit_reason: string | null
+  exit_price: number | null
+  exit_return_pct: number | null
+  exit_alpha: number | null
+  mfe_pct: number | null
+  mae_pct: number | null
 }
 
 // One open pick tracked live against the current price.

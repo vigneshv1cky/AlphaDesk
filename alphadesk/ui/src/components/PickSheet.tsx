@@ -136,7 +136,31 @@ export function PickSheet({
                     </>
                   )}
                 </div>
-                {pick.alpha_net !== null && (
+                {pick.exit_ts && (
+                  <div className="mt-2 rounded-md bg-zinc-100 dark:bg-zinc-900 px-3 py-2 text-xs space-y-1">
+                    <div className="text-zinc-500">── Outcome ──</div>
+                    <div>
+                      exit <b className="text-zinc-800 dark:text-zinc-200">${pick.exit_price}</b>
+                      <span className={pick.exit_return_pct != null && pick.exit_return_pct >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}>
+                        {" "}· {pick.exit_return_pct != null ? fmtAlpha(pick.exit_return_pct) : "—"}
+                      </span>
+                      {pick.exit_reason && <span className="text-zinc-500"> · {pick.exit_reason.length > 80 ? pick.exit_reason.slice(0, 80) + "…" : pick.exit_reason}</span>}
+                    </div>
+                    {pick.alpha_net !== null && (
+                      <div className="text-zinc-500">
+                        vs S&P: {fmtAlpha(pick.alpha_net)}
+                        {pick.alpha_adj !== null && (
+                          <span> · β-adj: {fmtAlpha(pick.alpha_adj)}{pick.beta != null ? ` (β ${pick.beta.toFixed(2)})` : ""}</span>
+                        )}
+                      </div>
+                    )}
+                    <div className="flex gap-4 text-zinc-500">
+                      {pick.mfe_pct != null && <span>peak <span className="text-emerald-600 dark:text-emerald-400">{pick.mfe_pct >= 0 ? "+" : ""}{pick.mfe_pct}%</span></span>}
+                      {pick.mae_pct != null && <span>worst <span className="text-red-600 dark:text-red-400">{pick.mae_pct}%</span></span>}
+                    </div>
+                  </div>
+                )}
+                {!pick.exit_ts && pick.alpha_net !== null && (
                   <div className="text-zinc-500">
                     vs S&P: {fmtAlpha(pick.alpha_net)}
                     {pick.alpha_adj !== null && (
