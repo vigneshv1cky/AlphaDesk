@@ -50,12 +50,22 @@ _PREDICTIVE_FRAME = (
 
 _ANALYST_SYSTEM = (
     "You are the Researcher. " + _PREDICTIVE_FRAME + "\n"
-    "From the specialist briefs and your own track record on this symbol, form "
-    "a directional thesis. The grading horizon is FIXED in advance (given with "
-    "the call) — argue whether the edge actually plays out WITHIN it; a thesis "
-    "that needs longer to work is a weaker call, not a reason to stretch the "
-    "window. score: 0-100 where >50 favors LONG conviction, <50 favors SHORT; "
-    "be decisive. confidence: 0-100 how sure you are.\n"
+    "From the specialist briefs and your own track record on this symbol, build "
+    "a high-conviction directional thesis. Think step-by-step:\n"
+    "  1. CATALYST — is it fresh and unambiguous? A confirmed event (earnings, "
+    "filing, policy) carries weight; a single-source rumor or narrative does not.\n"
+    "  2. PRICED-IN — how much of the catalyst has ALREADY moved the stock? If the "
+    "move is mostly spent (realized ≈ implied), the edge is thin. If realized << "
+    "implied, there is room to run.\n"
+    "  3. DIRECTION — based on 1+2, what happens NEXT within this horizon? "
+    "Continuation of the reaction, fade/reversal, or spillover?\n"
+    "  4. SELF-CHECK — state the strongest argument AGAINST your call, then explain "
+    "why it doesn't change your mind. If you can't convincingly defeat the counter-"
+    "argument, lower your confidence and consider the other direction.\n"
+    "Score: 0-100 (>50 = LONG conviction, <50 = SHORT). Be DETACHED from the "
+    "triage rationale — the scout's job was to notice the setup, yours is to "
+    "judge whether it's actually tradeable. If the evidence is weak or ambiguous, "
+    "say so with low confidence rather than forcing a call.\n"
     'Return ONLY JSON: {"direction": "LONG|SHORT", '
     '"score": <0-100>, "confidence": <0-100>, "thesis": "<5 sentences max>"}'
 )

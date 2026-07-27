@@ -8,12 +8,14 @@ function Brief({ b }: { b: { kind: string; summary: string; key_facts?: (string 
   const labels: Record<string, string> = { market: "Market", news: "News", earnings: "Earnings" }
   return (
     <div>
-      <button onClick={() => setOpen(!open)} className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200 w-full text-left">
-        {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
-        <span className="font-semibold">{labels[b.kind] ?? b.kind}</span>
-        <span className="text-zinc-600 truncate">— {b.summary.slice(0, 80)}{b.summary.length > 80 ? "…" : ""}</span>
+      <button onClick={() => setOpen(!open)} className="flex items-start gap-1 text-xs text-left w-full group">
+        {open ? <ChevronDown className="h-3 w-3 shrink-0 mt-0.5 text-zinc-400" /> : <ChevronRight className="h-3 w-3 shrink-0 mt-0.5 text-zinc-400" />}
+        <span className="font-semibold text-zinc-500 dark:text-zinc-400 group-hover:text-zinc-200 shrink-0">{labels[b.kind] ?? b.kind}</span>
+        <span className={open ? "text-zinc-800 dark:text-zinc-200" : "text-zinc-600 dark:text-zinc-400 truncate"}>
+          {open ? b.summary : `— ${b.summary.slice(0, 120)}${b.summary.length > 120 ? "…" : ""}`}
+        </span>
       </button>
-      {open && (
+      {open && (b.key_facts ?? []).length > 0 && (
         <div className="mt-1 ml-4 text-xs text-zinc-500 space-y-0.5">
           {(b.key_facts ?? []).map((f, j) => (
             <div key={j}>· {typeof f === "string" ? f : f.fact}</div>
@@ -119,20 +121,18 @@ export function PickSheet({
                     <span className="text-zinc-500"> · thin lean</span>
                   )}
                 </div>
-                <div className="text-zinc-500 text-xs mt-1 flex flex-wrap gap-x-3">
-                  <span>
-                    fill{" "}
+                <div className="text-zinc-500 mt-1">
+                  <div>fill{" "}
                     {pick.entry_price ? (
                       <span>${pick.entry_price}{pick.session !== "OPEN" ? ` (${pick.session === "PRE" ? "pre-mkt" : pick.session === "AFTER" ? "after-hrs" : "entered at open"})` : ""}</span>
                     ) : (
                       "next open"
                     )}
-                  </span>
+                  </div>
                   {pick.plan_entry != null && pick.plan_target != null && pick.plan_stop != null && (
                     <>
-                      <span>target <b className="text-emerald-600 dark:text-emerald-400">${pick.plan_target}</b></span>
-                      <span>stop <b className="text-red-600 dark:text-red-400">${pick.plan_stop}</b></span>
-                      {pick.plan_note && <span className="text-zinc-600">"{pick.plan_note}"</span>}
+                      <div>target <b className="text-emerald-600 dark:text-emerald-400">${pick.plan_target}</b></div>
+                      <div>stop <b className="text-red-600 dark:text-red-400">${pick.plan_stop}</b></div>
                     </>
                   )}
                 </div>
@@ -154,7 +154,7 @@ export function PickSheet({
                   <div className="text-zinc-500 mb-1">── Why we looked ──</div>
                   <div>
                     <span className="text-yellow-400 font-semibold">[SCOUT]</span>{" "}
-                    <span className="text-zinc-400">{pick.triage_reason}</span>
+                    <span className="text-zinc-800 dark:text-zinc-200">{pick.triage_reason}</span>
                   </div>
                 </div>
               )}
