@@ -480,6 +480,16 @@ def _log_run_event(ev: dict) -> None:
                       "  ⟲ REVERSED" if ev.get("flipped") else "")
         if ev.get("summary"):
                 _run_log.info("         %s", _clip(ev.get("summary", ""), 160))
+    elif t == "chief":
+        board = ev.get("board") or []
+        takes = sum(1 for r in board if r.get("take"))
+        _run_log.info("HEAD ▸  ranked %d, %d worth acting on", len(board), takes)
+        if ev.get("summary"):
+            _run_log.info("         %s", _clip(ev.get("summary", ""), 200))
+        for r in board:
+            if r.get("take"):
+                _run_log.info("         ✓ %-6s %s — %s", r.get("symbol", ""), r.get("direction", ""),
+                              _clip(r.get("chief_reason", ""), 110))
     elif t == "done":
         board = ev.get("board") or []
         _run_log.info("── run complete — %d ideas, %d worth acting on ──", len(board),

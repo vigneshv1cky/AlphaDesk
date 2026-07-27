@@ -42,6 +42,7 @@ MODEL_MAP: dict[str, str] = {
     "judge": "opus",         # final verdict
     "loner": "opus",            # single-agent control arm
     "review": "opus",          # position review — HOLD/EXIT on still-open TAKEs
+    "head": "opus",            # comparative head-to-head selection across debated ideas
     "earnings_reader": "sonnet",      # web-grounded read of an actual earnings report
     "connections": "opus",     # one web-grounded call: supplier/customer/competitor map → spillover candidates
     "plan": "sonnet",          # execution desk — entry/target/stop for a committed call
@@ -65,7 +66,7 @@ WORLD_MAX_CATEGORIES = int(os.environ.get("WORLD_MAX_CATEGORIES", "0"))
 # opus cohorts in the ledger. Keep any single role sharp with a per-role override, e.g.
 # MODEL_JUDGE=opus. Set CHEAP_MODELS=0 to restore the opus defaults.
 if os.environ.get("CHEAP_MODELS", "1") not in ("0", "", "false", "False", "no"):
-    for _r in ("critic", "judge", "loner", "review", "connections"):
+    for _r in ("critic", "judge", "loner", "review", "head", "connections"):
         MODEL_MAP[_r] = "sonnet"
 
 for _role in list(MODEL_MAP):   # per-role override wins over the cheap default
