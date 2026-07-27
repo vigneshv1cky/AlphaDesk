@@ -386,6 +386,8 @@ def apply_concentration_cap(board: list[dict]) -> list[dict]:
     from alphadesk.config import CONCENTRATION_MAX_PER_CLUSTER
     from alphadesk.ingest import prices
     from alphadesk.ledger import store
+    if CONCENTRATION_MAX_PER_CLUSTER <= 0:
+        return []   # cap disabled — 0 or negative means no limit
     counts = store.taken_cluster_counts_today()   # what earlier runs already booked today
     capped: list[dict] = []
     for row in board:
