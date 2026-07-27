@@ -47,3 +47,5 @@ terraform/.terraform
 terraform/terraform.tfstate*
 terraform/altavela/terraform.tfvars
 terraform/altavela/.terraform
+terraform/altavela/terraform.tfstate
+terraform/altavela/terraform.tfstate.backup
