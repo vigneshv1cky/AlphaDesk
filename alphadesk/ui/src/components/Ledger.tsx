@@ -226,6 +226,7 @@ function SymbolCard({ s, onSelect }: { s: SymbolTimeline; onSelect: (id: number)
 export function Ledger({ stats, onSelect }: { stats: Stats | null; onSelect: (id: number) => void }) {
   const [symbols, setSymbols] = useState<SymbolTimeline[]>([])
   const [loaded, setLoaded] = useState(false)
+  const [showNotTaken, setShowNotTaken] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -260,7 +261,15 @@ export function Ledger({ stats, onSelect }: { stats: Stats | null; onSelect: (id
         </Card>
       ) : (
         <div className="space-y-3">
-          {groupByDayKey(symbols, (s) => s.last_ts).map((g) => (
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input type="checkbox" checked={showNotTaken} onChange={e => setShowNotTaken(e.target.checked)}
+              className="accent-indigo-500" />
+            Show not taken
+          </label>
+          {groupByDayKey(
+            showNotTaken ? symbols : symbols.filter(s => s.current !== "NOT_TAKEN"),
+            (s) => s.last_ts
+          ).map((g) => (
             <div key={g.key} className="space-y-2">
               <div className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
                 {g.label}
