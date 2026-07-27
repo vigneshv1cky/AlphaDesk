@@ -1,0 +1,33 @@
+name: Altavela CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "altavela/**"
+      - "requirements.txt"
+      - ".github/workflows/altavela.yml"
+  pull_request:
+    paths:
+      - "altavela/**"
+      - "requirements.txt"
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: |
+          python -c "
+          from altavela.config import MODEL_MAP, MODEL_PROVIDER
+          from altavela.llm import call_role, wrap_data, LLMError
+          from altavela.ledger.store import init as store_init
+          store_init()
+          print('Altavela imports OK')
+          print(f'Provider: {MODEL_PROVIDER}')
+          "

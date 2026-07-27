@@ -42,3 +42,6 @@ logs/
 
 # Claude Security scan artifacts
 CLAUDE-SECURITY-*/
+terraform/terraform.tfvars
+terraform/.terraform
+terraform/terraform.tfstate*

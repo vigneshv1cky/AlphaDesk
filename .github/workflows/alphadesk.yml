@@ -1,0 +1,73 @@
+name: AlphaDesk CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "alphadesk/**"
+      - "requirements.txt"
+      - ".github/workflows/alphadesk.yml"
+  pull_request:
+    paths:
+      - "alphadesk/**"
+      - "requirements.txt"
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: |
+          python -c "
+          from alphadesk.config import MODEL_MAP, MODEL_PROVIDER, in_universe
+          from alphadesk.llm import call_role, wrap_data, LLMError
+          from alphadesk.ledger.store import init as store_init
+          store_init()
+          print('AlphaDesk imports OK')
+          print(f'Provider: {MODEL_PROVIDER}')
+          "
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: alphadesk/ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "latest"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: alphadesk/ui/pnpm-lock.yaml
+      - run: pnpm install
+      - run: pnpm build
+
+  terraform:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15"
+      - run: |
+          echo 'project_id      = "test"' > terraform.tfvars
+          echo 'admin_username  = "test"' >> terraform.tfvars
+          echo 'admin_password  = "test"' >> terraform.tfvars
+          echo 'alpaca_key      = "test"' >> terraform.tfvars
+          echo 'alpaca_secret   = "test"' >> terraform.tfvars
+          echo 'polygon_key     = "test"' >> terraform.tfvars
+          echo 'ds_api_key      = "test"' >> terraform.tfvars
+      - run: terraform init -backend=false
+      - run: terraform validate

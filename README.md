@@ -156,7 +156,8 @@ The system tracks macro conditions and reacts to dislocations in real time:
 ## Extended-hours execution
 
 - **PRE (4:00–9:30 ET) / AFTER (16:00–20:00 ET)**  --  watcher runs spot-price monitoring for
-  broker-filled positions. Stops/targets enforced.
+  broker-filled positions. Stops/targets enforced. BMO reports are tradeable from 4am PRE;
+  AMC reports from 4pm AFTER.
 - **Macro shocks in extended hours**  --  flagged longs get companion SHORT hedges; macro scout
   books profit positions before the gap.
 - **OPEN (9:30–16:00 ET)**  --  full bar-based monitoring with intraday minute bars.
@@ -268,6 +269,21 @@ LLM_MAX_CONCURRENCY=4         # parallel LLM calls
 MODEL_<ROLE>=...              # override any role's tier, e.g. MODEL_JUDGE=opus
 ```
 
+## GCP Deployment
+
+Terraform config in `terraform/` provisions everything:
+
+```bash
+cd terraform
+cp terraform.tfvars.example terraform.tfvars   # fill in your keys
+terraform init -backend=false
+terraform apply
+```
+
+Creates an e2-small VM (Ubuntu 22.04) with a 20GB persistent disk for the ledger,
+a static IP, and a firewall opening port 8000. A startup script clones the repo,
+installs deps, writes `.env`, and runs the dashboard as a systemd service that
+survives reboots. ~$18/month.
 
 ## Repository layout
 
@@ -329,8 +345,9 @@ Early and **unproven.** The ledger clock is running but the sample is tiny (~28 
 criteria stay dormant until the sample is large enough.
 
 Recent work (2026-07-26): switched to DeepSeek, added macro awareness (FOMC calendar, shock
-detection, hedging), extended-hours monitoring, and redesigned the UI as a terminal-style
-console. The system is ready to accumulate a real sample.
+detection, hedging), extended-hours execution with BMO reports at 4am PRE, clock-aligned
+hourly autorun (04:00–19:00 ET weekdays), and redesigned the UI as a terminal-style console.
+The system is ready to accumulate a real sample.
 
 
 ## Disclaimer
