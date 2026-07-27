@@ -585,6 +585,8 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
     # (not just sorting isolated conviction numbers). One Opus call still
     # worth it: cross-pick awareness catches same-catalyst redundancy,
     # share-class dedup, and slate-level calibration the isolated debates miss.
+    # The Head's take=true/false on each pick is RESPECTED — only the picks
+    # the Head selects are booked (fallback: approved picks only).
     if len(board) >= 1:
         yield _ev("status", msg="Head comparing all opportunities head-to-head…")
         try:
@@ -595,7 +597,7 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
             for row in board:
                 cr = ranking.get(row["symbol"].upper())
                 row["chief_reason"] = cr["reason"] if cr else ""
-                row["take"] = True   # TAKE-ALL mode: every debated pick is booked
+                row["take"] = cr["take"] if cr else False   # respect Head's decision
             board.sort(key=lambda r: order.get(r["symbol"].upper(), 999))
             capped = await loop.run_in_executor(None, team.apply_concentration_cap, board)
             for row in board:
@@ -613,9 +615,9 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
         except LLMError as exc:
             log.warning("Head synthesis failed (%s) — falling back to score sort", exc)
 
-    # fallback: no Head → sort isolated scores
+    # fallback: no Head → take every approved pick
     for row in board:
-        row["take"] = True
+        row["take"] = row["approved"]
         row["chief_reason"] = ""
     board.sort(key=lambda r: (not r["approved"], -abs(r["conviction"] - 50)))
     capped = await loop.run_in_executor(None, team.apply_concentration_cap, board)
