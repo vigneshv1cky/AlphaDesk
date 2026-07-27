@@ -401,9 +401,13 @@ def grade_paths() -> int:
             hi = float(window["High"].astype(float).max())
             lo = float(window["Low"].astype(float).min())
             if row["direction"] == "LONG":     # favorable = up, adverse = down
-                mfe, mae = (hi - entry_price), (lo - entry_price)
+                mfe_hi = max(hi, float(row.get("exit_price") or 0))
+                mae_lo = min(lo, float(row.get("exit_price") or float("inf")))
+                mfe, mae = (mfe_hi - entry_price), (mae_lo - entry_price)
             else:                              # SHORT: favorable = down, adverse = up
-                mfe, mae = (entry_price - lo), (entry_price - hi)
+                mfe_lo = min(lo, float(row.get("exit_price") or float("inf")))
+                mae_hi = max(hi, float(row.get("exit_price") or 0))
+                mfe, mae = (entry_price - mfe_lo), (entry_price - mae_hi)
             store.update_pick(row["id"],
                               mfe_pct=round(mfe / entry_price * 100, 3),
                               mae_pct=round(mae / entry_price * 100, 3))

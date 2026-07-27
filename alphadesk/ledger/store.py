@@ -816,7 +816,7 @@ def picks_for_path(days: int = 20) -> list[dict]:
     and bounded — open ones update each pass, closed ones compute once."""
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT id, ts, symbol, direction, horizon_days, session, entry_price,"
+            "SELECT id, ts, symbol, direction, horizon_days, session, entry_price, exit_price,"
             " low_liquidity, exit_ts, plan_entry, order_type, mfe_pct FROM picks"
             " WHERE arm='TEAM' AND plan_entry IS NOT NULL"
             "   AND ts >= datetime('now', ?)"
