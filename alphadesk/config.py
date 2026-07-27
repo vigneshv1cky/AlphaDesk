@@ -37,7 +37,7 @@ MODEL_MAP: dict[str, str] = {
     "gate": "haiku",           # pre-debate catalyst screen — drop phantom setups before the debate
     "brief": "haiku",          # specialist subagents (technical/news/graph)
     "scout": "sonnet",        # attention desk
-    "researcher": "opus",       # thesis + rebuttal — opus for higher initial quality
+    "researcher": "sonnet",       # thesis + rebuttal
     "critic": "opus",         # adversarial challenge
     "judge": "opus",         # final verdict
     "loner": "opus",            # single-agent control arm
