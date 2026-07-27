@@ -465,17 +465,17 @@ async def _serve() -> None:
                 in_window = (now.weekday() < 5
                              and (now.hour, now.minute) >= (s_h, s_m)
                              and (now.hour, now.minute) < (e_h, e_m))
-                # Align to clock: next run at the next interval boundary after the
-                # window start. A run at 4:17 fires at 5:00, not 5:17. Drift-free.
+                # Align to clock: fire at the CURRENT interval boundary (the last one
+                # that has passed). A run at 4:17 fires the 4:00 slot. Drift-free.
+                # The +1 in the old formula always pointed to the NEXT slot, so
+                # now >= next_slot was never true — the autorun never fired.
                 window_start = now.replace(hour=s_h, minute=s_m, second=0, microsecond=0)
                 mins_since_start = (now - window_start).total_seconds() / 60
-                next_slot = window_start + timedelta(
-                    hours=(int(mins_since_start // (AUTORUN_INTERVAL_HOURS * 60)) + 1)
-                    * AUTORUN_INTERVAL_HOURS)
-                # Guard: fire at the clock-aligned boundary regardless of manual runs.
-                # Only skip if THIS exact slot already ran (restart-safety).
-                if in_window and not running and now >= next_slot:
-                    slot_key = next_slot.strftime("%Y-%m-%dT%H:%M")
+                elapsed = int(mins_since_start) // (AUTORUN_INTERVAL_HOURS * 60)
+                current_slot = window_start + timedelta(
+                    hours=elapsed * AUTORUN_INTERVAL_HOURS)
+                if in_window and not running and now >= current_slot:
+                    slot_key = current_slot.strftime("%Y-%m-%dT%H:%M")
                     lt = store.last_run_time("FIND_TRADES")
                     last_slot = None
                     if lt:
@@ -485,7 +485,7 @@ async def _serve() -> None:
                                                         second=0, microsecond=0)
                         except (ValueError, TypeError):
                             pass
-                    if last_slot is None or last_slot < next_slot:
+                    if last_slot is None or last_slot < current_slot:
                         running = True
                     try:
                         log.info("Auto-run: firing Find Trades")
