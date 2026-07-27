@@ -31,3 +31,24 @@ jobs:
           print('Altavela imports OK')
           print(f'Provider: {MODEL_PROVIDER}')
           "
+
+  deploy:
+    name: Deploy to GCP
+    needs: [backend]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to VM
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.ALTAVELA_VM_IP }}
+          username: vignesh
+          key: ${{ secrets.GCP_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/alphadesk
+            sudo git pull origin main
+            sudo pip install -r requirements.txt
+            sudo systemctl restart altavela
+            echo "Deployed — altavela restarted"
+            sudo journalctl -u altavela --no-pager -n 3
