@@ -62,6 +62,7 @@ export function PickSheet({
                   <span className="text-zinc-600"> · {pick.arm === "LONER" ? "Loner" : "Team"}</span>
                   {pick.edge && <span className="text-zinc-600"> · {plainEdge(pick.edge)}</span>}
                   <span className="text-zinc-600"> · {etDateTime(pick.ts)} ET</span>
+                  <span className="text-zinc-600"> · {pick.session === "PRE" ? "pre-market" : pick.session === "AFTER" ? "after-hours" : pick.session === "OPEN" ? "regular hours" : "overnight"}</span>
                 </>
               )}
             </div>
@@ -92,7 +93,19 @@ export function PickSheet({
                   <span className="text-zinc-600"> · until {exitDate(pick.ts, pick.session, pick.horizon_days)}</span>
                 </div>
                 <div className="text-zinc-500">
-                  entry {pick.entry_price ? `$${pick.entry_price}` : "next open"} · confidence{" "}
+                  entry{" "}
+                  {pick.entry_price ? (
+                    <span>
+                      ${pick.entry_price}
+                      {pick.session !== "OPEN" ? (
+                        <span className="text-zinc-600"> ({pick.session === "PRE" ? "pre-market" : pick.session === "AFTER" ? "after-hours" : "overnight"})</span>
+                      ) : null}
+                      {pick.session === "CLOSED" ? <span> · fills at next open</span> : null}
+                    </span>
+                  ) : (
+                    "next open"
+                  )}{" "}
+                  · confidence{" "}
                   {Math.round(pick.adjusted_score ?? pick.score)}/100{" "}
                   {pick.verdict && <span>· {plainVerdict(pick.verdict)}</span>}{" "}
                   {pick.approved ? (

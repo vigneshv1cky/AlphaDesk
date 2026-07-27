@@ -312,7 +312,7 @@ export function fmtAlpha(a: number | null): string {
 
 export function exitDate(ts: string, session: string, horizonDays: number): string {
   const d = new Date(ts)
-  if (session !== "OPEN") d.setDate(d.getDate() + 1)
+  if (session === "CLOSED") d.setDate(d.getDate() + 1)   // only overnight picks wait for next open
   while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1)
   let remaining = horizonDays
   while (remaining > 0) {

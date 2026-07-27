@@ -250,9 +250,12 @@ def api_live():
         # at the open). Until then it's PENDING — no P&L, no vs-SPY (you're not in it),
         # regardless of market/limit. Filled → measure everything from the real entry.
         filled = p.get("entry_price") is not None
+        # entry_ts: if already filled, use the actual decision time (PRE/AFTER picks
+        # fill immediately now); otherwise show when the Model-A fill will happen.
+        fill_ts = p["ts"] if filled else (fill.isoformat() if fill else p["ts"])
         row = dict(p, current=cur, pnl_pct=None, progress=None,
                    status=("pending" if not filled else "no quote"),
-                   entry_ts=(fill.isoformat() if fill else p["ts"]),
+                   entry_ts=fill_ts,
                    alpha_so_far=None)
         if filled:
             entry = p["entry_price"]
