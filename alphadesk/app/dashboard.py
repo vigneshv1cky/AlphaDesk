@@ -309,14 +309,12 @@ def _is_not_taken(exit_ts: str | None, exit_reason: str | None, fill) -> bool:
 def api_sessions(days: int = 14):
     """Picks grouped by the market window they were DECIDED in — day market
     (regular hours), extended market (pre + after-hours), night market
-    (overnight/weekend) — with per-window aggregates. Only resolved outcomes:
-    graded, exited, or not-taken. Open positions belong in Live, not here."""
+    (overnight/weekend) — with per-window aggregates. Only exited picks:
+    target hit or stopped out."""
     GROUP = {"OPEN": "day", "PRE": "extended", "AFTER": "extended", "CLOSED": "night"}
     out: dict[str, list] = {"day": [], "extended": [], "night": []}
     for r in store.recent_team_picks(days=days):
-        # Track record: only resolved outcomes (graded, exited, or not-taken).
-        # Open positions are tracked in Live, not in the record.
-        if r.get("graded_at") or r.get("exit_ts") or not r.get("taken"):
+        if r.get("exit_ts"):   # only exited picks: target hit or stopped out
             out.setdefault(GROUP.get(r.get("session") or "", "night"), []).append(r)
     agg = {}
     for g, rows in out.items():
