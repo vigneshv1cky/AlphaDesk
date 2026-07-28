@@ -462,6 +462,23 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
     picks, gate_drops = await gate.screen_picks(picks, candidates, loop)
     for d in gate_drops:
         yield _ev("gate", symbol=d["symbol"], reason=d["reason"])
+
+    # Liquidity gate (PRE/AFTER only): drop picks where Alpaca reports ZERO trades
+    # in the current extended session. Can't fill → don't waste a debate.
+    untradeable = []
+    tradeable = []
+    cur_sess = session()
+    for p in picks:
+        ctx = window.get(p["symbol"], {}).get("price") or {}
+        if cur_sess in ("PRE", "AFTER") and not ctx.get("last_trade_ts"):
+            untradeable.append(p)
+        else:
+            tradeable.append(p)
+    for d in untradeable:
+        yield _ev("gate", symbol=d["symbol"],
+                  reason="no trades in this extended session — can't fill, waiting for open")
+    picks = tradeable
+
     if not picks:
         await loop.run_in_executor(None, store.add_run, "FIND_TRADES", [])
         yield _ev("status", msg="All picks gated out — no verifiable catalyst this scan.")

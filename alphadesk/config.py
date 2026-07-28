@@ -202,6 +202,10 @@ ENTRY_GAP_SKIP_PCT = float(os.environ.get("ENTRY_GAP_SKIP_PCT", "2.0"))
 # this × risk (stop→entry). 1.0 = reward >= risk. Rejects sub-1.0 plans so losses
 # can't systematically outweigh wins even at 50% win rate.
 MIN_RISK_REWARD_RATIO = float(os.environ.get("MIN_RISK_REWARD_RATIO", "1.5"))
+# Minimum stop distance from entry: stops inside normal daily noise get hit by
+# random volatility before the thesis plays out. 2% floor keeps a 1d swing alive
+# past the first few minutes of open. Bump for volatile names.
+MIN_STOP_DISTANCE_PCT = float(os.environ.get("MIN_STOP_DISTANCE_PCT", "2.0"))
 # Scout coverage: how many candidates reach the scout (and get a price-context fetch). The
 # window is now ranked by MATERIALITY (earnings reaction size, else news intensity), NOT
 # market cap — so the biggest movers are seen first instead of being truncated behind

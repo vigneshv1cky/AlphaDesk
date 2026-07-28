@@ -33,10 +33,10 @@ _SYSTEM = (
     "session move — not just a few basis points. The reward (target→entry) must "
     "be at least 1.5× the risk (entry→stop). Err toward more ambitious targets: "
     "tight targets leave money on the table when the move continues past them.\n"
-    "  • stop — the invalidation level. Keep it tight: the plan MUST have reward "
-    "at least 1.5× risk (rejected otherwise). A tight stop paired with a wide "
-    "target gives the best risk/reward. Place it just beyond normal noise for a "
-    "single-day hold.\n"
+    "  • stop — the invalidation level. Keep it tight but OUTSIDE normal daily "
+    "noise: the stop must be at least 2% from entry (checked by code rails). "
+    "A stop inside 2% gets rejected — it's noise, not invalidation. Pair a "
+    "2%+ stop with a 3%+ target for 1.5× R/R.\n"
     "  • note — ONE plain-English line telling a trader exactly what to do.\n"
     "COHERENCE (required): for LONG, stop < entry < target. For SHORT, "
     "target < entry < stop. Entry MUST equal the current price.\n"
@@ -74,6 +74,9 @@ def _coherent(direction: str, entry: float, target: float, stop: float,
     risk = abs(stop - entry) / entry
     if risk > 0 and reward / risk < MIN_RISK_REWARD_RATIO:
         return False  # reward smaller than risk → negative expected value
+    from alphadesk.config import MIN_STOP_DISTANCE_PCT
+    if risk < MIN_STOP_DISTANCE_PCT / 100.0:
+        return False  # stop too tight — normal noise triggers it before the thesis plays out
     return True
 
 
