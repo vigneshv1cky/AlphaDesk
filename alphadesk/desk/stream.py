@@ -385,7 +385,7 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
             last = await loop.run_in_executor(None, store.last_debate, su)
             # Noise stop-out check: if exited via stop within 60 min of fill,
             # it was opening volatility, not thesis failure — allow re-pick.
-            if (last and last.get("exit_reason", "").startswith("stopped out")
+            if (last and (last.get("exit_reason") or "").startswith("stopped out")
                     and last.get("exit_ts") and last.get("entry_price")
                     and last.get("session") in ("OPEN", "PRE", "AFTER")):
                 try:
@@ -632,6 +632,11 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
                 cr = ranking.get(row["symbol"].upper())
                 row["chief_reason"] = cr["reason"] if cr else ""
                 row["take"] = cr["take"] if cr else False   # respect Head's decision
+            # Safety rail: if Head says zero, take at least the top-ranked pick.
+            # An over-cautious Head that rejects everything is worse than one bad trade.
+            if not any(r.get("take") for r in board):
+                board[0]["take"] = True
+                board[0]["chief_reason"] = (board[0].get("chief_reason") or "") + " (forced: Head picked zero)"
             board.sort(key=lambda r: order.get(r["symbol"].upper(), 999))
             capped = await loop.run_in_executor(None, team.apply_concentration_cap, board)
             for row in board:
@@ -653,6 +658,10 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
     for row in board:
         row["take"] = row["approved"]
         row["chief_reason"] = ""
+    # Same safety rail as the Head path
+    if not any(r.get("take") for r in board) and board:
+        board[0]["take"] = True
+        board[0]["chief_reason"] = "forced: Head picked zero"
     board.sort(key=lambda r: (not r["approved"], -abs(r["conviction"] - 50)))
     capped = await loop.run_in_executor(None, team.apply_concentration_cap, board)
     for row in board:
