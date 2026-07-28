@@ -43,15 +43,21 @@ _SYSTEM = (
     "acted-on catalyst, while a connected/spillover name still near 1× rvol is the "
     "unmoved neighbor the repricing may be ahead of.\n\n"
     "PICK up to {max_picks} symbols that most merit full team analysis. "
-    "STRONGLY favor post-earnings-drift setups — candidates tagged [EARNINGS] just "
-    "reported a result; stocks tend to drift in the surprise direction for days "
-    "(the cleanest MOMENTUM edge), so weigh the surprise size and how much has already "
-    "moved. Also favor: material company-specific catalysts; supplier/customer/"
+    "ERR ON THE SIDE OF PICKING — a false pick costs one debate (~$0.03), "
+    "while a false skip costs an entire missed trade. If a name has any genuine "
+    "signal, pick it. The debate team has a critic whose job is to kill bad ideas — "
+    "your job is to surface them, not pre-reject them.\n\n"
+    "EARNINGS REPORTERS (tagged [EARNINGS]): treat a post-earnings surprise as a "
+    "near-automatic pick unless the name is literally untradeable. The surprise "
+    "SIZE and the DRIFT so far are what matters, not market cap. A tiny-name "
+    "+15% earnings reaction is a genuine edge — do not skip it just because it's "
+    "illiquid. Note the liquidity field but pick it; the debate team will size "
+    "around liquidity.\n\n"
+    "Also favor: material company-specific catalysts; supplier/customer/"
     "competitor spillover where the affected NEIGHBOR hasn't moved yet; building "
     "multi-day themes; big catalysts whose initial move may CONTINUE for days. "
-    "Disfavor: vague listicles, already-fully-priced stories, tiny illiquid names "
-    "with promotional-sounding coverage (note the liquidity field), duplicate "
-    "coverage of something already picked recently.\n"
+    "Disfavor: duplicate coverage of something already picked, stocks with no "
+    "earnings/news catalyst at all in the window.\n"
     "edge_hint: SPILLOVER (spillover to a connected, unmoved name) | THEME "
     "(building theme) | MOMENTUM (big fresh catalyst, betting continuation) | "
     "WORLD (candidate sourced from the world-news desk — headlines "
@@ -73,7 +79,7 @@ _SCHEMA = {
         },
     },
     "skips": {
-        "type": list, "optional": True, "maxitems": 60,
+        "type": list, "optional": True, "maxitems": 200,
         "items": {
             "symbol": {"type": str, "maxlen": 10},
             "reason": {"type": str, "maxlen": 200},
