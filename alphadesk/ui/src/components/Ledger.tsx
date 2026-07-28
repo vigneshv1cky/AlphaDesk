@@ -102,33 +102,17 @@ function Outcome({ e }: { e: TimelineEvent }) {
   }
   if (e.state === "graded" && e.alpha_net != null) {
     return (
-      <span className="inline-flex flex-col items-end leading-tight">
-        <span className={`font-mono text-sm font-semibold tabular-nums ${e.alpha_net > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
-          {fmtAlpha(e.alpha_net)} <span className="text-[11px] font-normal text-muted-foreground">vs S&P</span>
-        </span>
-        {e.alpha_adj != null && (
-          <InfoTip
-            tip="Beta-adjusted and borrow-aware alpha — strips market-beta exposure (and short-borrow cost) out of the vs-S&P number. The honest read."
-            className={`cursor-help font-mono text-[10px] tabular-nums ${e.alpha_adj > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}
-          >
-            {fmtAlpha(e.alpha_adj)} β-adj
-          </InfoTip>
-        )}
+      <span className={`font-mono text-sm font-semibold tabular-nums ${e.alpha_net > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
+        {fmtAlpha(e.alpha_net)}
       </span>
     )
   }
   if (e.state === "exited") {
-    // The header badge ("Exited · stopped out") and the "Exited: …" reason already
-    // say WHY it closed — the row just needs the realized number, colored win/loss.
-    const ex = e.exit_alpha ?? e.exit_return_pct
-    const k = exitKind(e.exit_reason, ex)
-    if (ex == null) return <span className={`text-xs font-semibold ${toneText(k.tone)}`}>Exited</span>
+    const ret = e.exit_return_pct
+    if (ret == null) return <span className="text-xs font-semibold text-muted-foreground">Exited</span>
     return (
-      <span className={`font-mono text-sm font-semibold tabular-nums ${ex > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
-        {fmtAlpha(ex)}{" "}
-        <span className="text-[11px] font-normal text-muted-foreground">
-          {e.exit_alpha != null ? "vs S&P" : "ret"}
-        </span>
+      <span className={`font-mono text-sm font-semibold tabular-nums ${ret > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
+        {ret >= 0 ? "+" : ""}{ret.toFixed(2)}%
       </span>
     )
   }

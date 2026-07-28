@@ -693,7 +693,8 @@ def last_debate(symbol: str) -> dict | None:
     later run can tell 'same story' from a genuinely new catalyst."""
     with _connect() as conn:
         row = conn.execute(
-            "SELECT ts, triage_reason, thesis FROM picks WHERE arm='TEAM' AND symbol=?"
+            "SELECT ts, triage_reason, thesis, exit_reason, exit_ts, entry_price, session"
+            " FROM picks WHERE arm='TEAM' AND symbol=?"
             " ORDER BY id DESC LIMIT 1", (symbol.upper(),),
         ).fetchone()
     return dict(row) if row else None

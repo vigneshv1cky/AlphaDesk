@@ -370,6 +370,8 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
     #    adverse news there triggers an EXIT, so they're covered).
     #  • names debated within the cooldown → skip UNLESS a materiality check says a
     #    genuinely NEW catalyst arrived since that debate (same story != new event).
+    #  • noise stop-out exception: if the last pick was stopped out within 60 min of
+    #    its fill (opening volatility, not thesis invalidation), allow immediate re-entry.
     held = {p["symbol"].upper() for p in open_positions}
     cooling = await loop.run_in_executor(None, store.symbols_debated_since, REPICK_COOLDOWN_HOURS)
     dropped: list[str] = []
@@ -381,6 +383,21 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
             continue
         if su in cooling:
             last = await loop.run_in_executor(None, store.last_debate, su)
+            # Noise stop-out check: if exited via stop within 60 min of fill,
+            # it was opening volatility, not thesis failure — allow re-pick.
+            if (last and last.get("exit_reason", "").startswith("stopped out")
+                    and last.get("exit_ts") and last.get("entry_price")
+                    and last.get("session") in ("OPEN", "PRE", "AFTER")):
+                try:
+                    fill_dt = datetime.fromisoformat(last["ts"]).astimezone(timezone.utc)
+                    exit_dt = datetime.fromisoformat(last["exit_ts"]).astimezone(timezone.utc)
+                    hold_min = (exit_dt - fill_dt).total_seconds() / 60
+                    if 0 < hold_min < 60:
+                        yield _ev("status", msg=f"{s}: stopped out in {int(hold_min)}m — re-examining "
+                                                "(opening noise, not thesis failure)")
+                        continue
+                except (ValueError, TypeError):
+                    pass
             ts = (last or {}).get("ts") or ""
             new_arts = [a for a in candidates[s] if str(a.get("published_at", "")) > ts]
             if new_arts:
