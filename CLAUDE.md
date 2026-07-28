@@ -451,3 +451,4 @@ PAPER_TRADING=0
 - VM journal times are UTC, not ET — always check.
 - User prefers "regular/after-hours/pre-market/overnight" labels, not session codes.
 - User wants Track Record to show only exited picks — not open, not graded-only, not not-taken.
+- 2026-07-28: **Altavela UI is single-column (2026-07-28).** Entire page stacks vertically. Deploy with `pnpm deploy` from `altavela/ui/` — it tars the build over SSH to the VM and restarts the service.
