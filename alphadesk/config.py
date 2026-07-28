@@ -147,7 +147,7 @@ KIMI_WEB_SEARCH = os.environ.get("KIMI_WEB_SEARCH", "1") not in ("0", "", "false
 # Hard caps — resource physics, not judgment
 # ---------------------------------------------------------------------------
 
-MAX_PICKS_PER_WINDOW = 5
+MAX_PICKS_PER_WINDOW = int(os.environ.get("MAX_PICKS_PER_WINDOW", "5"))
 MAX_DEBATES_PER_DAY = 40
 # env-overridable for small hosts (e.g. 1GB GCP e2-micro → set 1: debates queue)
 MAX_CONCURRENT_WORKFLOWS = int(os.environ.get("MAX_CONCURRENT_WORKFLOWS", "4"))
