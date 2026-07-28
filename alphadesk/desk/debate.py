@@ -130,7 +130,13 @@ async def deliberate(sym: str, pick: dict, briefs: list[dict], price_ctx: dict |
         # (approved=True, revised_score<50) was logged as an override that never happened.
         "arbiter_overrode": int(bool(verdict["approved"]) and final_dir != (
             "LONG" if float(rebuttal["revised_score"]) > 50 else "SHORT")),
-        "entry_price": (price_ctx or {}).get("last_price") if sess != "CLOSED" else None,
+        "entry_price": (price_ctx or {}).get("last_price") if sess == "OPEN" else (
+            # PRE/AFTER: only fill if Alpaca confirms actual trading activity in the
+            # current extended session. No trade → can't fill → wait for the open.
+            (price_ctx or {}).get("last_price")
+            if sess != "CLOSED" and (price_ctx or {}).get("last_trade_ts")
+            else None
+        ),
         "spy_price": (spy_ctx or {}).get("last_price"),
         "plan_entry": (trade or {}).get("entry"),
         "plan_target": (trade or {}).get("target"),

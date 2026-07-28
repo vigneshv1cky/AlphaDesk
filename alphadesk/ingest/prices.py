@@ -44,12 +44,11 @@ def _alpaca_data_client():
     return _alpaca_client
 
 
-def _live_last_trade(symbol: str) -> Optional[float]:
-    """Real-time last trade for ONE symbol from Alpaca, or None. Deliberately has
-    NO yfinance fallback (get_context owns that) so it can never recurse. This is
-    the fix for the stale-close bug: the morning after an earnings gap, yfinance's
-    latest *daily* bar is yesterday's pre-gap close, so anchoring plans/marks to it
-    books the overnight gap as if it were still-capturable drift."""
+def _live_last_trade(symbol: str) -> Optional[tuple[float, object]]:
+    """Real-time last trade for ONE symbol from Alpaca → (price, timestamp) or None.
+    Deliberately has NO yfinance fallback — get_context owns that. The timestamp
+    lets the caller gate PRE/AFTER fills: no trade in the current extended session
+    means the stock can't actually fill, so treat it like a CLOSED pick."""
     client = _alpaca_data_client()
     if client is None:
         return None
@@ -58,7 +57,9 @@ def _live_last_trade(symbol: str) -> Optional[float]:
         trades = client.get_stock_latest_trade(
             StockLatestTradeRequest(symbol_or_symbols=[symbol.upper()]))
         t = trades.get(symbol.upper())
-        return round(float(t.price), 4) if t and t.price else None
+        if t and t.price:
+            return (round(float(t.price), 4), getattr(t, "timestamp", None))
+        return None
     except Exception as exc:
         log.debug("live last-trade failed %s: %s", symbol, exc)
         return None
@@ -86,8 +87,9 @@ def get_context(symbol: str) -> Optional[dict]:
         # compare it against the last COMPLETED session (skip a partial today bar)
         # so change_today is the true move, not 0%. No live price → old behaviour.
         rt = _live_last_trade(sym)
-        if rt:
-            last = rt
+        rt_price, rt_ts = (rt[0], rt[1]) if rt else (None, None)
+        if rt_price:
+            last = rt_price
             prev = daily_prev if latest_is_today else daily_last
         else:
             last = daily_last
@@ -120,6 +122,7 @@ def get_context(symbol: str) -> Optional[dict]:
             "rvol": rvol,          # latest-session volume ÷ its 20-session norm
             "low_liquidity": avg_dollar_vol < LOW_LIQUIDITY_DOLLAR_VOL,
             "closes_10d": [round(float(c), 2) for c in closes.tail(10)],
+            "last_trade_ts": rt_ts,  # None if no real-time Alpaca trade (stale yfinance only)
         }
         with _cache_lock:
             _cache[sym] = (time.time(), ctx)
