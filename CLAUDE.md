@@ -399,3 +399,55 @@ AUTORUN_END_ET=19:00         # window end (default 16:00; 19:00 adds the AMC-ear
   daily close the morning after an earnings gap; the forward grade (`alpha_net`) was never
   affected (it enters at the real next-session open). Highest-value next step: let the
   current honestly-priced cohort grade to a real read before changing anything.
+
+## Current state (2026-07-27 — Jul 27)
+
+### Deployment
+- **AlphaDesk**: GCP VM `alphadesk` at 34.182.195.6:8000, project `alphadesk-research`
+- **Altavela**: GCP VM `altavela` at 35.221.39.188:8001, project `altavela-research`
+- Both VMs: UTC timezone, ET = UTC-4. Journal timestamps are UTC. Autoruns, dashboard, sessions all use ET.
+- `MODEL_PROVIDER=deepseek`, DEEPSEEK_MODEL_SONNET=deepseek-v4-flash, DEEPSEEK_MODEL_OPUS=deepseek-v4-pro
+- No CI/CD — deploy via `gcloud compute scp` + `systemctl restart`
+
+### Active config on VM (`/opt/alphadesk/.env`)
+```
+CONCENTRATION_MAX_PER_CLUSTER=999   (disabled)
+SCOUT_MAX_CANDIDATES=999            (all reporters)
+LEAN_SCOUT_MAX_CANDIDATES=999       (no lean cap)
+MAX_PICKS_PER_WINDOW=999            (env configurable, was hardcoded 5)
+LEAN_MAX_DEBATES=999                (no debate cap)
+AUTORUN_START_ET=04:00
+AUTORUN_END_ET=19:00
+AUTORUN_INTERVAL_HOURS=1
+WATCH_INTERVAL_S=60
+WORLD_MAX_CATEGORIES=0
+PAPER_TRADING=0
+```
+
+### Bugs fixed today (Jul 27)
+1. **Concentration cap `=0` blocked every pick** — `apply_concentration_cap` treated `0 >= 0` as "cap exceeded." Fixed: `<= 0` disables cap.
+2. **Autorun never fired** — `next_slot` formula had `+1` that always pointed to next slot, `now >= next_slot` never true. Fixed: removed `+1` to compute current slot. Also fixed indentation bug where `try/finally` was outside `last_slot` guard (would re-fire every 60s).
+3. **PRE/AFTER picks waited for 9:30 AM** — `debate.py` only stamped `entry_price` for `sess == "OPEN"`. Fixed: `sess != "CLOSED"` — PRE/AFTER fills immediately.
+4. **`live_picks()` showed `taken=0` picks** — confusing dashboard with "stopped out" picks that weren't real. Fixed: added `taken=1` to SQL.
+5. **MFE understated real peaks** — used daily High only, missed intraday spikes. Fixed: `max(daily_high, exit_price)` for LONG, `min(daily_low, exit_price)` for SHORT.
+
+### Improvements deployed today
+- **Risk/reward rail**: `MIN_RISK_REWARD_RATIO=1.5` — plan rejects if reward < 1.5× risk
+- **Researcher prompt**: 4-step framework (catalyst → priced-in → direction → mandatory self-check)
+- **Scout prompt**: "Err on side of picking" — earnings reporters are near-automatic picks
+- **Head owns take decisions** — `row["take"] = cr["take"]`, respected
+- **UI**: Sessions tab removed (merged into History), exit alerts in Live, briefs collapsible, no repetition in PickSheet, MFE/MAE shown
+- **All caps removed**: scout sees every reporter, picks unlimited, debates unlimited
+
+### Known / pending
+- Graded sample still tiny (~20-30), system unproven
+- No Alpaca paper trading (PAPER_TRADING=0)
+- No Altavela fixes ported yet
+- Entry_ts on CLOSED picks shows decision time not fill time (fixed for CLOSED only)
+- Scout may still miss posts based on judgment (2 true misses today)
+
+### Memory log
+- 2026-07-27: User wants cross-session memory. Tell me what to add and I'll put it here.
+- VM journal times are UTC, not ET — always check.
+- User prefers "regular/after-hours/pre-market/overnight" labels, not session codes.
+- User wants Track Record to show only exited picks — not open, not graded-only, not not-taken.
