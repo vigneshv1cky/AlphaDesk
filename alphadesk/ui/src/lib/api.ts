@@ -158,6 +158,8 @@ export interface Stats {
     avg_alpha_adj: number | null // beta-adjusted + borrow-aware mean alpha
     effective_graded: number | null // graded, cluster-deduped (correlated picks count once)
     wins: number | null
+    total_return_pct: number | null // sum of realized returns across all exited picks
+    exited: number | null
   }
   by: Record<
     string,

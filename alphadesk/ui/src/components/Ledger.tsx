@@ -21,8 +21,8 @@ function PerfStrip({ stats }: { stats: Stats | null }) {
   const graded = stats?.total.graded ?? 0
   const wins = stats?.total.wins ?? 0
   const winRate = graded > 0 ? Math.round((wins / graded) * 100) : null
-  const avg = stats?.total.avg_alpha_net ?? null
-  const adj = stats?.total.avg_alpha_adj ?? null
+  const pnl = stats?.total.total_return_pct ?? null
+  const exited = stats?.total.exited ?? 0
   const eff = stats?.total.effective_graded ?? null
   const scoredSub =
     (winRate != null ? `${winRate}% beat S&P` : "grading forward") +
@@ -32,10 +32,10 @@ function PerfStrip({ stats }: { stats: Stats | null }) {
       <Stat label="Ideas logged" value={String(stats?.total.picks ?? 0)} />
       <Stat label="Scored" value={String(graded)} sub={scoredSub} />
       <Stat
-        label="Avg vs S&P"
-        value={avg != null ? fmtAlpha(avg) : "—"}
-        tone={avg}
-        sub={adj != null ? `${fmtAlpha(adj)} β-adj` : undefined}
+        label="Profit & Loss"
+        value={pnl != null ? `${pnl >= 0 ? "+" : ""}${pnl}%` : "—"}
+        tone={pnl}
+        sub={`${exited} closed`}
       />
     </div>
   )

@@ -499,7 +499,9 @@ def stats() -> dict:
             "SELECT count(*) AS picks, count(alpha_net) AS graded,"
             " round(avg(alpha_net), 3) AS avg_alpha_net,"
             " round(avg(alpha_adj), 3) AS avg_alpha_adj,"   # beta-adjusted + borrow-aware (honest)
-            " sum(CASE WHEN alpha_net > 0 THEN 1 ELSE 0 END) AS wins"
+            " sum(CASE WHEN alpha_net > 0 THEN 1 ELSE 0 END) AS wins,"
+            " round(sum(exit_return_pct), 2) AS total_return_pct,"
+            " count(exit_return_pct) AS exited"
             " FROM picks"
         ).fetchone())
         # Effective (cluster-deduped) graded sample: correlated picks (same sector+direction+

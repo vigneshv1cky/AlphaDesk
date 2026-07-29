@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import {
   api,
-  fmtAlpha,
   type EarningsRow,
   type Stats,
   type TokenRow,
@@ -46,7 +45,7 @@ export default function App() {
   const graded = stats?.total.graded ?? 0
   const winRate =
     graded > 0 && stats?.total.wins != null ? Math.round((stats.total.wins / graded) * 100) : null
-  const avg = stats?.total.avg_alpha_net ?? null
+  const pnl = stats?.total.total_return_pct ?? null
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
@@ -76,7 +75,7 @@ export default function App() {
           <div className="ml-auto flex items-center gap-5">
             <Kpi label="Ideas" value={String(stats?.total.picks ?? "—")} />
             <Kpi label="Beat S&P" value={winRate != null ? `${winRate}%` : "—"} />
-            <Kpi label="Avg vs S&P" value={avg != null ? fmtAlpha(avg) : "—"} tone={avg} />
+            <Kpi label="Profit & Loss" value={pnl != null ? `${pnl >= 0 ? "+" : ""}${pnl}%` : "—"} tone={pnl} />
             <Kpi label="AI today" value={burn > 0 ? `${Math.round(burn / 1000)}k` : "0"} />
             <button
               onClick={toggleTheme}
