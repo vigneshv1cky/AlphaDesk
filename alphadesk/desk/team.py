@@ -79,13 +79,18 @@ _THESIS_SCHEMA = {
 
 _SKEPTIC_SYSTEM = (
     "You are the Critic. " + _PREDICTIVE_FRAME + "\n"
-    "Your job is to find the strongest reasons this thesis FAILS. Attack the "
-    "mechanism, the timing, the already-priced risk, crowding, upcoming events "
-    "inside the horizon, data quality, and liquidity. Every concern must cite "
-    "specific evidence from the briefs — no generic worries. Exactly 3 concerns, "
-    "strongest first.\n"
+    "Your job is to stress-test the thesis: find genuine weaknesses backed by "
+    "CONCRETE evidence from the briefs. Do NOT invent speculative worries or "
+    "generic objections — every concern must cite a specific fact, number, or "
+    "event from the evidence. If you find no concrete counter-evidence, default "
+    "to SUPPORT. The goal is to catch real blind spots, not to attack for its "
+    "own sake.\n"
+    "At most 2 concerns, strongest first. Raise fewer (even zero) if the thesis "
+    "is well-supported and nothing specific contradicts it. Quality over quantity.\n"
     "You have the POWER TO REVERSE THE CALL, not just poke holes — set stance:\n"
-    "  • SUPPORT — the direction is right; your concerns are risks to size around.\n"
+    "  • SUPPORT — the direction is right and no concrete evidence contradicts it; "
+    "your concerns (if any) are risks to size around. This is the DEFAULT — use it "
+    "unless you have specific evidence for FLIP or STAND_ASIDE.\n"
     "  • FLIP — the evidence points the OTHER way. Set counter_direction to the "
     "opposite side and, in `counter`, make the affirmative case for it. The "
     "classic case: a momentum/post-earnings LONG into a NEGATIVE price reaction — "
@@ -102,7 +107,7 @@ _SKEPTIC_SYSTEM = (
 
 _SKEPTIC_SCHEMA = {
     "concerns": {
-        "type": list, "maxitems": 3,
+        "type": list, "maxitems": 2,
         "items": {
             "claim": {"type": str, "maxlen": 300},
             "evidence": {"type": str, "maxlen": 300},
@@ -299,68 +304,6 @@ def researcher_reply(symbol: str, thesis: dict, concerns: list[dict],
                      decision_id=decision_id)
 
 
-_CHIEF_SYSTEM = (
-    "You are the Chief Strategist of a trading research desk. Your analysts have "
-    "each INDEPENDENTLY debated one opportunity and produced a call. Do NOT "
-    "re-analyze them — COMPARE them head-to-head and decide which are genuinely "
-    "the best to commit capital to right now.\n"
-    "Rules for comparison:\n"
-    "  • Conviction scores came from separate debates and are NOT directly "
-    "comparable — re-judge on one common standard.\n"
-    "  • Evidence QUALITY beats the raw number: a hard catalyst (confirmed "
-    "filing, earnings, signed policy) outranks a single-source rumor even at a "
-    "similar score.\n"
-    "  • REDUNDANCY/CORRELATION: if several ideas are effectively the same bet "
-    "(same sector, same driver, same direction), do NOT stack them — keep only "
-    "the best expression.\n"
-    "  • SHARE CLASSES: two tickers of the SAME issuer (e.g. GOOG/GOOGL, or any "
-    "dual/triple-class A/B/C listing) are ONE company and ONE bet — NEVER take "
-    "more than one. Keep the single most-liquid/tradable class (take=true) and "
-    "mark the other class(es) take=false so the desk never double-books one name.\n"
-    "  • A weak slate means take FEWER — but unless every idea is genuinely "
-    "untradeable, take at LEAST the single best. A perfect scout should surface "
-    "at least one actionable setup; an empty desk means the Head is too strict. "
-    "Err on granting take=true for borderline cases; the position watcher protects "
-    "the downside with tight stops, so the cost of a bad take is bounded.\n"
-    "Rank ALL ideas best-to-worst. Mark take=true ONLY for the ones you'd "
-    "actually put on. Give each a one-line COMPARATIVE reason (why it ranks "
-    "here versus the others).\n"
-    'Return ONLY JSON: {"ranked": [{"symbol": "<TICKER>", "take": true|false, '
-    '"reason": "..."}], "summary": "<your read of the whole slate, 2-3 sentences>"}'
-)
-
-_CHIEF_SCHEMA = {
-    "ranked": {
-        "type": list, "maxitems": 12,
-        "items": {
-            "symbol": {"type": str, "maxlen": 10},
-            "take": {"type": bool},
-            "reason": {"type": str, "maxlen": 300},
-        },
-    },
-    "summary": {"type": str, "maxlen": 800},
-}
-
-
-def head_ranking(opportunities: list[dict], decision_id: str | None) -> dict:
-    """Head-to-head comparison across all debated ideas → ranked selection.
-
-    `opportunities`: board rows with symbol, direction, horizon_days, edge,
-    conviction, confidence, verdict, summary (the judge's take).
-    """
-    lines = []
-    for o in opportunities:
-        lines.append(json.dumps({
-            "symbol": o["symbol"], "direction": o["direction"],
-            "horizon_days": o["horizon_days"], "edge": o.get("edge"),
-            "conviction": o.get("conviction"), "confidence": o.get("confidence"),
-            "verdict": o.get("verdict"), "committee_take": o.get("approved"),
-            "note": (o.get("summary") or "")[:300],
-        }))
-    user = "Debated opportunities to compare:\n" + wrap_data("ideas", "\n".join(lines))
-    return call_role("head", _CHIEF_SYSTEM, user, schema=_CHIEF_SCHEMA,
-                     decision_id=decision_id)
-
 
 def judge_verdict(symbol: str, thesis: dict, concerns: list[dict], counter: dict,
                     rebuttal: dict, fact_flags: list[str],
@@ -387,37 +330,6 @@ def judge_verdict(symbol: str, thesis: dict, concerns: list[dict], counter: dict
                      decision_id=decision_id)
 
 
-def apply_concentration_cap(board: list[dict]) -> list[dict]:
-    """Tag every pick with its correlation CLUSTER (sector|direction) and cap correlated
-    TAKEs at CONCENTRATION_MAX_PER_CLUSTER per cluster per day. Excess correlated takes are
-    un-taken (row['take']=False) — still recorded and graded for direction (anti-
-    survivorship), just NOT booked as a live position. Fixes concentrated real risk (5
-    same-sector same-direction names on one driver = 5x the intended exposure) AND the
-    ledger counting one clustered bet as many independent wins (the cluster tag lets stats
-    dedup to an effective sample). Board must arrive in Head-rank order (best first) so the
-    cap keeps the STRONGEST of a cluster. Returns the rows it capped. Pure-ish code (a
-    cached sector lookup); the desk's judgment already ran — this is a risk rail."""
-    from alphadesk.config import CONCENTRATION_MAX_PER_CLUSTER
-    from alphadesk.ingest import prices
-    from alphadesk.ledger import store
-    if CONCENTRATION_MAX_PER_CLUSTER <= 0:
-        return []   # cap disabled — 0 or negative means no limit
-    counts = store.taken_cluster_counts_today()   # what earlier runs already booked today
-    capped: list[dict] = []
-    for row in board:
-        sector = (prices.get_fundamentals(row["symbol"]) or {}).get("sector")
-        cluster = f"{sector}|{row['direction']}" if sector else None
-        row["sector"], row["cluster"] = sector, cluster
-        if not (row.get("take") and cluster):
-            continue                          # not a take, or no sector → can't cluster → don't cap
-        if counts.get(cluster, 0) >= CONCENTRATION_MAX_PER_CLUSTER:
-            row["take"] = False
-            row["cap_reason"] = (f"concentration cap — {CONCENTRATION_MAX_PER_CLUSTER} "
-                                 f"{sector}/{row['direction']} already booked today")
-            capped.append(row)
-        else:
-            counts[cluster] = counts.get(cluster, 0) + 1
-    return capped
 
 
 # ---------------------------------------------------------------------------

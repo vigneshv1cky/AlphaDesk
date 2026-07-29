@@ -437,7 +437,7 @@ def _log_run_event(ev: dict) -> None:
     """Mirror a live Find Trades run to the terminal in real time — the FULL
     transcript, streamed as each event is produced (the terminal can afford more
     detail than the browser cards: the critic's actual pushback, the researcher's
-    thesis and reply, fact-check flags, briefs, skips, holds, head reasoning)."""
+    thesis and reply, fact-check flags, briefs, skips, holds)."""
     t = ev.get("type")
     sym = ev.get("symbol", "")
     if t == "status":

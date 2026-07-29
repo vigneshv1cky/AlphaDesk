@@ -56,7 +56,6 @@ interface BoardRow {
   approved: boolean
   summary: string
   take?: boolean
-  chief_reason?: string
   flipped?: boolean
   plan?: Plan | null
 }
@@ -143,7 +142,6 @@ export function FindTrades({
   const [status, setStatus] = useState("")
   const [feed, setFeed] = useState<Ev[]>([])
   const [board, setBoard] = useState<BoardRow[] | null>(null)
-  const [chief, setChief] = useState("")
   const [positions, setPositions] = useState<Ev[]>([])
   const [deep, setDeep] = useState(false)
   const esRef = useRef<EventSource | null>(null)
@@ -158,7 +156,6 @@ export function FindTrades({
     setRun(true)
     setFeed([])
     setBoard(null)
-    setChief("")
     setPositions([])
     setStatus("Starting…")
     const es = new EventSource(`/api/find-trades?hours=24&max_debates=6&expose=${deep}`)
@@ -166,10 +163,7 @@ export function FindTrades({
     es.onmessage = (e) => {
       const ev: Ev = JSON.parse(e.data)
       if (ev.type === "status") setStatus(ev.msg ?? "")
-      else if (ev.type === "chief") {
-        setChief(ev.summary ?? "")
-        setBoard(ev.board ?? [])
-      } else if (ev.type === "done") {
+      else if (ev.type === "done") {
         setBoard(ev.board ?? [])
         setRun(false)
         es.close()
@@ -186,8 +180,6 @@ export function FindTrades({
       es.close()
     }
   }
-
-  const takes = board?.filter((b) => b.take).length ?? 0
 
   return (
     <div className="overflow-hidden rounded-lg border bg-card text-card-foreground shadow-sm p-4">
@@ -345,23 +337,17 @@ export function FindTrades({
                 )
               })()}
 
-              {/* ── HEAD / BOARD ── */}
+              {/* ── BOARD ── */}
               {board && (
                 <div>
                   <div className="border-t border-zinc-200 dark:border-zinc-800 pt-3" />
                   <div className="text-zinc-500 mb-1">
-                    ── Head Ranking ({takes} suggested) ──
+                    ── Board ({board.length} pick{board.length !== 1 ? "s" : ""}) ──
                   </div>
-                  {chief && (
-                    <div className="text-amber-400/80 mb-1">{chief}</div>
-                  )}
                   {board.map((r, i) => (
                     <div key={r.id}>
                       {i > 0 && <div className="border-t border-zinc-800 my-1" />}
                       <span className="text-zinc-500 dark:text-zinc-600">#{i + 1}</span>{" "}
-                      <span className={`font-semibold ${r.take ? "text-emerald-400" : "text-zinc-500"}`}>
-                        [{r.take ? "TAKE" : "SKIP"}]
-                      </span>{" "}
                       <span className={dirUp(r.direction) ? "text-emerald-300" : "text-red-300"}>
                         {dirWord(r.direction)}
                       </span>{" "}
@@ -377,9 +363,6 @@ export function FindTrades({
                       )}
                       {r.summary && (
                         <div className="text-zinc-500 ml-4">{r.summary}</div>
-                      )}
-                      {r.chief_reason && (
-                        <div className="text-amber-400/70 ml-4">{r.chief_reason}</div>
                       )}
                     </div>
                   ))}

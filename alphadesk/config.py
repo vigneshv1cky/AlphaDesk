@@ -42,7 +42,6 @@ MODEL_MAP: dict[str, str] = {
     "judge": "opus",         # final verdict
     "loner": "opus",            # single-agent control arm
     "review": "opus",          # position review — HOLD/EXIT on still-open TAKEs
-    "head": "opus",            # comparative head-to-head selection across debated ideas
     "earnings_reader": "sonnet",      # web-grounded read of an actual earnings report
     "connections": "opus",     # one web-grounded call: supplier/customer/competitor map → spillover candidates
     "plan": "sonnet",          # execution desk — entry/target/stop for a committed call
@@ -66,7 +65,7 @@ WORLD_MAX_CATEGORIES = int(os.environ.get("WORLD_MAX_CATEGORIES", "0"))
 # opus cohorts in the ledger. Keep any single role sharp with a per-role override, e.g.
 # MODEL_JUDGE=opus. Set CHEAP_MODELS=0 to restore the opus defaults.
 if os.environ.get("CHEAP_MODELS", "1") not in ("0", "", "false", "False", "no"):
-    for _r in ("critic", "judge", "loner", "review", "head", "connections"):
+    for _r in ("critic", "judge", "loner", "review", "connections"):
         MODEL_MAP[_r] = "sonnet"
 
 for _role in list(MODEL_MAP):   # per-role override wins over the cheap default
@@ -172,10 +171,6 @@ LOW_LIQUIDITY_DOLLAR_VOL = 10_000_000  # avg daily dollar volume below this → 
 # proxy until a real borrow-rate feed exists). LONGs pay nothing here.
 SHORT_BORROW_APR = float(os.environ.get("SHORT_BORROW_APR", "2.0"))            # easy-to-borrow baseline
 SHORT_BORROW_APR_ILLIQUID = float(os.environ.get("SHORT_BORROW_APR_ILLIQUID", "30.0"))  # hard-to-borrow proxy
-# Concentration cap: at most this many TAKEN picks per correlation cluster (sector+direction)
-# per day. Stops the desk booking 5 same-sector same-direction names on one driver — which is
-# 5x the intended risk AND makes the ledger count one bet as many independent wins.
-CONCENTRATION_MAX_PER_CLUSTER = int(os.environ.get("CONCENTRATION_MAX_PER_CLUSTER", "2"))
 # Pre-committed horizon: the grading horizon is FIXED per edge, decided in advance — NOT
 # chosen by the judge after seeing the setup. Removes the garden-of-forking-paths (the same
 # catalyst bookable as a 1d or 10d call grades differently and only the chosen spec is logged),

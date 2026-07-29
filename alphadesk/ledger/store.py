@@ -573,7 +573,7 @@ def record_ingest(source: str, articles: int, candidates: int) -> None:
 def source_scorecard(days: int = 30) -> list[dict]:
     """Per ingestion source: volume (articles/candidates), cost (ingestion +
     debate tokens), and value (picks/taken/graded/avg alpha). Answers which
-    channel earns its tokens. 'shared' bucket = cross-source calls (scout, head)."""
+    channel earns its tokens. 'shared' bucket = cross-source calls (scout)."""
     since = f"-{int(days)} day"
     with _connect() as conn:
         vol = {r["source"]: dict(r) for r in conn.execute(
@@ -719,17 +719,6 @@ def mark_taken(pick_ids: list[int]) -> None:
         return
     with _lock, _connect() as conn:
         conn.executemany("UPDATE picks SET taken=1 WHERE id=?", [(int(i),) for i in pick_ids])
-
-
-def taken_cluster_counts_today() -> dict[str, int]:
-    """{cluster: count} of TAKEN picks booked so far today (ET), for the concentration
-    cap — so a later run in the same day counts what earlier runs already booked."""
-    with _connect() as conn:
-        rows = conn.execute(
-            "SELECT cluster, count(*) AS n FROM picks"
-            " WHERE taken=1 AND cluster IS NOT NULL AND ts >= ?"
-            " GROUP BY cluster", (_et_day_start_utc(),)).fetchall()
-    return {r["cluster"]: int(r["n"]) for r in rows}
 
 
 def open_taken_picks() -> list[dict]:

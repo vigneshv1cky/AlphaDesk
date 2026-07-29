@@ -10,7 +10,7 @@ stage fails (the caller drops the candidate).
 
 Deliberately NOT here (they legitimately differ per entry point): brief-gathering
 (stream uses fundamentals/freshness, workflow uses the graph brief), the solo arm
-cadence, and the caller-specific pre/post steps (exposure, chief, cooldowns,
+cadence, and the caller-specific pre/post steps (exposure, cooldowns,
 funnel). Those stay in stream.py / workflow.py.
 """
 

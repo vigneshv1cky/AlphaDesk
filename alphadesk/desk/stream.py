@@ -615,62 +615,10 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_debates: int = 6,
         else:
             yield item
 
-    # Head — genuine head-to-head comparison across every debated idea
-    # (not just sorting isolated conviction numbers). One Opus call still
-    # worth it: cross-pick awareness catches same-catalyst redundancy,
-    # share-class dedup, and slate-level calibration the isolated debates miss.
-    # The Head's take=true/false on each pick is RESPECTED — only the picks
-    # the Head selects are booked (fallback: approved picks only).
-    if len(board) >= 1:
-        yield _ev("status", msg="Head comparing all opportunities head-to-head…")
-        try:
-            chief = await loop.run_in_executor(
-                None, lambda: team.head_ranking(board, "chief"))
-            ranking = {r["symbol"].upper(): r for r in chief.get("ranked", [])}
-            order = {r["symbol"].upper(): i for i, r in enumerate(chief.get("ranked", []))}
-            for row in board:
-                cr = ranking.get(row["symbol"].upper())
-                row["chief_reason"] = cr["reason"] if cr else ""
-                row["take"] = cr["take"] if cr else False   # respect Head's decision
-            # Safety rail: if Head says zero, take at least the top-ranked pick.
-            # An over-cautious Head that rejects everything is worse than one bad trade.
-            if not any(r.get("take") for r in board):
-                board[0]["take"] = True
-                board[0]["chief_reason"] = (board[0].get("chief_reason") or "") + " (forced: Head picked zero)"
-            board.sort(key=lambda r: order.get(r["symbol"].upper(), 999))
-            capped = await loop.run_in_executor(None, team.apply_concentration_cap, board)
-            for row in board:
-                if row.get("sector"):
-                    store.update_pick(row["id"], sector=row["sector"], cluster=row["cluster"])
-            store.add_run("FIND_TRADES", board)
-            store.mark_taken([r["id"] for r in board if r.get("take")])
-            _pending_run_picks = []
-            if capped:
-                yield _ev("status", msg="Concentration cap — held back "
-                          + ", ".join(f"{r['symbol']} ({r['cap_reason']})" for r in capped))
-            yield _ev("chief", board=board, summary=chief.get("summary", ""))
-            yield _ev("done", board=board)
-            return
-        except LLMError as exc:
-            log.warning("Head synthesis failed (%s) — falling back to score sort", exc)
-
-    # fallback: no Head → take every approved pick
+    # All debated picks are booked as positions
     for row in board:
-        row["take"] = row["approved"]
-        row["chief_reason"] = ""
-    # Same safety rail as the Head path
-    if not any(r.get("take") for r in board) and board:
-        board[0]["take"] = True
-        board[0]["chief_reason"] = "forced: Head picked zero"
-    board.sort(key=lambda r: (not r["approved"], -abs(r["conviction"] - 50)))
-    capped = await loop.run_in_executor(None, team.apply_concentration_cap, board)
-    for row in board:
-        if row.get("sector"):
-            store.update_pick(row["id"], sector=row["sector"], cluster=row["cluster"])
+        row["take"] = True
     store.add_run("FIND_TRADES", board)
-    store.mark_taken([r["id"] for r in board if r.get("take")])
+    store.mark_taken([r["id"] for r in board])
     _pending_run_picks = []
-    if capped:
-        yield _ev("status", msg="Concentration cap — held back "
-                  + ", ".join(f"{r['symbol']} ({r['cap_reason']})" for r in capped))
     yield _ev("done", board=board)
