@@ -404,14 +404,16 @@ AUTORUN_END_ET=19:00         # window end (default 16:00; 19:00 adds the AMC-ear
 
 ### Deployment
 - **AlphaDesk**: GCP VM `alphadesk` at 34.182.195.6:8000, project `alphadesk-research`
-- **Altavela**: GCP VM `altavela` at 35.221.39.188:8001, project `altavela-research`
-- Both VMs: UTC timezone, ET = UTC-4. Journal timestamps are UTC. Autoruns, dashboard, sessions all use ET.
+- VM is UTC timezone, ET = UTC-4. Journal timestamps are UTC. Autoruns, dashboard, sessions all use ET.
 - `MODEL_PROVIDER=deepseek`, DEEPSEEK_MODEL_SONNET=deepseek-v4-flash, DEEPSEEK_MODEL_OPUS=deepseek-v4-pro
-- No CI/CD — deploy via `gcloud compute scp` + `systemctl restart`
+- No CI/CD — deploy MANUALLY via `gcloud compute scp` to `/tmp/` → SSH `sudo cp` to
+  `/opt/alphadesk/` → `sudo systemctl restart alphadesk`. For static files: `sudo rm -rf`
+  the old static dir first, then `sudo cp -r` the new one, so stale files from prior
+  builds don't accumulate. Never wait for CI — do every deploy by hand.
+- Always commit + push BEFORE deploying manually — never deploy uncommitted code.
 
 ### Active config on VM (`/opt/alphadesk/.env`)
 ```
-CONCENTRATION_MAX_PER_CLUSTER=999   (disabled)
 SCOUT_MAX_CANDIDATES=999            (all reporters)
 LEAN_SCOUT_MAX_CANDIDATES=999       (no lean cap)
 MAX_PICKS_PER_WINDOW=999            (env configurable, was hardcoded 5)
@@ -442,7 +444,6 @@ PAPER_TRADING=0
 ### Known / pending
 - Graded sample still tiny (~20-30), system unproven
 - No Alpaca paper trading (PAPER_TRADING=0)
-- No Altavela fixes ported yet
 - Entry_ts on CLOSED picks shows decision time not fill time (fixed for CLOSED only)
 - Scout may still miss posts based on judgment (2 true misses today)
 
@@ -451,4 +452,3 @@ PAPER_TRADING=0
 - VM journal times are UTC, not ET — always check.
 - User prefers "regular/after-hours/pre-market/overnight" labels, not session codes.
 - User wants Track Record to show only exited picks — not open, not graded-only, not not-taken.
-- 2026-07-28: **Altavela UI is single-column (2026-07-28).** Entire page stacks vertically. Deploy with `pnpm deploy` from `altavela/ui/` — it tars the build over SSH to the VM and restarts the service.
