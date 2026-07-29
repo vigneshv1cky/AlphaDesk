@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react"
-import { api, etDateTime, fmtAlpha, groupByDayKey, type SymbolTimeline, type TimelineEvent, type Stats } from "@/lib/api"
+import { api, etDateTime, groupByDayKey, type SymbolTimeline, type TimelineEvent, type Stats } from "@/lib/api"
 import { dirUp, dirWord } from "@/lib/plain"
 import { ArrowDown, ArrowUp, RotateCcw } from "lucide-react"
-import { InfoTip } from "@/components/InfoTip"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 
@@ -23,10 +22,8 @@ function PerfStrip({ stats }: { stats: Stats | null }) {
   const winRate = graded > 0 ? Math.round((wins / graded) * 100) : null
   const pnl = stats?.total.total_return_pct ?? null
   const exited = stats?.total.exited ?? 0
-  const eff = stats?.total.effective_graded ?? null
   const scoredSub =
-    (winRate != null ? `${winRate}% beat S&P` : "grading forward") +
-    (eff != null && eff < graded ? ` · ${eff} independent` : "") // correlated picks deduped
+    winRate != null ? `${winRate}% win` : "grading forward"
   return (
     <div className="grid grid-cols-3 gap-2">
       <Stat label="Ideas logged" value={String(stats?.total.picks ?? 0)} />
@@ -89,7 +86,7 @@ function StanceBadge({ current, exit }: { current: string; exit?: { label: strin
   return <Badge className={`text-[11px] font-semibold ${s.cls}`}>{s.label}</Badge>
 }
 
-// What happened with one call: vs S&P (graded), exited, or live P&L (open).
+// What happened with one call: exited, or live P&L (open).
 function Outcome({ e }: { e: TimelineEvent }) {
   if (e.state === "not_taken") {
     // thesis died before the open fill — never held, so no realized P&L (still
@@ -99,13 +96,6 @@ function Outcome({ e }: { e: TimelineEvent }) {
   if (e.state === "open" && e.status === "pending") {
     // decided while the market was shut — fills at the next open, not a position yet.
     return <span className="text-xs font-medium text-amber-600 dark:text-amber-400">Pending open</span>
-  }
-  if (e.state === "graded" && e.alpha_net != null) {
-    return (
-      <span className={`font-mono text-sm font-semibold tabular-nums ${e.alpha_net > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
-        {fmtAlpha(e.alpha_net)}
-      </span>
-    )
   }
   if (e.state === "exited") {
     const ret = e.exit_return_pct
@@ -118,7 +108,6 @@ function Outcome({ e }: { e: TimelineEvent }) {
   }
   if (e.pnl_pct != null) {
     const pos = e.pnl_pct >= 0
-    const aPos = (e.alpha_so_far ?? 0) >= 0
     return (
       <span className="text-right">
         <span className="font-mono text-sm tabular-nums">${e.current}</span>{" "}
@@ -126,15 +115,6 @@ function Outcome({ e }: { e: TimelineEvent }) {
           ({pos ? "+" : ""}
           {e.pnl_pct}%)
         </span>
-        {e.alpha_so_far != null && (
-          <InfoTip
-            tip="How much it's beating the S&P 500 so far, net of friction — a live mark, not the official grade"
-            className={`ml-1 cursor-help text-[10px] ${aPos ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}
-          >
-            vs S&P {aPos ? "+" : ""}
-            {e.alpha_so_far}% so far
-          </InfoTip>
-        )}
       </span>
     )
   }

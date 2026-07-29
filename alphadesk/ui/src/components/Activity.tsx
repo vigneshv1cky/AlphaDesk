@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { api, fmtAlpha, type SourceStat, type TokenRow } from "@/lib/api"
+import { api, type SourceStat, type TokenRow } from "@/lib/api"
 import {
   Table,
   TableBody,
@@ -33,7 +33,7 @@ function BySource() {
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                {["source", "arts", "tokens", "picks", "vs S&P"].map((h, i) => (
+                {["source", "arts", "tokens", "picks"].map((h, i) => (
                   <TableHead
                     key={h}
                     className={`h-auto pb-1 text-[10px] uppercase tracking-wider ${i === 0 ? "" : "text-right"}`}
@@ -56,17 +56,6 @@ function BySource() {
                   <TableCell className="py-1.5 text-right tabular-nums">
                     {s.picks}
                     {s.graded > 0 && <span className="text-muted-foreground"> ({s.graded}g)</span>}
-                  </TableCell>
-                  <TableCell
-                    className={`py-1.5 text-right font-mono tabular-nums ${
-                      s.avg_alpha == null
-                        ? "text-muted-foreground"
-                        : s.avg_alpha > 0
-                          ? "text-emerald-600 dark:text-emerald-400"
-                          : "text-red-600 dark:text-red-400"
-                    }`}
-                  >
-                    {s.avg_alpha == null ? "—" : fmtAlpha(s.avg_alpha)}
                   </TableCell>
                 </TableRow>
               ))}

@@ -146,26 +146,10 @@ export function PickSheet({
                       </span>
                       {pick.exit_reason && <span className="text-zinc-500"> · {pick.exit_reason.length > 80 ? pick.exit_reason.slice(0, 80) + "…" : pick.exit_reason}</span>}
                     </div>
-                    {pick.alpha_net !== null && (
-                      <div className="text-zinc-500">
-                        vs S&P: {fmtAlpha(pick.alpha_net)}
-                        {pick.alpha_adj !== null && (
-                          <span> · β-adj: {fmtAlpha(pick.alpha_adj)}{pick.beta != null ? ` (β ${pick.beta.toFixed(2)})` : ""}</span>
-                        )}
-                      </div>
-                    )}
                     <div className="flex gap-4 text-zinc-500">
                       {pick.mfe_pct != null && <span>peak <span className="text-emerald-600 dark:text-emerald-400">{pick.mfe_pct >= 0 ? "+" : ""}{pick.mfe_pct}%</span></span>}
                       {pick.mae_pct != null && <span>worst <span className="text-red-600 dark:text-red-400">{pick.mae_pct}%</span></span>}
                     </div>
-                  </div>
-                )}
-                {!pick.exit_ts && pick.alpha_net !== null && (
-                  <div className="text-zinc-500">
-                    vs S&P: {fmtAlpha(pick.alpha_net)}
-                    {pick.alpha_adj !== null && (
-                      <span> · β-adj: {fmtAlpha(pick.alpha_adj)}{pick.beta != null ? ` (β ${pick.beta.toFixed(2)})` : ""}</span>
-                    )}
                   </div>
                 )}
               </div>

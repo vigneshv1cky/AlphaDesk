@@ -1,7 +1,6 @@
 import { useEffect, useState, useRef } from "react"
 import { api, etDateTime, groupByDayKey, type LivePick } from "@/lib/api"
 import { dirUp } from "@/lib/plain"
-import { InfoTip } from "@/components/InfoTip"
 import { Card } from "@/components/ui/card"
 import { ArrowDown, ArrowUp, RefreshCw, X } from "lucide-react"
 
@@ -205,15 +204,6 @@ export function LiveTracker() {
                   <span className="ml-1 text-amber-600 dark:text-amber-400">· pending</span>
                 )}
               </span>
-              {p.alpha_so_far != null && (
-                <InfoTip
-                  tip="Return vs S&P so far, net of friction — a live mark, not the official grade"
-                  className={`cursor-help font-semibold ${p.alpha_so_far >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}
-                >
-                  vs S&P {p.alpha_so_far >= 0 ? "+" : ""}
-                  {p.alpha_so_far}%
-                </InfoTip>
-              )}
             </div>
               </Card>
             )

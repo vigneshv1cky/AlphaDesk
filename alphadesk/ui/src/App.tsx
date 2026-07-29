@@ -74,7 +74,7 @@ export default function App() {
 
           <div className="ml-auto flex items-center gap-5">
             <Kpi label="Ideas" value={String(stats?.total.picks ?? "—")} />
-            <Kpi label="Beat S&P" value={winRate != null ? `${winRate}%` : "—"} />
+            <Kpi label="Win rate" value={winRate != null ? `${winRate}%` : "—"} />
             <Kpi label="Profit & Loss" value={pnl != null ? `${pnl >= 0 ? "+" : ""}${pnl}%` : "—"} tone={pnl} />
             <Kpi label="AI today" value={burn > 0 ? `${Math.round(burn / 1000)}k` : "0"} />
             <button

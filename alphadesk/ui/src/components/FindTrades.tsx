@@ -281,7 +281,7 @@ export function FindTrades({
             <p>
               <b className="text-foreground">9 · Aftermath</b> — every 3 minutes, code walks the
               price bars and closes at the first target/stop touched. Later, every call is
-              graded vs the S&amp;P 500 at its own horizon — including the skips and rejects.
+              scored at its own horizon — including the skips and rejects.
             </p>
             <p className="pt-1">
               These are <b className="text-foreground">research ideas, not trades</b> — nothing is

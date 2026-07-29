@@ -31,7 +31,7 @@ function StatLine({ a }: { a: SessionAgg }) {
     <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
       <span>{a.n} picks</span>
       <span>
-        {a.graded} graded{win != null ? ` · ${win}% beat S&P` : ""}
+        {a.graded} graded{win != null ? ` · ${win}% win` : ""}
         {a.avg_alpha != null ? ` · avg ${fmtAlpha(a.avg_alpha)}` : ""}
       </span>
     </div>
