@@ -21,7 +21,6 @@ const TITLES: Record<string, string> = {
   "/pre": "Pre-Market · AlphaDesk",
   "/open": "Open Market · AlphaDesk",
   "/after": "After Hours · AlphaDesk",
-  "/night": "Night · AlphaDesk",
   "/earnings": "Earnings · AlphaDesk",
 }
 
@@ -110,7 +109,6 @@ function Shell() {
               <Route path="/pre" element={<MarketPage session="PRE" liveRows={liveRows} symbols={symbols} loading={!historyLoaded} />} />
               <Route path="/open" element={<MarketPage session="OPEN" liveRows={liveRows} symbols={symbols} loading={!historyLoaded} />} />
               <Route path="/after" element={<MarketPage session="AFTER" liveRows={liveRows} symbols={symbols} loading={!historyLoaded} />} />
-              <Route path="/night" element={<MarketPage session="CLOSED" liveRows={liveRows} symbols={symbols} loading={!historyLoaded} />} />
               <Route path="/earnings" element={<EarningsPage earnings={earnings} />} />
               <Route path="*" element={<Navigate to="/live" replace />} />
             </Routes>

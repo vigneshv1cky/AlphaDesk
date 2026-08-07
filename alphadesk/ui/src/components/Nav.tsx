@@ -6,7 +6,6 @@ const LINKS = [
   { to: "/pre", label: "Pre-Market" },
   { to: "/open", label: "Open" },
   { to: "/after", label: "After" },
-  { to: "/night", label: "Night" },
   { to: "/earnings", label: "Earnings" },
 ]
 

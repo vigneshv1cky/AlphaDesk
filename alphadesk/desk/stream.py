@@ -185,6 +185,11 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
 
     # Liquidity gate + shortability check
     cur_sess = session()
+    # Night (CLOSED, 20:00–4:00) is not tradeable: the market is closed, so a pick
+    # decided then enters at the next 4:00 PRE open. Stamp it PRE so it lives on the
+    # Pre-Market page (and its session-close exit is the PRE close, not a phantom
+    # night window).
+    stamp_sess = "PRE" if cur_sess == "CLOSED" else cur_sess
     board = []
     picks_count = 0
     max_score = max(abs(s[1]) for s in top) if top else 1
@@ -234,7 +239,7 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
         pick_id = store.record_pick({
             "symbol": sym, "arm": "QUANT", "edge": "MOMENTUM",
             "source": "QUANT", "decision_id": f"q-{sym}",
-            "trigger_src": "FIND_TRADES", "session": cur_sess,
+            "trigger_src": "FIND_TRADES", "session": stamp_sess,
             "direction": direction, "horizon_days": horizon,
             "score": qscore["score"],
             "adjusted_score": conviction,

@@ -85,10 +85,14 @@ async def research_run(candidates: dict[str, list[dict]], trigger_src: str = "ST
 
         spy_ctx = await loop.run_in_executor(None, prices.get_context, "SPY")
         sess = sess_fn()
+        # Night (CLOSED) is not tradeable — a pick decided then enters at the next
+        # 4:00 PRE open, so stamp it PRE (lives on the Pre-Market page, exits at the
+        # PRE close). entry_price stays None (queued for the 4:00 fill).
+        stamp_sess = "PRE" if sess == "CLOSED" else sess
         pick_id = store.record_pick({
             "symbol": sym, "arm": "QUANT", "edge": "MOMENTUM",
             "source": "BATCH", "decision_id": f"b-{sym}-{uuid.uuid4().hex[:8]}",
-            "trigger_src": trigger_src, "session": sess,
+            "trigger_src": trigger_src, "session": stamp_sess,
             "direction": direction, "horizon_days": horizon,
             "score": result["score"], "adjusted_score": result["score"],
             "confidence": 50, "verdict": "QUANT", "approved": 1,

@@ -7,12 +7,13 @@ import { dirUp, dirWord } from "@/lib/plain"
 import { groupByDayKey, type LivePick, type SymbolTimeline, type TimelineEvent } from "@/lib/api"
 
 // One market window = one trade (session-scoped model): enter at the session
-// open, exit at the session close, never carry into another market.
+// open, exit at the session close, never carry into another market. Night is not
+// tradeable (market closed 20:00–4:00) — night-decided picks are stamped PRE
+// because they enter at the next 4:00 open.
 export const MARKET_SESSIONS = {
   PRE: { label: "Pre-Market", window: "4:00–9:30 ET" },
   OPEN: { label: "Open Market", window: "9:30–16:00 ET" },
   AFTER: { label: "After Hours", window: "16:00–20:00 ET" },
-  CLOSED: { label: "Night", window: "20:00–4:00 ET" },
 } as const
 
 type SessionCode = keyof typeof MARKET_SESSIONS
