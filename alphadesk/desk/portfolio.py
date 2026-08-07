@@ -31,39 +31,39 @@ def _trading_client():
     return _client
 
 
-def _qty(price: float, conviction: float) -> int:
-    """Conviction-weighted whole-share size, capped per position."""
-    from alphadesk.config import PM_BASE_USD, PM_MAX_POSITION_USD
-    usd = min(PM_MAX_POSITION_USD, PM_BASE_USD * (conviction / 50.0))
-    qty = int(usd / price) if price > 0 else 0
-    return max(1, qty)
+def _fractional_qty(price: float) -> float:
+    """$10 fractional sizing — every trade buys/sells exactly TRADE_NOTIONAL_USD of
+    the name (fractional shares), so the paper fills match the $10/trade the
+    dashboard already assumes."""
+    from alphadesk.config import TRADE_NOTIONAL_USD
+    return round(TRADE_NOTIONAL_USD / price, 4) if price > 0 else 0.0
 
 
 def route_pick(pick_id: int, symbol: str, direction: str, price: float,
                conviction: float, session: str) -> bool:
     """Place the order on Alpaca paper and stamp broker_order_id/status/qty.
 
-    OPEN session → market order (fills at market). PRE/AFTER → extended-hours LIMIT
-    at the decision price (only when PM_EXTENDED_HOURS=1; otherwise closed-market
-    picks wait for the 9:30 open under Model A). Returns True if routed; never
-    raises — a failure is logged and the pick stays un-routed."""
+    $10 fractional notional per trade (TRADE_NOTIONAL_USD). OPEN → fractional
+    market order; PRE/AFTER → extended-hours fractional limit at the decision price
+    (only when PM_EXTENDED_HOURS=1; otherwise closed-market picks wait for the
+    9:30 open under Model A). Returns True if routed; never raises — a failure is
+    logged and the pick stays un-routed."""
     try:
         from alpaca.trading.enums import OrderSide, TimeInForce
         from alpaca.trading.requests import LimitOrderRequest, MarketOrderRequest
 
-        from alphadesk.config import PM_EXTENDED_HOURS
+        from alphadesk.config import PM_EXTENDED_HOURS, TRADE_NOTIONAL_USD
         from alphadesk.ledger import store
 
         if not price or price <= 0:
             return False
-        qty = _qty(price, conviction)
         side = OrderSide.BUY if direction == "LONG" else OrderSide.SELL
         client = _trading_client()
         if session == "OPEN":
-            req = MarketOrderRequest(symbol=symbol, qty=qty, side=side,
-                                     time_in_force=TimeInForce.DAY)
+            req = MarketOrderRequest(symbol=symbol, notional=round(TRADE_NOTIONAL_USD, 2),
+                                     side=side, time_in_force=TimeInForce.DAY)
         elif PM_EXTENDED_HOURS:
-            req = LimitOrderRequest(symbol=symbol, qty=qty, side=side,
+            req = LimitOrderRequest(symbol=symbol, qty=_fractional_qty(price), side=side,
                                     limit_price=round(price, 2),
                                     time_in_force=TimeInForce.DAY,
                                     extended_hours=True)
@@ -71,9 +71,10 @@ def route_pick(pick_id: int, symbol: str, direction: str, price: float,
             return False   # closed-market pick waits for the open (Model A)
         order = client.submit_order(req)
         order_id = str(getattr(order, "id", ""))
-        store.set_broker_order(pick_id, order_id, getattr(order, "status", ""), qty)
-        log.info("Routed #%d %s %s qty=%d → order %s", pick_id, symbol, direction,
-                 qty, order_id)
+        store.set_broker_order(pick_id, order_id, getattr(order, "status", ""),
+                               _fractional_qty(price))
+        log.info("Routed #%d %s %s $%.2f (%.4f sh) → order %s", pick_id, symbol,
+                 direction, TRADE_NOTIONAL_USD, _fractional_qty(price), order_id)
         return True
     except Exception as exc:
         log.warning("route_pick %d %s failed: %s", pick_id, symbol, exc)

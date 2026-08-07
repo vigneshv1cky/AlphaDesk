@@ -89,6 +89,7 @@ AUTORUN_END_ET = os.environ.get("AUTORUN_END_ET", "16:00").strip()
 
 # ── Paper trading (opt-in) ──────────────────────────────────────────────────
 PAPER_TRADING = os.environ.get("PAPER_TRADING", "0") not in ("0", "", "false", "False", "no")
+TRADE_NOTIONAL_USD = float(os.environ.get("TRADE_NOTIONAL_USD", "10"))   # $10 fractional per trade
 PM_BASE_USD = float(os.environ.get("PM_BASE_USD", "1000"))
 PM_MAX_POSITION_USD = float(os.environ.get("PM_MAX_POSITION_USD", "2500"))
 PM_MAX_POSITIONS = int(os.environ.get("PM_MAX_POSITIONS", "20"))
