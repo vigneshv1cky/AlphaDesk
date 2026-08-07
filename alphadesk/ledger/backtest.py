@@ -33,9 +33,13 @@ def _bucket(mag: float) -> int:
 def _load_hist(symbols: list[str], period: str = "6mo", chunk: int = 40) -> dict:
     """Batch-download raw daily OHLC for all symbols + returns {SYM: df}.
 
-    Chunked (~40 tickers per yfinance call): a full window can be 2000+ reporters,
-    and a single threads=True download of that many spawns a thread per ticker and
-    dies with 'can't start new thread' on a small VM."""
+    Chunked (~40 tickers per yfinance call, a short pause between chunks): a full
+    window can be 2000+ reporters, and a single threads=True download of that many
+    spawns a thread per ticker and dies with 'can't start new thread' on a small
+    VM — and hammering yfinance wholesale trips its rate limiter. Callers should
+    pass a BOUNDED symbol set (see backtest_drift's max_symbols cap)."""
+    import time as _time
+
     import pandas as pd
     import yfinance as yf
 
@@ -48,25 +52,24 @@ def _load_hist(symbols: list[str], period: str = "6mo", chunk: int = 40) -> dict
         try:
             df = yf.download(batch, period=period, interval="1d", group_by="ticker",
                              auto_adjust=False, progress=False, threads=True)
-            if df is None:
-                continue
-            multi = isinstance(df.columns, pd.MultiIndex)
-            for s in batch:
-                try:
-                    if multi and s in df.columns.get_level_values(0):
-                        sub = df[s]
-                    elif len(batch) == 1:
-                        sub = df
-                    else:
+            if df is not None:
+                multi = isinstance(df.columns, pd.MultiIndex)
+                for s in batch:
+                    try:
+                        if multi and s in df.columns.get_level_values(0):
+                            sub = df[s]
+                        elif len(batch) == 1:
+                            sub = df
+                        else:
+                            continue
+                        sub = sub.dropna(subset=["Close"]) if isinstance(sub, pd.DataFrame) else None
+                        if sub is not None and len(sub) > 0:
+                            out[s] = sub
+                    except Exception:
                         continue
-                    sub = sub.dropna(subset=["Close"]) if isinstance(sub, pd.DataFrame) else None
-                    if sub is not None and len(sub) > 0:
-                        out[s] = sub
-                except Exception:
-                    continue
         except Exception as exc:
             log.warning("history batch %d failed: %s", i // chunk, exc)
-            continue
+        _time.sleep(0.4)   # be polite to yfinance between chunks
     return out
 
 
@@ -82,9 +85,13 @@ def _bar(df, day, col) -> float | None:
         return None
 
 
-def backtest_drift(days: int = 90, horizon: int = 1) -> list:
+def backtest_drift(days: int = 30, horizon: int = 1, max_symbols: int = 500) -> list:
     """Replay past reports → per-report {session, direction, reaction_pct, gated,
-    alpha, ret, spy}. Returns the list of trades (empty if nothing to test)."""
+    alpha, ret, spy}. Returns the list of trades (empty if nothing to test).
+
+    Bounded: only the `max_symbols` most RECENT reports get history downloaded (a
+    full earnings-season window is thousands of tickers — yfinance rate-limits and
+    a small VM can't download them all in reasonable time)."""
     import pandas as pd
 
     from alphadesk.config import FRICTION_BPS_PER_SIDE, MATERIAL_REACTION_PCT
@@ -94,8 +101,19 @@ def backtest_drift(days: int = 90, horizon: int = 1) -> list:
             if r.get("session") in ("BMO", "AMC", "DAY") and r.get("symbol")]
     if not rows:
         return []
+    # most recent first, bounded to max_symbols unique symbols
+    rows.sort(key=lambda r: r.get("report_date", ""), reverse=True)
+    seen: set = set()
+    kept = []
+    for r in rows:
+        if r["symbol"].upper() in seen:
+            continue
+        seen.add(r["symbol"].upper())
+        kept.append(r)
+        if len(kept) >= max_symbols:
+            break
 
-    hist = _load_hist([r["symbol"] for r in rows] + ["SPY"])
+    hist = _load_hist([r["symbol"] for r in kept] + ["SPY"])
     spy = hist.get("SPY")
     if spy is None:
         return []
