@@ -914,6 +914,38 @@ def record_exit(pick_id: int, reason: str, exit_price: float | None = None,
         return cur.rowcount > 0
 
 
+def open_position_count() -> int:
+    """Live open TAKEN positions (not exited, not graded, within window)."""
+    with _connect() as conn:
+        return int(conn.execute(
+            "SELECT count(*) FROM picks WHERE taken=1 AND exit_ts IS NULL"
+            " AND graded_at IS NULL"
+            " AND datetime(ts, '+' || (horizon_days + 2) || ' days') >= datetime('now')"
+        ).fetchone()[0])
+
+
+def today_realized_pnl_pct() -> float:
+    """Sum of realized exit returns today (equal-weight) — the daily-loss circuit breaker."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(sum(exit_return_pct), 0) FROM picks"
+            " WHERE exit_ts IS NOT NULL AND exit_ts >= ?", (_et_day_start_utc(),)).fetchone()
+        return float(row[0] or 0)
+
+
+def cluster_take_count(cluster: str) -> int:
+    """How many TAKEN picks today share this (sector|direction) cluster."""
+    with _connect() as conn:
+        return int(conn.execute(
+            "SELECT count(*) FROM picks WHERE taken=1 AND cluster=? AND ts >= ?",
+            (cluster, _et_day_start_utc())).fetchone()[0])
+
+
+def set_cluster(pick_id: int, cluster: str | None) -> None:
+    with _lock, _connect() as conn:
+        conn.execute("UPDATE picks SET cluster=? WHERE id=?", (cluster, int(pick_id)))
+
+
 def record_skips(skips: list[dict], cap: int = 30) -> None:
     """Persist skipped candidates individually so their forward moves can be graded
     (anti-survivorship: did we pass on a name that then moved big?). Capped per

@@ -42,6 +42,14 @@ SYMBOL_REPICK_COOLDOWN_MIN = 15
 REPICK_COOLDOWN_HOURS = int(os.environ.get("REPICK_COOLDOWN_HOURS", "24"))
 WATCH_INTERVAL_S = int(os.environ.get("WATCH_INTERVAL_S", "60"))
 
+# ── Risk rails (paper-desk circuit breakers) ─────────────────────────────────
+MAX_OPEN_POSITIONS = int(os.environ.get("MAX_OPEN_POSITIONS", "20"))
+DAILY_LOSS_STOP_PCT = float(os.environ.get("DAILY_LOSS_STOP_PCT", "10"))
+# stop opening new positions after realized (equal-weight) losses pass this today
+CONCENTRATION_MAX_PER_CLUSTER = int(os.environ.get("CONCENTRATION_MAX_PER_CLUSTER", "2"))
+# thin sessions size down (conviction multiplier applied to new picks)
+SESSION_SIZE_MULT = {"OPEN": 1.0, "PRE": 0.5, "AFTER": 0.5}
+
 # ── Earnings ────────────────────────────────────────────────────────────────
 EARNINGS_DRIFT_DAYS = 3
 MATERIAL_REACTION_PCT = float(os.environ.get("MATERIAL_REACTION_PCT", "1.5"))

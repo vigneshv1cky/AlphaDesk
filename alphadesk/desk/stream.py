@@ -224,6 +224,38 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
         yield _ev("done", board=[])
         return
 
+    # ── Risk rails (paper-desk circuit breakers) ──
+    from alphadesk.config import (
+        CONCENTRATION_MAX_PER_CLUSTER,
+        DAILY_LOSS_STOP_PCT,
+        MAX_OPEN_POSITIONS,
+        SESSION_SIZE_MULT,
+    )
+    if MAX_OPEN_POSITIONS > 0 and store.open_position_count() >= MAX_OPEN_POSITIONS:
+        for sym, *_ in top:
+            drop_reasons.append({"symbol": sym,
+                                 "reason": f"risk rail: at max {MAX_OPEN_POSITIONS} open positions"})
+        store.funnel_add(ingested=len(candidates), candidates=len(scored_candidates),
+                         picked=0, skipped=len(drop_reasons), skip_reasons=drop_reasons)
+        if drop_reasons:
+            store.record_skips(drop_reasons)
+        await loop.run_in_executor(None, store.add_run, "FIND_TRADES", [])
+        yield _ev("status", msg=f"Risk rail: at max {MAX_OPEN_POSITIONS} open positions — not booking.")
+        yield _ev("done", board=[])
+        return
+    if DAILY_LOSS_STOP_PCT > 0 and store.today_realized_pnl_pct() <= -DAILY_LOSS_STOP_PCT:
+        for sym, *_ in top:
+            drop_reasons.append({"symbol": sym,
+                                 "reason": "risk rail: daily loss stop hit"})
+        store.funnel_add(ingested=len(candidates), candidates=len(scored_candidates),
+                         picked=0, skipped=len(drop_reasons), skip_reasons=drop_reasons)
+        if drop_reasons:
+            store.record_skips(drop_reasons)
+        await loop.run_in_executor(None, store.add_run, "FIND_TRADES", [])
+        yield _ev("status", msg=f"Risk rail: daily realized loss ≤ -{DAILY_LOSS_STOP_PCT:g}% — not booking until tomorrow.")
+        yield _ev("done", board=[])
+        return
+
     # Liquidity gate + shortability check
     cur_sess = session()
     # Night (CLOSED, 20:00–4:00) is not tradeable: the market is closed, so a pick
@@ -253,6 +285,19 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
                           reason="SHORT skipped — not shortable at broker")
                 continue
 
+        # Concentration cap: at most N TAKEN picks per (sector|direction) cluster per day
+        cluster = None
+        if CONCENTRATION_MAX_PER_CLUSTER > 0:
+            fund = await loop.run_in_executor(None, prices.get_fundamentals, sym) or {}
+            sector = fund.get("sector")
+            if sector:
+                cluster = f"{sector}|{direction}"
+                if store.cluster_take_count(cluster) >= CONCENTRATION_MAX_PER_CLUSTER:
+                    drop_reasons.append({"symbol": sym,
+                                         "reason": f"concentration cap: {cluster} already at {CONCENTRATION_MAX_PER_CLUSTER}"})
+                    yield _ev("gate", symbol=sym, reason=f"concentration cap reached ({sector} {direction})")
+                    continue
+
         picks_count += 1
         yield _ev("triage_pick", symbol=sym, edge="MOMENTUM",
                   reason=f"Quant: {qscore['score']:.0f} {direction}")
@@ -274,9 +319,11 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
                          "stop": round(last * (1 + atr/100 * PLAN_STOP_ATR), 4),
                          "note": f"Quant: {direction} {sym}", "order": "market"}
 
-        # Kelly-style sizing: scale conviction by signal strength vs max in run
+        # Kelly-style sizing: scale conviction by signal strength vs max in run,
+        # then size DOWN in thin sessions (PRE/AFTER) where fills are worse.
         sizing = min(abs(qscore["score"]) / max(max_score, 1), 1.0)
-        conviction = round(25 + sizing * 75)  # 25-100 range
+        conviction = round((25 + sizing * 75) * SESSION_SIZE_MULT.get(cur_sess, 1.0))
+        conviction = max(0, min(conviction, 100))
 
         spy_ctx = await loop.run_in_executor(None, prices.get_context, "SPY")
         pick_id = store.record_pick({
@@ -284,6 +331,7 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
             "source": "QUANT", "decision_id": f"q-{sym}",
             "trigger_src": "FIND_TRADES", "session": stamp_sess,
             "direction": direction, "horizon_days": horizon,
+            "cluster": cluster,   # sector|direction — for the concentration cap
             "score": qscore["score"],
             "adjusted_score": conviction,
             "confidence": conviction,
