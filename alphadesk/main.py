@@ -78,6 +78,7 @@ async def _serve() -> None:
         extended-hours fills; CLOSED: skip monitoring."""
         from alphadesk.config import (
             WATCH_INTERVAL_S,
+            entry_allowed,
             entry_fill_time,
             now_et,
         )
@@ -266,13 +267,16 @@ async def _serve() -> None:
                     # positions (no intraday bars exist in extended hours). ──
                     open_pos = await loop.run_in_executor(None, store.live_picks)
                     if sess == "PRE":
-                        # Night (CLOSED) picks enter at the PRE open (4:00): stamp the
-                        # live price once the session is live — enter at session open,
-                        # exit at session close (9:25). No extended trade yet → stays
-                        # pending; the OPEN branch marks it not-taken if it never fills.
+                        # Night (CLOSED) picks enter once the session is live: stamp the
+                        # live price — but only inside the session's ALLOWED entry window
+                        # (past the START buffer, before the END entry buffer), so they
+                        # skip the volatile open like any new entry. No extended trade →
+                        # stays pending; the OPEN branch marks it not-taken if it never
+                        # fills in the window.
                         now = now_et()
                         queued = [p for p in open_pos if p.get("entry_price") is None
                                   and not p.get("broker_order_id")
+                                  and entry_allowed()
                                   and (ft := entry_fill_time(p["ts"], p.get("session"))) and ft <= now]
                         if queued:
                             q = await loop.run_in_executor(
