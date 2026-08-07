@@ -20,22 +20,26 @@ function timeSince(ts: string): string {
   return `${Math.floor(h / 24)}d`
 }
 
+// Fractional-assumption sizing: every trade buys a flat $10 of the name
+// (POSITION_USD / entry shares). Dollar P&L per position = $10 × its return.
+const POSITION_USD = 10
+
+function positionPnlUsd(p: LivePick): number | null {
+  if (p.current == null || p.plan_entry == null || p.plan_entry <= 0) return null
+  const perShare = p.direction === "LONG" ? (p.current - p.plan_entry) : (p.plan_entry - p.current)
+  return (POSITION_USD / p.plan_entry) * perShare
+}
+
 export function LivePositions({ rows, market, loading }: { rows: LivePick[]; market: string; loading: boolean }) {
   const up = rows.filter(p => (p.pnl_pct ?? 0) > 0).length
   const down = rows.filter(p => (p.pnl_pct ?? 0) < 0).length
   const total = up + down
   const winRate = total > 0 ? Math.round((up / total) * 100) : null
-  // Dollar P&L = the total of the P&L column (sum of the per-position $ moves).
-  // Each position counts as 1 share, equal shares per name — so the sum is the
-  // unrealized $ gain on an equal-share book; scale by shares-per-name for the
-  // actual $ on your capital. Same math as the P&L cell (plan_entry vs current),
-  // so the card total always matches the column. Unquoted/pending rows (no
-  // current price) aren't in it yet.
-  const pnlUsd = rows.reduce((s, p) => {
-    if (p.current == null || p.plan_entry == null) return s
-    return s + (p.direction === "LONG" ? (p.current - p.plan_entry) : (p.plan_entry - p.current))
-  }, 0)
-  const pnlCount = rows.filter(p => p.current != null && p.plan_entry != null).length
+  // Dollar P&L assumes a FRACTIONAL $10 per trade: each position holds $10 of the
+  // name, so its $ P&L = $10 × the return % (POSITION_USD / entry shares × move).
+  // Same math as the P&L cell, so the card total always matches the column.
+  const pnlUsd = rows.reduce((s, p) => s + (positionPnlUsd(p) ?? 0), 0)
+  const pnlCount = rows.filter(p => positionPnlUsd(p) != null).length
 
   if (loading) return (
     <div className="space-y-2">
@@ -64,7 +68,7 @@ export function LivePositions({ rows, market, loading }: { rows: LivePick[]; mar
           <TrendingUp className={`h-4 w-4 ${pnlUsd >= 0 ? "text-emerald-500" : "text-red-500"}`} />
           <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Live P&amp;L</div>
           <div className={`font-mono text-lg font-bold tabular-nums ${pnlUsd >= 0 ? "text-emerald-500" : "text-red-500"}`}>{pnlUsd >= 0 ? "+" : ""}${pnlUsd.toFixed(2)}</div>
-          <div className="text-[10px] text-muted-foreground">1 share each · {pnlCount} open</div>
+          <div className="text-[10px] text-muted-foreground">$10/trade · {pnlCount} open</div>
         </CardContent></Card>
       </div>
       <Separator />
@@ -93,13 +97,14 @@ export function LivePositions({ rows, market, loading }: { rows: LivePick[]; mar
               <TableCell className="text-right font-mono tabular-nums">${p.plan_entry.toFixed(2)}</TableCell>
               <TableCell className="text-right font-mono tabular-nums">{p.current != null ? `$${p.current.toFixed(2)}` : "—"}</TableCell>
               <TableCell className="text-right">
-                {p.current != null && p.plan_entry != null ? (
-                  <div className={`font-mono tabular-nums font-semibold ${(p.pnl_pct ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}>
-                    {p.direction === "LONG"
-                      ? `${(p.current - p.plan_entry) >= 0 ? "+" : ""}$${(p.current - p.plan_entry).toFixed(2)}`
-                      : `${(p.plan_entry - p.current) >= 0 ? "+" : ""}$${(p.plan_entry - p.current).toFixed(2)}`}
-                  </div>
-                ) : <span className="text-muted-foreground">—</span>}
+                {p.current != null && p.plan_entry != null ? (() => {
+                  const pnl = positionPnlUsd(p)
+                  return (
+                    <div className={`font-mono tabular-nums font-semibold ${(pnl ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                      {pnl != null ? `${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}` : "—"}
+                    </div>
+                  )
+                })() : <span className="text-muted-foreground">—</span>}
               </TableCell>
               <TableCell className="text-right font-mono tabular-nums">${p.plan_target.toFixed(2)}</TableCell>
               <TableCell className="text-right font-mono tabular-nums">${p.plan_stop.toFixed(2)}</TableCell>
