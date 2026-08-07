@@ -1,0 +1,1 @@
+import{r as e,u as t}from"./badge-BTFROv66.js";var n=t();function r({className:t,...r}){return(0,n.jsx)(`div`,{"data-slot":`skeleton`,className:e(`animate-pulse rounded-md bg-muted`,t),...r})}export{r as t};

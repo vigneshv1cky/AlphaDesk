@@ -130,7 +130,9 @@ async def _serve() -> None:
                     store.record_exit(pid, r, **pf))
                 n += 1
             if n:
-                log.info("Session-close sweep: exited %d position(s) at %s close", n, sess)
+                log.info("Session-close sweep: exited %d position(s) at close", n)
+                from alphadesk.app.alerts import notify
+                notify(f"Session close: exited {n} position(s)", "warn")
             return n
         while True:
             try:
@@ -402,6 +404,9 @@ async def _serve() -> None:
                             if quant_dropped:
                                 summary_parts.append(f"{quant_dropped} pre-filtered out")
                             log.info("Auto-run complete — %s", ", ".join(summary_parts))
+                            if picks_found:
+                                from alphadesk.app.alerts import notify
+                                notify("Find Trades: " + ", ".join(summary_parts), "pick")
                         finally:
                             running = False
             except Exception as exc:

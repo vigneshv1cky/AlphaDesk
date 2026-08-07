@@ -252,6 +252,17 @@ export interface SessionsResponse {
   agg: { day: SessionAgg; extended: SessionAgg; night: SessionAgg }
 }
 
+export interface SystemInfo {
+  last_run: string | null
+  runs_today: { total: number; with_picks: number; last_ts: string | null }
+  funnel_today: { candidates: number; picked: number; skipped: number }
+  open_positions: number
+  graded: number
+  exited: number
+  uptime_s: number
+  market: string
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path)
   if (!res.ok) throw new Error(`${path}: ${res.status}`)
@@ -263,6 +274,7 @@ export const api = {
   live: () => get<{ live: LivePick[]; market: string }>("/api/live"),
   timelines: () => get<{ symbols: SymbolTimeline[]; market: string }>("/api/timelines"),
   stats: () => get<Stats>("/api/stats"),
+  system: () => get<SystemInfo>("/api/system"),
   tokens: (days = 1) => get<{ usage: TokenRow[] }>(`/api/tokens?days=${days}`),
   sources: (days = 30) => get<{ sources: SourceStat[] }>(`/api/sources?days=${days}`),
   earnings: () =>

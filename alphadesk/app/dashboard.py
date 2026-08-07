@@ -74,6 +74,25 @@ def api_sources(days: int = 30):
     return {"days": days, "sources": store.source_scorecard(days)}
 
 
+@app.get("/api/system")
+def api_system():
+    """System-health panel: is the desk alive and covering? Last run, run cadence
+    today (how many actually booked), the coverage funnel, open positions, and
+    process uptime."""
+    from alphadesk.config import session as market_session
+    s = store.stats()["total"]
+    return {
+        "last_run": s.get("last_run"),
+        "runs_today": store.runs_summary_today(),
+        "funnel_today": store.funnel_today(),
+        "open_positions": store.open_position_count(),
+        "graded": s.get("graded"),
+        "exited": s.get("exited"),
+        "uptime_s": round(_process_age_s()),
+        "market": market_session(),
+    }
+
+
 @app.get("/api/quant/stats")
 def api_quant_stats():
     """Signal-level performance: hit rate per signal, current weights,

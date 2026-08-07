@@ -1239,4 +1239,29 @@ def runs_today(kind: str = "FIND_TRADES") -> int:
     return int(n)
 
 
+def runs_summary_today(kind: str = "FIND_TRADES") -> dict:
+    """Run-activity for the system-health panel: total runs today, how many actually
+    booked picks (top_picks non-empty), and the most recent run time."""
+    start = _et_day_start_utc()
+    with _connect() as conn:
+        total = int(conn.execute(
+            "SELECT count(*) FROM runs WHERE kind=? AND ts >= ?", (kind, start)).fetchone()[0])
+        with_picks = int(conn.execute(
+            "SELECT count(*) FROM runs WHERE kind=? AND ts >= ? AND top_picks NOT IN ('[]','')",
+            (kind, start)).fetchone()[0])
+        last = conn.execute(
+            "SELECT max(ts) FROM runs WHERE kind=?", (kind,)).fetchone()[0]
+    return {"total": total, "with_picks": with_picks, "last_ts": last}
+
+
+def funnel_today() -> dict:
+    """Today's coverage funnel: candidates scored → picked → why-dropped."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(sum(candidates),0) AS candidates,"
+            " COALESCE(sum(picked),0) AS picked, COALESCE(sum(skipped),0) AS skipped"
+            " FROM funnel WHERE window_ts >= ?", (_et_day_start_utc(),)).fetchone()
+    return dict(row) if row else {"candidates": 0, "picked": 0, "skipped": 0}
+
+
 init()

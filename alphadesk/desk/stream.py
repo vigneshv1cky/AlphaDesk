@@ -240,6 +240,8 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
         if drop_reasons:
             store.record_skips(drop_reasons)
         await loop.run_in_executor(None, store.add_run, "FIND_TRADES", [])
+        from alphadesk.app.alerts import notify
+        notify(f"Risk rail: at max {MAX_OPEN_POSITIONS} open positions — not booking", "warn")
         yield _ev("status", msg=f"Risk rail: at max {MAX_OPEN_POSITIONS} open positions — not booking.")
         yield _ev("done", board=[])
         return
@@ -252,6 +254,8 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
         if drop_reasons:
             store.record_skips(drop_reasons)
         await loop.run_in_executor(None, store.add_run, "FIND_TRADES", [])
+        from alphadesk.app.alerts import notify
+        notify(f"Risk rail: daily realized loss ≤ -{DAILY_LOSS_STOP_PCT:g}% — halted for the day", "error")
         yield _ev("status", msg=f"Risk rail: daily realized loss ≤ -{DAILY_LOSS_STOP_PCT:g}% — not booking until tomorrow.")
         yield _ev("done", board=[])
         return

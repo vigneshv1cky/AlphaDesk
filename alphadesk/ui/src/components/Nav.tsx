@@ -7,6 +7,7 @@ const LINKS = [
   { to: "/open", label: "Open" },
   { to: "/after", label: "After" },
   { to: "/earnings", label: "Earnings" },
+  { to: "/system", label: "Health" },
 ]
 
 export function Nav() {
