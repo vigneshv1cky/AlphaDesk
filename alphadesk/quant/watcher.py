@@ -49,6 +49,28 @@ SPIKE_VOLATILITY_MULT = 3.0
 STALE_HOURS = 6
 STALE_MIN_MOVE_PCT = 0.5
 
+# Session-scoped model: every position exits at the close of the session it was
+# booked in — no carry-over across markets. Each tradeable window is its own
+# trade: PRE (4:00–9:30), OPEN (9:30–16:00), AFTER (16:00–20:00). Close a few
+# minutes before the boundary so the exit clears the session.
+SESSION_CLOSE_TIMES = {"PRE": 9 * 60 + 25, "OPEN": 15 * 60 + 55, "AFTER": 19 * 60 + 55}
+
+
+def session_close_due() -> tuple[str, int] | None:
+    """(session, close_minute) if the current session is at/after its close time,
+    else None. Shared by the quant watcher and the main position watcher so both
+    enforce the same no-carry-over exit."""
+    from alphadesk.config import session as _market_session, now_et as _now_et
+    sess = _market_session()
+    close_min = SESSION_CLOSE_TIMES.get(sess)
+    if close_min is None:
+        return None
+    now = _now_et()
+    minutes = now.hour * 60 + now.minute
+    if minutes >= close_min:
+        return sess, close_min
+    return None
+
 # Per-pick tracking state
 _trail_peaks: dict[int, float] = {}
 _entry_timestamps: dict[int, float] = {}
@@ -174,18 +196,12 @@ def check_exits(pick_id: int, direction: str, entry: float,
                         "reason": f"spike reversal ({spike_dir:.1f}%)",
                         "tier": EXIT_SPIKE}
 
-    # Tier 5: session-close exit — 1-day horizon means exit at session end
-    from alphadesk.config import session as _market_session, now_et as _now_et
-    sess = _market_session()
-    if sess != "CLOSED":
-        now = _now_et()
-        minutes = now.hour * 60 + now.minute
-        # 5 min before regular close (15:55) or extended close (19:55)
-        close_time = 15 * 60 + 55 if sess == "OPEN" else 19 * 60 + 55
-        if minutes >= close_time:
-            return {"level": "session-close", "price": round(ptr, 4),
-                    "reason": f"session-close exit ({sess})",
-                    "tier": EXIT_CLOSE}
+    # Tier 5: session-close exit — session-scoped model (no carry-over across
+    # markets): every position exits at the close of the session it's in.
+    due = session_close_due()
+    if due:
+        return {"level": "session-close", "price": round(ptr, 4),
+                "reason": f"session-close exit ({due[0]})", "tier": EXIT_CLOSE}
 
     # Tier 6: stale exit — only during market hours (prices don't move overnight)
     entry_ts = _entry_timestamps.get(pick_id)

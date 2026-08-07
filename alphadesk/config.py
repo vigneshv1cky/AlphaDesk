@@ -119,6 +119,23 @@ def next_market_open(dt: datetime) -> datetime:
     return open_at(d)
 
 
+def next_session_open(dt: datetime) -> datetime:
+    """ET moment the next TRADEABLE session opens — the PRE (4:00) of the next
+    trading day. Session-scoped model (no carry-over across markets): a pick
+    decided when the market is closed enters at this moment and exits at that
+    session's close. If we're in a weekday night BEFORE 4:00, that's today's
+    PRE; otherwise it's the next trading day's 4:00 PRE."""
+    dt = dt.astimezone(ET)
+    def pre_at(d) -> datetime:
+        return datetime(d.year, d.month, d.day, 4, 0, tzinfo=ET)
+    if dt.weekday() < 5 and dt < pre_at(dt.date()):
+        return pre_at(dt.date())
+    d = dt.date() + timedelta(days=1)
+    while d.weekday() >= 5:
+        d += timedelta(days=1)
+    return pre_at(d)
+
+
 def market_context_line() -> str:
     now = now_et()
     sess = session(now)
@@ -130,11 +147,17 @@ def market_context_line() -> str:
 
 
 def entry_fill_time(ts_iso: str, sess: str | None) -> datetime | None:
+    """When a pick's entry actually fills, in ET.
+    Session-scoped model: PRE/OPEN/AFTER picks fill LIVE at decision time
+    (regular or extended hours); a CLOSED/night pick (no market open) enters at
+    the next session's open (4:00 PRE) and exits at that session's close."""
     try:
         dt = datetime.fromisoformat(ts_iso).astimezone(ET)
     except (ValueError, TypeError):
         return None
-    return dt if sess == "OPEN" else next_market_open(dt)
+    if sess in ("OPEN", "PRE", "AFTER"):
+        return dt
+    return next_session_open(dt)
 
 
 # ── Universe ─────────────────────────────────────────────────────────────────

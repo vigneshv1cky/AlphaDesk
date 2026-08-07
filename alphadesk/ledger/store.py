@@ -801,7 +801,7 @@ def open_hedges() -> list[dict]:
 
 
 def recent_team_picks(days: int = 30) -> list[dict]:
-    """All TEAM picks in the window, for per-symbol timelines (stance changes +
+    """All TEAM/QUANT picks in the window, for per-symbol timelines (stance changes +
     outcomes). Ordered so grouping keeps each symbol's events in time order."""
     with _connect() as conn:
         rows = conn.execute(
@@ -809,7 +809,7 @@ def recent_team_picks(days: int = 30) -> list[dict]:
             " adjusted_score, confidence, session, plan_entry, plan_target, plan_stop, plan_note,"
             " entry_price, spy_price, alpha_net, alpha_adj, beta, ret_horizon, graded_at, exit_ts, exit_reason,"
             " exit_price, exit_return_pct, exit_alpha, mfe_pct, mae_pct, taken"
-            " FROM picks WHERE arm='TEAM' AND ts >= datetime('now', ?)"
+            " FROM picks WHERE arm IN ('TEAM','QUANT') AND ts >= datetime('now', ?)"
             " ORDER BY symbol, id", (f"-{int(days)} days",),
         ).fetchall()
     return [dict(r) for r in rows]
@@ -823,7 +823,7 @@ def picks_for_path(days: int = 20) -> list[dict]:
         rows = conn.execute(
             "SELECT id, ts, symbol, direction, horizon_days, session, entry_price, exit_price,"
             " low_liquidity, exit_ts, plan_entry, order_type, mfe_pct FROM picks"
-            " WHERE arm='TEAM' AND plan_entry IS NOT NULL"
+            " WHERE arm IN ('TEAM','QUANT') AND plan_entry IS NOT NULL"
             "   AND ts >= datetime('now', ?)"
             "   AND (mfe_pct IS NULL OR (graded_at IS NULL AND exit_ts IS NULL))",
             (f"-{int(days)} days",),
@@ -878,20 +878,30 @@ def set_entry_price(pick_id: int, price: float) -> None:
 def record_exit(pick_id: int, reason: str, exit_price: float | None = None,
                 exit_return_pct: float | None = None,
                 exit_alpha: float | None = None) -> bool:
-    """Stamp an early exit (a target/stop hit or a review) WITH its realized
-    performance at the exit price. Distinct from the horizon grade (alpha_net),
-    which still settles at the declared horizon and measures the call's edge.
+    """Stamp an early exit (a target/stop hit, a session-close, or a review)
+    WITH its realized performance at the exit price.
+
+    Session-scoped model: a position's result IS its exit (it never carries past
+    its session), so a real exit with an alpha also becomes the pick's grade —
+    alpha_net = the realized exit alpha vs SPY, ret_horizon = the realized return,
+    and graded_at is stamped so the forward 1-day grader never re-grades it.
+    (COALESCE keeps an existing grade if one somehow already resolved.)
 
     Idempotent: the `exit_ts IS NULL` guard means only the FIRST close wins — three
     writers (watcher level-cross, run review, watcher escalation) can race the same
     open position, and the guard stops a second one overwriting the realized price/
     reason (or, with real orders, sending a second close). Returns True if this call
     closed it, False if it was already closed."""
+    graded = datetime.now(timezone.utc).isoformat() if exit_alpha is not None else None
     with _lock, _connect() as conn:
         cur = conn.execute(
             "UPDATE picks SET exit_ts=?, exit_reason=?, exit_price=?,"
-            " exit_return_pct=?, exit_alpha=? WHERE id=? AND exit_ts IS NULL",
-            (_now(), reason, exit_price, exit_return_pct, exit_alpha, int(pick_id)))
+            " exit_return_pct=?, exit_alpha=?,"
+            " alpha_net=COALESCE(alpha_net, ?), ret_horizon=COALESCE(ret_horizon, ?),"
+            " graded_at=COALESCE(graded_at, ?)"
+            " WHERE id=? AND exit_ts IS NULL",
+            (_now(), reason, exit_price, exit_return_pct, exit_alpha,
+             exit_alpha, exit_return_pct, graded, int(pick_id)))
         return cur.rowcount > 0
 
 

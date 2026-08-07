@@ -77,8 +77,6 @@ async def _serve() -> None:
         OPEN hours: bar-based + Model-A fills; PRE/AFTER: spot-price for
         extended-hours fills; CLOSED: skip monitoring."""
         from alphadesk.config import (
-            LIMIT_FILL_BUFFER_PCT,
-            LIMIT_FILL_MIN_CUSHION_FRAC,
             WATCH_INTERVAL_S,
             entry_fill_time,
             now_et,
@@ -87,23 +85,71 @@ async def _serve() -> None:
         from alphadesk.desk.plan import (
             first_touch_exit,
             level_crossed,
-            limit_fill,
             realized_exit,
         )
+        from alphadesk.quant.watcher import session_close_due
         from alphadesk.ingest import prices
         from alphadesk.ledger import store
         loop = asyncio.get_running_loop()
         log = logging.getLogger("alphadesk.watch")
         last_check: dict[int, object] = {}   # pick_id → ET ts we last walked bars up to
         _fill_quality_flagged: set[int] = set()  # picks we've already warned about (one-shot)
+
+        async def _sweep_session_close(open_pos, quotes) -> int:
+            """NO-CARRY-OVER guarantee: force-close every filled open position at the
+            current price once its session is at/after the close minute (PRE 9:25 /
+            OPEN 15:55 / AFTER 19:55). The quant watcher enforces this per-pick with
+            live stream prices; this sweep is the belt-and-suspenders so a position
+            NEVER carries into another market even if tiered exits are disabled.
+            record_exit is idempotent, so both closing a pick is safe."""
+            due = session_close_due()
+            if not due:
+                return 0
+            sess = due[0]
+            spy_now = quotes.get("SPY")
+            n = 0
+            for p in open_pos:
+                if not (p.get("taken")
+                        and (p.get("entry_price") is not None
+                             or p.get("broker_fill_price") is not None)
+                        and p.get("plan_target") and p.get("plan_stop")):
+                    continue
+                cur = quotes.get(p["symbol"].upper())
+                if not cur:
+                    continue
+                entry = (p.get("entry_price") or p.get("broker_fill_price")
+                         or p.get("plan_entry"))
+                perf = realized_exit(p["direction"], entry, cur,
+                                     p.get("spy_price"), spy_now,
+                                     bool(p.get("low_liquidity")))
+                reason = f"session-close ({sess})"
+                await loop.run_in_executor(
+                    None, lambda pid=p["id"], r=reason, pf=perf:
+                    store.record_exit(pid, r, **pf))
+                n += 1
+            if n:
+                log.info("Session-close sweep: exited %d position(s) at %s close", n, sess)
+            return n
         while True:
             try:
                 sess = market_session()
                 if sess == "CLOSED":
                     pass   # no monitoring outside market windows
-                elif sess == "OPEN":
-                    # ── FULL-SESSION monitoring: Model-A fill resolution + bar-based
-                    # exits + spot fallback. ──
+                else:
+                    # ── NO CARRY-OVER ACROSS MARKETS: every filled position exits
+                    # at the close of the session it's in (PRE 9:25 / OPEN 15:55 /
+                    # AFTER 19:55), so a trade NEVER survives into another session.
+                    # The quant watcher closes per-pick with live stream prices;
+                    # this sweep is the guarantee even if tiered exits are off. ──
+                    if session_close_due():
+                        open_pos = await loop.run_in_executor(None, store.live_picks)
+                        if open_pos:
+                            quotes = await loop.run_in_executor(
+                                None, prices.latest_prices,
+                                [p["symbol"] for p in open_pos] + ["SPY"])
+                            await _sweep_session_close(open_pos, quotes)
+                if sess == "OPEN":
+                    # ── FULL-SESSION monitoring: bar-based exits + spot fallback. ──
                     open_pos = await loop.run_in_executor(None, store.live_picks)
                     quotes: dict[str, float] = {}
                     spy_now: float | None = None
@@ -132,42 +178,24 @@ async def _serve() -> None:
                                         "%.1f%% from current price %.2f — possibly thin "
                                         "extended-hours fill",
                                         p["id"], p["symbol"], fill_px, div, cur)
-                    # Model A fill: once a closed-market pick's 9:30 open has passed,
-                    # resolve its entry from the fill-day OHLC. Market → the open; limit
-                    # → its level if price reached it (stamp entry_price so live P&L /
-                    # exits measure from the real fill), else the limit never triggered
-                    # → NOT TAKEN (no fill, no P&L). Broker-routed picks (PM) are
-                    # skipped — the PM owns their fill (broker_fill_price).
+                    # Session-scoped model: fills happen in the session they're
+                    # booked for — OPEN/PRE/AFTER picks fill live at decision; night
+                    # (CLOSED) picks fill at the next PRE open (4:00, in the PRE
+                    # branch). Anything still unfilled once its fill moment has
+                    # passed was never filled in its session → NOT TAKEN (no
+                    # carry-over into another market).
                     now = now_et()
-                    unfilled = [p for p in open_pos if p.get("entry_price") is None
-                                and not p.get("broker_order_id")
-                                and (ft := entry_fill_time(p["ts"], p.get("session"))) and ft <= now]
                     not_taken_ids: set[int] = set()
-                    if unfilled:
-                        items = [{"id": p["id"], "symbol": p["symbol"],
-                                  "fill_date": entry_fill_time(p["ts"], p["session"]).strftime("%Y-%m-%d")}
-                                 for p in unfilled]
-                        ohlc = await loop.run_in_executor(None, prices.fill_ohlc, items)
-                        for p in unfilled:
-                            if p["id"] not in ohlc:
-                                continue
-                            o, h, low = ohlc[p["id"]]
-                            px = limit_fill(p["direction"], p.get("order_type"),
-                                            p.get("plan_entry"), o, h, low, LIMIT_FILL_BUFFER_PCT,
-                                            stop=p.get("plan_stop"),
-                                            min_cushion_frac=LIMIT_FILL_MIN_CUSHION_FRAC)
-                            if px is not None:
-                                await loop.run_in_executor(
-                                    None, lambda i=p["id"], x=px: store.set_entry_price(i, x))
-                                p["entry_price"] = px   # use it this pass too
-                            else:
-                                reason = (f"not taken: limit {p.get('plan_entry')} not filled — price never "
-                                          "reached it, or gapped against the thesis too close to the stop")
-                                await loop.run_in_executor(
-                                    None, lambda i=p["id"], r=reason: store.record_exit(i, r))
-                                not_taken_ids.add(p["id"])
-                                log.info("Not taken #%d %s — limit %s not reached",
-                                         p["id"], p["symbol"], p.get("plan_entry"))
+                    stale = [p for p in open_pos if p.get("entry_price") is None
+                             and not p.get("broker_order_id")
+                             and (ft := entry_fill_time(p["ts"], p.get("session"))) and ft <= now]
+                    for p in stale:
+                        reason = f"not taken: {p['symbol']} never filled in its session"
+                        await loop.run_in_executor(
+                            None, lambda i=p["id"], r=reason: store.record_exit(i, r))
+                        not_taken_ids.add(p["id"])
+                        log.info("Not taken #%d %s — no fill in its session",
+                                 p["id"], p["symbol"])
                     # Only auto-exit positions that were actually TAKEN and FILLED —
                     # live_picks also carries counterfactuals the Head passed on and
                     # not-yet-filled limits (entry_price is NULL); exiting those would
@@ -234,10 +262,29 @@ async def _serve() -> None:
 
 
                 elif sess in ("PRE", "AFTER"):
-                    # ── EXTENDED-HOURS monitoring: spot-price only for broker-filled
-                    # positions (no intraday bars exist in extended hours). Model-A
-                    # fill resolution waits for the OPEN session. ──
+                    # ── EXTENDED-HOURS monitoring: spot-price only for filled
+                    # positions (no intraday bars exist in extended hours). ──
                     open_pos = await loop.run_in_executor(None, store.live_picks)
+                    if sess == "PRE":
+                        # Night (CLOSED) picks enter at the PRE open (4:00): stamp the
+                        # live price once the session is live — enter at session open,
+                        # exit at session close (9:25). No extended trade yet → stays
+                        # pending; the OPEN branch marks it not-taken if it never fills.
+                        now = now_et()
+                        queued = [p for p in open_pos if p.get("entry_price") is None
+                                  and not p.get("broker_order_id")
+                                  and (ft := entry_fill_time(p["ts"], p.get("session"))) and ft <= now]
+                        if queued:
+                            q = await loop.run_in_executor(
+                                None, prices.latest_prices,
+                                [p["symbol"] for p in queued])
+                            for p in queued:
+                                px = q.get(p["symbol"].upper())
+                                if px:
+                                    await loop.run_in_executor(
+                                        None, lambda i=p["id"], x=px: store.set_entry_price(i, x))
+                                    log.info("Filled queued night pick #%d %s @ %.2f (PRE open)",
+                                             p["id"], p["symbol"], px)
                     # Only monitor positions that already HAVE a fill (broker fill from
                     # extended-hours limit orders or already-stamped entry_price) — unfilled
                     # closed-market picks have nothing to monitor until the open.
@@ -369,6 +416,7 @@ async def _serve() -> None:
                 from alphadesk.quant import stream as qstream
                 log.info("Starting Alpaca WebSocket stream for real-time prices")
                 await qstream.start_stream()
+                qstream.register("SPY")
             except Exception as exc:
                 log.warning("Alpaca stream start failed: %s — using REST price checks", exc)
         from alphadesk.quant import watcher as qwatcher
@@ -397,10 +445,20 @@ async def _serve() -> None:
                         s = p["symbol"].upper()
                         if s not in live_prices:
                             qs.register(s)
+                    if "SPY" not in live_prices:
+                        qs.register("SPY")
                 if not live_prices:
                     from alphadesk.ingest import prices
                     syms = [p["symbol"] for p in monitorable] + ["SPY"]
                     live_prices = await loop.run_in_executor(None, prices.latest_prices, syms)
+                # exit alpha needs SPY now — if the stream hasn't ticked SPY yet, pull it
+                # via REST so quant exits still get graded against the benchmark
+                if "SPY" not in live_prices:
+                    from alphadesk.ingest import prices
+                    spy_quotes = await loop.run_in_executor(None, prices.latest_prices, ["SPY"])
+                    spy_px = spy_quotes.get("SPY")
+                    if spy_px is not None:
+                        live_prices["SPY"] = spy_px
                 for p in monitorable:
                     cur = live_prices.get(p["symbol"].upper())
                     if not cur:
