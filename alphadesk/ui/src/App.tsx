@@ -13,10 +13,15 @@ import { Moon, Monitor, Sun } from "lucide-react"
 const LivePage = lazy(() => import("@/pages/LivePage"))
 const HistoryPage = lazy(() => import("@/pages/HistoryPage"))
 const EarningsPage = lazy(() => import("@/pages/EarningsPage"))
+const MarketPage = lazy(() => import("@/pages/MarketPage"))
 
 const TITLES: Record<string, string> = {
   "/live": "Live Positions · AlphaDesk",
   "/history": "History · AlphaDesk",
+  "/pre": "Pre-Market · AlphaDesk",
+  "/open": "Open Market · AlphaDesk",
+  "/after": "After Hours · AlphaDesk",
+  "/night": "Night · AlphaDesk",
   "/earnings": "Earnings · AlphaDesk",
 }
 
@@ -74,7 +79,7 @@ function Shell() {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
       <header className="z-30 shrink-0 border-b border-border bg-background/85 backdrop-blur">
-        <div className="mx-auto flex max-w-[1200px] items-center gap-3 px-5 py-2.5">
+        <div className="mx-auto flex max-w-[1440px] items-center gap-3 px-5 py-2.5">
           <div className="flex items-center gap-2.5">
             <span className="h-3.5 w-3.5 rotate-45 rounded-[3px] bg-indigo-500" />
             <div className="leading-none">
@@ -102,6 +107,10 @@ function Shell() {
               <Route path="/" element={<Navigate to="/live" replace />} />
               <Route path="/live" element={<LivePage rows={liveRows} market={market} loading={!liveLoaded} />} />
               <Route path="/history" element={<HistoryPage symbols={symbols} stats={stats} loading={!historyLoaded} />} />
+              <Route path="/pre" element={<MarketPage session="PRE" liveRows={liveRows} symbols={symbols} loading={!historyLoaded} />} />
+              <Route path="/open" element={<MarketPage session="OPEN" liveRows={liveRows} symbols={symbols} loading={!historyLoaded} />} />
+              <Route path="/after" element={<MarketPage session="AFTER" liveRows={liveRows} symbols={symbols} loading={!historyLoaded} />} />
+              <Route path="/night" element={<MarketPage session="CLOSED" liveRows={liveRows} symbols={symbols} loading={!historyLoaded} />} />
               <Route path="/earnings" element={<EarningsPage earnings={earnings} />} />
               <Route path="*" element={<Navigate to="/live" replace />} />
             </Routes>

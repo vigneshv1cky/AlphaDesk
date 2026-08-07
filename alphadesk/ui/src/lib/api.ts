@@ -116,6 +116,7 @@ export interface TimelineEvent {
   entry_ts: string // honest entry fill time (9:30 open if the call was made off-hours)
   direction: "LONG" | "SHORT"
   horizon_days: number
+  session: string // PRE | OPEN | AFTER | CLOSED — the market window the trade ran in
   edge: string | null
   verdict: string | null
   approved: number
