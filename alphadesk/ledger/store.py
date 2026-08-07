@@ -778,6 +778,18 @@ def set_broker_fill(pick_id: int, price: float, ts: str) -> None:
             (round(float(price), 4), str(ts)[:40], int(pick_id)))
 
 
+def picks_with_open_broker_orders() -> list[dict]:
+    """Routed-but-unfilled picks (broker_order_id set, order not terminal, not
+    exited) — the set the paper PM reconciles against."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, symbol, direction, broker_order_id, broker_status FROM picks"
+            " WHERE broker_order_id IS NOT NULL AND exit_ts IS NULL"
+            " AND COALESCE(broker_status, '') NOT IN ('filled','cancelled','expired','rejected')"
+            " ORDER BY id").fetchall()
+    return [dict(r) for r in rows]
+
+
 def pm_managed_symbols() -> set[str]:
     """Symbols the paper PM has ever routed to the broker — so reconcile() only ever
     CLOSES positions it opened itself, never a manual trade in the same account."""

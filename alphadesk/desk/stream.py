@@ -362,6 +362,23 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
                  (trade or {}).get("entry", 0),
                  (trade or {}).get("stop", 0),
                  (trade or {}).get("target", 0))
+
+        # Opt-in Alpaca PAPER fills: route the real order so the ledger gets the
+        # broker's actual fill (slippage/borrow). Fail-closed — a route failure
+        # leaves the pick un-routed rather than a phantom position.
+        from alphadesk.config import PAPER_TRADING
+        if PAPER_TRADING:
+            from alphadesk.desk import portfolio
+            routed = await loop.run_in_executor(
+                None, portfolio.route_pick, pick_id, sym, direction,
+                last or (trade or {}).get("entry", 0) or 0, conviction, stamp_sess)
+            if not routed:
+                reason = "not taken: broker route failed"
+                await loop.run_in_executor(
+                    None, lambda i=pick_id, r=reason: store.record_exit(i, r))
+                log.warning("Pick #%d %s not routed to broker — not taken", pick_id, sym)
+                continue
+
         row = {
             "id": pick_id, "symbol": sym, "direction": direction,
             "horizon_days": horizon, "edge": "MOMENTUM",

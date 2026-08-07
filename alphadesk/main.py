@@ -136,6 +136,14 @@ async def _serve() -> None:
             return n
         while True:
             try:
+                # Opt-in PAPER fills: sync broker order status → stamp real fills.
+                from alphadesk.config import PAPER_TRADING
+                if PAPER_TRADING:
+                    try:
+                        from alphadesk.desk import portfolio
+                        await loop.run_in_executor(None, portfolio.reconcile_all)
+                    except Exception as exc:
+                        log.warning("portfolio reconcile error: %s", exc)
                 sess = market_session()
                 if sess == "CLOSED":
                     pass   # no monitoring outside market windows
