@@ -51,9 +51,12 @@ STALE_MIN_MOVE_PCT = 0.5
 
 # Session-scoped model: every position exits at the close of the session it was
 # booked in — no carry-over across markets. Each tradeable window is its own
-# trade: PRE (4:00–9:30), OPEN (9:30–16:00), AFTER (16:00–20:00). Close a few
-# minutes before the boundary so the exit clears the session.
-SESSION_CLOSE_TIMES = {"PRE": 9 * 60 + 25, "OPEN": 15 * 60 + 55, "AFTER": 19 * 60 + 55}
+# trade: PRE (4:00–9:30), OPEN (9:30–16:00), AFTER (16:00–20:00). The EXIT buffer
+# is centralized in config (SESSION_EXIT_MIN) — positions exit a few minutes
+# before the boundary so the close clears the session.
+from alphadesk.config import SESSION_EXIT_MIN
+
+SESSION_CLOSE_TIMES = SESSION_EXIT_MIN
 
 
 def session_close_due() -> tuple[str, int] | None:

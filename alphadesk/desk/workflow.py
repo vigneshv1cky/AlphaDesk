@@ -47,6 +47,11 @@ async def research_run(candidates: dict[str, list[dict]], trigger_src: str = "ST
         _seed_cooldowns_from_ledger()
     now = time.monotonic()
 
+    # ENTRY buffer: no new positions in the last ENTRY_BUFFER_MIN of a session.
+    from alphadesk.config import entry_allowed
+    if not entry_allowed():
+        return []
+
     eligible = {s: a for s, a in candidates.items() if _repick_at.get(s, 0.0) <= now}
     if not eligible:
         return []

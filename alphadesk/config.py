@@ -160,6 +160,35 @@ def entry_fill_time(ts_iso: str, sess: str | None) -> datetime | None:
     return next_session_open(dt)
 
 
+# ── Per-market entry/exit buffers ─────────────────────────────────────────────
+# Each tradeable window is its own trade. Give it room to work at both ends:
+#   • EXIT buffer  — every position exits EXIT_BUFFER_MIN before its session's
+#     close, so the close clears before the market flips to the next window.
+#   • ENTRY buffer — no NEW positions in the last ENTRY_BUFFER_MIN of a session;
+#     a pick opened then would barely have time to work before that exit.
+# Night (CLOSED) is exempt on both — nothing trades 20:00–4:00; night-decided
+# picks queue for the next 4:00 open and get a full window.
+EXIT_BUFFER_MIN = int(os.environ.get("EXIT_BUFFER_MIN", "5"))
+ENTRY_BUFFER_MIN = int(os.environ.get("ENTRY_BUFFER_MIN", "15"))
+
+SESSION_CLOSE_MIN = {"PRE": 9 * 60 + 30, "OPEN": 16 * 60, "AFTER": 20 * 60}
+SESSION_EXIT_MIN = {s: close - EXIT_BUFFER_MIN for s, close in SESSION_CLOSE_MIN.items()}
+SESSION_ENTRY_DEADLINE_MIN = {s: close - ENTRY_BUFFER_MIN for s, close in SESSION_CLOSE_MIN.items()}
+
+
+def entry_allowed(now: datetime | None = None) -> bool:
+    """True if a NEW position may be opened right now. False when the current
+    session is inside its entry buffer — a pick opened then would barely have time
+    to work before the session-close exit. CLOSED (night) is allowed: those picks
+    queue for the next 4:00 PRE open and get a full window."""
+    dt = (now or now_et()).astimezone(ET)
+    sess = session(dt)
+    if sess == "CLOSED":
+        return True
+    minutes = dt.hour * 60 + dt.minute
+    return minutes < SESSION_ENTRY_DEADLINE_MIN[sess]
+
+
 # ── Universe ─────────────────────────────────────────────────────────────────
 
 _UNIVERSE_CACHE = DATA_DIR / "universe.json"

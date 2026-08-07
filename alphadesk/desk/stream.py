@@ -106,6 +106,15 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
         yield _ev("done", board=[])
         return
 
+    # ENTRY buffer: a pick opened in the last ENTRY_BUFFER_MIN of a session would
+    # barely have time to work before the session-close exit — skip the run.
+    from alphadesk.config import entry_allowed
+    if not entry_allowed():
+        await loop.run_in_executor(None, store.add_run, "FIND_TRADES", [])
+        yield _ev("status", msg="Session closing — inside the entry buffer; no new positions until the next session.")
+        yield _ev("done", board=[])
+        return
+
     # Quant scoring — limited to prevent yfinance rate-limiting on large slates
     from alphadesk.quant import signals as qs
     from alphadesk.quant import calibrate as qc
