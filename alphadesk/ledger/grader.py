@@ -20,10 +20,11 @@ from alphadesk.ledger import store
 log = logging.getLogger("alphadesk.grader")
 
 _history_cache: dict[str, object] = {}
+_HISTORY_CACHE_MAX = 500
 
 
 def _daily_history(symbol: str):
-    """Daily OHLC frame for the last ~60 days (cached per grading pass)."""
+    """Daily OHLC frame for the last ~60 days (cached per grading pass, size-bounded)."""
     if symbol in _history_cache:
         return _history_cache[symbol]
     import yfinance as yf
@@ -36,6 +37,8 @@ def _daily_history(symbol: str):
         _history_cache[symbol] = None
         return None
     df = df.tz_convert(ET) if df.index.tz is not None else df.tz_localize(ET)
+    if len(_history_cache) >= _HISTORY_CACHE_MAX:
+        _history_cache.pop(next(iter(_history_cache)), None)
     _history_cache[symbol] = df
     return df
 
@@ -293,14 +296,51 @@ def _entry_and_outcomes(row: dict, df, spy) -> dict | None:
 def grade_due() -> int:
     """Grade all picks whose horizons have elapsed. Returns rows updated.
     Also updates the MFE/MAE path (open + closed) and skip grades each pass."""
+    import time as _time
     _history_cache.clear()
-    spy = _daily_history("SPY")
+    _time.sleep(2)  # rate-limit breathing room between passes
+
+    # Batch-preload ALL symbols needed this pass (single download → no 429s)
+    import yfinance as yf
+    due = store.due_for_grading()
+    due_react = store.due_reactions()
+    due_skip = store.due_skips()
+    all_syms = {"SPY"}
+    for r in due:
+        all_syms.add(r["symbol"])
+    for r in due_react:
+        all_syms.add(r["symbol"])
+    for s in due_skip:
+        all_syms.add(s["symbol"])
+    if all_syms and len(all_syms) > 0:
+        try:
+            import pandas as pd
+            sym_list = list(all_syms)
+            df_batch = yf.download(sym_list, period="60d", interval="1d",
+                                   group_by="ticker", progress=False, threads=True,
+                                   auto_adjust=False)
+            if df_batch is not None and not (isinstance(df_batch, pd.DataFrame) and df_batch.empty):
+                is_multi = isinstance(df_batch.columns, pd.MultiIndex)
+                for sym in all_syms:
+                    try:
+                        if is_multi and sym in df_batch.columns.get_level_values(0):
+                            df = df_batch[sym].copy()
+                        elif len(sym_list) == 1 and sym == sym_list[0]:
+                            df = df_batch.copy()
+                        else:
+                            continue
+                        if isinstance(df, pd.DataFrame) and len(df) > 0:
+                            df_tz = df.tz_convert(ET) if df.index.tz is not None else df.tz_localize(ET)
+                            _history_cache[sym] = df_tz
+                    except Exception:
+                        continue
+        except Exception as exc:
+            log.warning("Batch history download failed: %s — falling back to per-symbol", exc)
+    spy = _history_cache.get("SPY") or _daily_history("SPY")
+    _time.sleep(1)  # cooldown after batch download
     graded = 0
+    calibrated_picks: list[dict] = []
     if spy is None:
-        # No benchmark → grading would either corrupt (stamping graded_at with no
-        # alpha) or mis-grade (skips benchmarked against 0 = every big day flags a
-        # false miss). Skip ALL grading this pass; next hourly pass heals. MFE/MAE
-        # needs no benchmark, so it still updates.
         log.warning("SPY history unavailable — skipping pick/reaction/skip grading "
                     "this pass (MFE/MAE path still updates)")
     else:
@@ -308,11 +348,11 @@ def grade_due() -> int:
             try:
                 df = _daily_history(row["symbol"])
                 if df is None:
-                    _maybe_void(row, df_missing=True)   # delisted long past window
+                    _maybe_void(row, df_missing=True)
                     continue
                 out = _entry_and_outcomes(row, df, spy)
                 if not out:
-                    _maybe_void(row)   # never-filled 'not taken' past its fill time
+                    _maybe_void(row)
                     continue
                 store.update_pick(row["id"], **out)
                 if "graded_at" in out:
@@ -322,11 +362,39 @@ def grade_due() -> int:
                         row["id"], row["symbol"], row["direction"], row["horizon_days"],
                         out.get("ret_horizon", float("nan")), out.get("alpha_net"),
                     )
+                    # Collect for quant calibration
+                    debate = row.get("debate") or {}
+                    qsig = debate.get("quant_signals", {})
+                    if qsig:
+                        calibrated_picks.append({
+                            "direction": out.get("graded_direction", row.get("direction", "")),
+                            "pnl_pct": out.get("alpha_net", 0),
+                            "signals": qsig,
+                        })
             except Exception as exc:
                 log.warning("Grading failed for #%d %s: %s", row["id"], row["symbol"], exc)
-        grade_reactions()   # forward-grade the gate A/B shadow cohort
+        grade_reactions()
         graded += grade_skips()
-    grade_paths()   # refresh MFE/MAE (open + closed); a routine update, not a "grade"
+    grade_paths()
+    # ── Quant calibration: update weights from graded outcomes ──
+    if calibrated_picks:
+        try:
+            from alphadesk.config import QUANT_CALIBRATE
+            if QUANT_CALIBRATE:
+                from alphadesk.quant import calibrate as qcal
+                weights = qcal.load_weights()
+                for cp in calibrated_picks:
+                    weights = qcal.online_update(
+                        weights, cp["signals"], cp["direction"], cp["pnl_pct"])
+                qcal.save_weights(weights)
+                if len(calibrated_picks) >= 10:
+                    qcal.batch_calibrate(calibrated_picks)
+                # Also get graded picks with exit info for exit param optimization
+                exited = store.get_graded_exits(days=30)
+                if len(exited) >= 20:
+                    qcal.optimize_exits(exited)
+        except Exception as exc:
+            log.debug("Quant calibration skipped: %s", exc)
     return graded
 
 

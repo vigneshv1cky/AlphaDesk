@@ -149,7 +149,7 @@ export function LiveTracker() {
 
       {loaded && rows.length === 0 && recentExits.length === 0 ? (
         <Card className="text-sm text-muted-foreground">
-          No open picks to track. Run <span className="font-medium text-foreground">Find Trades</span> —
+          No open picks to track. Picks will appear here after the next auto-run.
           picks with a plan show up here and update live.
         </Card>
       ) : (

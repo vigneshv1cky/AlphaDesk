@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react"
 import { ChevronDown } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import type { EarningsRow } from "@/lib/api"
 import { InfoTip } from "@/components/InfoTip"
 import { Badge } from "@/components/ui/badge"
@@ -37,7 +38,7 @@ function Panel({
       >
         <CollapsibleTrigger
           render={
-            <button className="group -mx-1 flex w-full items-center gap-2 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-muted/40" />
+            <Button variant="ghost" className="group -mx-1 h-auto w-full justify-start gap-2 rounded-md px-1 py-0.5 text-left" />
           }
         >
           <span className="text-xs font-semibold uppercase tracking-wider text-foreground/75">
@@ -118,7 +119,7 @@ const ENG: Record<string, { label: string; cls: string }> = {
 
 function EngBadge({ state }: { state?: string }) {
   const b = state ? ENG[state] : undefined
-  if (!b) return <span className="text-[11px] text-muted-foreground/40">·</span>
+  if (!b) return <Badge variant="ghost" className="text-muted-foreground/40">·</Badge>
   return <Badge className={b.cls}>{b.label}</Badge>
 }
 
@@ -224,10 +225,11 @@ function ReportedRow({ e }: { e: EarningsRow }) {
   const up = (drift ?? 0) >= 0
   const took = e.engagement === "TOOK" || e.engagement === "DEBATED"
   return (
-    <li className="text-sm">
-      <button
+    <div className="text-sm">
+      <Button
+        variant="ghost"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 py-1.5 text-left transition-colors hover:bg-muted/30"
+        className="flex h-auto w-full items-center gap-2 py-1.5 text-left"
       >
         <span className="w-16 font-semibold">{e.symbol}</span>
         <span className="w-14 text-xs text-muted-foreground">{fmtCap(e.market_cap)}</span>
@@ -264,7 +266,7 @@ function ReportedRow({ e }: { e: EarningsRow }) {
             open ? "" : "-rotate-90"
           }`}
         />
-      </button>
+      </Button>
       {open && (
         <div className="mb-1.5 ml-16 mr-6 rounded-md bg-muted/40 px-2.5 py-2 text-xs leading-relaxed text-muted-foreground">
           {took && e.engagement_dir && (
@@ -276,7 +278,7 @@ function ReportedRow({ e }: { e: EarningsRow }) {
           {whyText(e)}
         </div>
       )}
-    </li>
+    </div>
   )
 }
 
@@ -291,35 +293,67 @@ function RunGroup({ g }: { g: DayGroup }) {
       <div className="mb-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
         {g.day === "—" ? "Run time n/a" : `Run ${dayLabel(g.day)} · 9:30 ET`}
       </div>
-      <ul className="divide-y divide-border">
+      <div className="divide-y divide-border">
         {shown.map((e) => (
-          <li key={e.symbol + e.report_date} className="flex items-center gap-2 py-1.5 text-sm">
+          <div key={e.symbol + e.report_date} className="flex items-center gap-2 py-1.5 text-sm">
             <span className="w-14 font-semibold">{e.symbol}</span>
             <span className="w-14 text-xs text-muted-foreground">{fmtCap(e.market_cap)}</span>
             <span className="ml-auto text-xs text-muted-foreground">
               {e.report_date.slice(5, 10)} {e.session}
             </span>
-          </li>
+          </div>
         ))}
-      </ul>
+      </div>
       {more > 0 && (
-        <button
+        <Button
+          variant="ghost"
+          size="xs"
           onClick={() => setExpanded((v) => !v)}
-          className="mt-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+          className="mt-1 font-medium"
         >
           {expanded ? "− show less" : `+${more} more`}
-        </button>
+        </Button>
       )}
     </div>
+  )
+}
+
+function ReportedDayGroup({ g }: { g: DayGroup }) {
+  const [showAll, setShowAll] = useState(false)
+  const shown = showAll ? g.rows : g.rows.slice(0, 50)
+  const more = g.rows.length - 50
+  return (
+    <>
+      {shown.map((e) => (
+        <ReportedRow key={e.symbol + e.report_date} e={e} />
+      ))}
+      {more > 0 && (
+        <div className="py-2 text-center">
+          <Button variant="ghost" size="sm" onClick={() => setShowAll(!showAll)} className="text-xs">
+            {showAll ? "Show less" : `Show all (${more} more)`}
+          </Button>
+        </div>
+      )}
+    </>
   )
 }
 
 export function Earnings({
   earnings,
 }: {
-  earnings?: { upcoming: EarningsRow[]; reported: EarningsRow[] }
+  earnings?: { upcoming: EarningsRow[]; reported: EarningsRow[] } | null
 }) {
-  if (!earnings || (earnings.reported.length === 0 && earnings.upcoming.length === 0)) {
+  if (earnings === null || earnings === undefined) {
+    return (
+      <Panel>
+        <div className="flex items-center gap-3 py-3">
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
+          <p className="text-sm text-muted-foreground">Loading earnings calendar…</p>
+        </div>
+      </Panel>
+    )
+  }
+  if (earnings.reported.length === 0 && earnings.upcoming.length === 0) {
     return (
       <Panel>
         <p className="text-sm text-muted-foreground">
@@ -357,11 +391,9 @@ export function Earnings({
                   </span>
                   <span className="text-[11px] text-muted-foreground">{g.rows.length} names</span>
                 </div>
-                <ul className="divide-y divide-border">
-                  {g.rows.map((e) => (
-                    <ReportedRow key={e.symbol + e.report_date} e={e} />
-                  ))}
-                </ul>
+                <div className="divide-y divide-border">
+                  <ReportedDayGroup g={g} />
+                </div>
               </div>
             ))}
           </div>

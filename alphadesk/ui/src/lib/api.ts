@@ -104,6 +104,7 @@ export interface LivePick {
   current: number | null
   pnl_pct: number | null
   alpha_so_far: number | null // interim vs-SPY, net friction — NOT the official grade
+  adjusted_score: number | null // quant composite score at booking
   progress: number | null // 0 = at stop, 1 = at target
   status: string // working | near target | near stop | target hit | stopped out | no quote
 }

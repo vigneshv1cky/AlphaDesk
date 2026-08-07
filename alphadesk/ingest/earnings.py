@@ -194,6 +194,41 @@ def drift_candidates(days: int) -> dict[str, list[dict]]:
     live_now = (prices.latest_prices([e["symbol"] for e in reporters])
                 if mkt == "OPEN" and reporters else {})
     out: dict[str, list[dict]] = {}
+
+    # ── Pre-earnings drift candidates: stocks reporting soon with visible momentum ──
+    pre_candidates = store.upcoming_earnings(days=3)
+    if pre_candidates:
+        pre_syms = [p["symbol"] for p in pre_candidates]
+        pre_px = prices.latest_prices(pre_syms) if mkt == "OPEN" and pre_syms else {}
+        for p in pre_candidates:
+            esym = p["symbol"]
+            ctx = prices.get_context(esym)
+            if not ctx:
+                continue
+            chg = ctx.get("change_5d_pct") or 0.0
+            rvol = ctx.get("rvol") or 0.0
+            if abs(chg) < 2.0 or rvol < 1.2:
+                continue
+            pre_dir = "LONG" if chg > 0 else "SHORT"
+            sent = round(max(-1.0, min(1.0, chg / 5.0)), 3)
+            out[esym] = [{
+                "id": f"pre-earnings-{esym}-{p['report_date']}",
+                "title": (f"[PRE-EARNINGS] {esym} reports {p['report_date']} {p.get('session', '')}: "
+                          f"5d move {chg:+.1f}%, rvol {rvol:.1f}x — positioning ahead of print"),
+                "summary": (f"Pre-earnings momentum: {esym} moving {chg:+.1f}% over 5d on "
+                            f"{rvol:.1f}x volume ahead of {p['report_date']} report. "
+                            f"Direction: {pre_dir}."),
+                "source": "PreEarnings", "url": "",
+                "published_at": p["report_date"],
+                "category": "PRE_EARNINGS", "tickers": [esym],
+                "reaction_pct": round(chg, 2),
+                "mentions": [{"symbol": esym, "sentiment": sent,
+                              "label": "positive" if sent > 0 else "negative",
+                              "category": "PRE_EARNINGS"}],
+                "relations": [],
+            }]
+    # ── End pre-earnings ──
+
     for e in reporters:
         esym = e["symbol"]
         surp = e.get("surprise_pct")

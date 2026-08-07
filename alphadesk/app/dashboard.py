@@ -1,18 +1,8 @@
-"""Dashboard — FastAPI serving the shadcn/ui SPA + JSON API.
+"""Dashboard — FastAPI serving the shadcn/ui SPA + JSON API. No auth."""
 
-Auth: HTTP Basic — enforced ONLY when the server is bound to a non-loopback host
-(the public GCP VM sets DASHBOARD_HOST=0.0.0.0). A local 127.0.0.1 run needs no
-password (we're not live); a public bind still fail-closes if ADMIN_USERNAME/
-ADMIN_PASSWORD are unset.
-Frontend: built by `pnpm build` in alphadesk/ui → alphadesk/app/static/.
-"""
-
-import base64
 import logging
 import os
-import secrets
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
@@ -24,69 +14,8 @@ _STATIC = Path(__file__).parent / "static"
 app = FastAPI(title="AlphaDesk")
 
 
-def _auth_required() -> bool:
-    """Auth is enforced ONLY when bound to a non-loopback host — i.e. reachable
-    off-box (the GCP VM sets DASHBOARD_HOST=0.0.0.0). A local 127.0.0.1 run is not
-    exposed, so it needs no password: no auth wall while we're not live."""
-    host = os.environ.get("DASHBOARD_HOST", "127.0.0.1").strip().lower()
-    return host not in ("", "127.0.0.1", "localhost", "::1")
-
-
-def _cross_origin(request: Request) -> bool:
-    """True if the request carries an Origin/Referer from a DIFFERENT host than the
-    dashboard — a cross-site drive-by. Guards the side-effecting run endpoint: since
-    it's a GET (SSE/EventSource is GET-only), an unauth'd localhost dashboard is
-    otherwise triggerable by ANY page the operator visits (a bare `<img>`/`fetch`/
-    `EventSource` to 127.0.0.1 fires a real LLM run + ledger writes). Browser drive-bys
-    always carry an Origin or a Referer pointing at the attacker's host; we reject those.
-    Same-origin (the real dashboard) and header-less clients (curl) are allowed.
-
-    Sec-Fetch-Site backstop: browsers send it even when Origin/Referer are stripped
-    (e.g. an HTTPS page hot-linking the HTTP localhost server via <img> — the
-    HTTPS→HTTP downgrade drops Referer). curl/scripts send neither header, so this
-    only ever rejects real browser cross-site requests."""
-    sfs = request.headers.get("sec-fetch-site", "").lower()
-    if sfs and sfs not in ("same-origin", "same-site", "none"):
-        return True
-    host = request.headers.get("host", "")
-    for h in ("origin", "referer"):
-        v = request.headers.get(h)
-        if not v:
-            continue
-        netloc = urlsplit(v).netloc
-        if netloc and netloc != host:
-            return True
-    return False
-
-
 @app.middleware("http")
-async def _basic_auth(request: Request, call_next):
-    # /healthz is the ONLY unauthenticated path — the external watchdog's probe.
-    # It exposes liveness only, never data.
-    if request.url.path == "/healthz":
-        return await call_next(request)
-    # Local (loopback) run — open, no password.
-    if not _auth_required():
-        return await call_next(request)
-    user = os.environ.get("ADMIN_USERNAME", "")
-    password = os.environ.get("ADMIN_PASSWORD", "")
-    if not user or not password:
-        return Response("auth not configured", status_code=503)
-    header = request.headers.get("Authorization", "")
-    ok = False
-    if header.startswith("Basic "):
-        try:
-            decoded = base64.b64decode(header[6:]).decode()
-            u, _, p = decoded.partition(":")
-            ok = secrets.compare_digest(u.encode(), user.encode()) and secrets.compare_digest(
-                p.encode(), password.encode()
-            )
-        except Exception:
-            ok = False
-    if not ok:
-        return Response(
-            "unauthorized", status_code=401, headers={"WWW-Authenticate": "Basic realm=alphadesk"}
-        )
+async def _passthrough(request: Request, call_next):
     return await call_next(request)
 
 
@@ -126,7 +55,11 @@ def api_pick(pick_id: int):
 
 @app.get("/api/stats")
 def api_stats():
-    return store.stats()
+    s = store.stats()
+    lt = store.last_run_time("FIND_TRADES")
+    if lt and isinstance(s, dict):
+        s.setdefault("total", {})["last_run"] = lt
+    return s
 
 
 @app.get("/api/tokens")
@@ -137,10 +70,50 @@ def api_tokens(days: int = 1):
 
 @app.get("/api/sources")
 def api_sources(days: int = 30):
-    """Per ingestion source: articles in, tokens spent (ingest + debate), and
-    value (picks / graded / avg alpha) — which channel earns its tokens."""
     days = max(1, min(days, 365))
     return {"days": days, "sources": store.source_scorecard(days)}
+
+
+@app.get("/api/quant/stats")
+def api_quant_stats():
+    """Signal-level performance: hit rate per signal, current weights,
+    composite score distribution."""
+    from alphadesk.quant import calibrate as qc
+    weights = qc.load_weights()
+    picks = store.live_picks() or []  # reuse live_picks for open positions
+    graded = store.symbol_history("*") or []
+
+    # Signal-level hit rates from graded picks
+    signal_hits: dict[str, dict] = {}
+    for g in graded:
+        debate = g.get("debate") or {}
+        qsig = debate.get("quant_signals", {})
+        if not qsig:
+            continue
+        actual_dir = g.get("direction", "")
+        alpha = float(g.get("alpha_net", 0))
+        for name, val in qsig.items():
+            if name not in signal_hits:
+                signal_hits[name] = {"correct": 0, "total": 0, "total_alpha": 0.0}
+            signal_hits[name]["total"] += 1
+            if (val > 0 and actual_dir == "LONG") or (val < 0 and actual_dir == "SHORT"):
+                signal_hits[name]["correct"] += 1
+            signal_hits[name]["total_alpha"] += alpha
+
+    signals = {}
+    for name, data in signal_hits.items():
+        n = data["total"]
+        signals[name] = {
+            "hit_rate": round(100 * data["correct"] / n, 1) if n else 0,
+            "avg_alpha": round(data["total_alpha"] / n, 2) if n else 0,
+            "n": n,
+        }
+
+    return {
+        "weights": {k: round(v, 3) for k, v in weights.items()},
+        "signals": signals,
+        "open_positions": len(picks),
+    }
 
 
 @app.get("/api/earnings")
@@ -192,21 +165,9 @@ def api_earnings():
     upcoming.sort(key=lambda e: (e["run_at"] or "9999", -(e.get("market_cap") or 0.0)))
     upcoming = _dedupe_dual(upcoming)
     reported = _dedupe_dual(reported)
-    # Show the real, verifiable signal: how much the stock has moved SINCE the
-    # report went public (the drift itself) — not a maybe-misleading EPS surprise%.
-    moves = prices.moves_since_report(reported)
-    # Coverage self-assessment: did the desk act on each reporter? Match the desk's
-    # engagement (pick/skip) that happened ON OR AFTER the report — the post-earnings
-    # decision — so a pre-report pick doesn't count as catching the drift.
     eng = store.earnings_engagement([e["symbol"] for e in reported])
+    reactions = store.earnings_reactions_batch([e["symbol"] for e in reported])
     for e in reported:
-        # Split the reaction: the overnight gap is uncapturable (repriced before you
-        # could act), the drift-from-open is what was actually tradeable. The miss
-        # verdict keys on the DRIFT so a pure-gap reprice isn't flagged as a miss.
-        mv = moves.get(e["symbol"])   # {"total","gap","drift"} or None
-        e["move_since_report_pct"] = mv["total"] if mv else None
-        e["move_gap_pct"] = mv["gap"] if mv else None
-        e["move_drift_pct"] = mv["drift"] if mv else None
         m = eng.get(e["symbol"].upper())
         if m and (m.get("ts") or "")[:10] >= e["report_date"][:10]:
             e["engagement"] = m["state"]
@@ -215,7 +176,11 @@ def api_earnings():
             e["engagement_verdict"] = m.get("verdict")
             e["engagement_why"] = m.get("why")
         else:
-            e["engagement"] = "UNSEEN"     # never surfaced (or only picked pre-report)
+            e["engagement"] = "UNSEEN"
+        r = reactions.get(e["symbol"].upper())
+        if r:
+            e["move_since_report_pct"] = r["reaction_total"]
+            e["move_drift_pct"] = r["reaction_total"]
     return {"upcoming": upcoming, "reported": reported}
 
 
@@ -409,8 +374,7 @@ def _within_daily_cap() -> bool:
     take the max, so a crash-loop/deploy can't bypass the cap (it's a runaway backstop)."""
     global _run_day, _run_count
     from datetime import date
-
-    from alphadesk.config import MAX_RUNS_PER_DAY
+    MAX_RUNS_PER_DAY = 50
     from alphadesk.ledger import store
     today = date.today().isoformat()
     if today != _run_day:
@@ -502,38 +466,20 @@ def _log_run_event(ev: dict) -> None:
 
 
 @app.get("/api/find-trades")
-async def api_find_trades(request: Request, hours: float = 24.0,
-                          max_debates: int = 6, expose: bool = False):
-    """Server-Sent Events stream of a live 'Find Trades' run — the team
-    scanning news and debating opportunities in real time. expose=true runs the
-    (heavier, web-grounded) Connections desk to surface supply-chain ripples —
-    off by default to conserve quota."""
+async def api_find_trades(request: Request, hours: float = 24.0, max_picks: int = 6):
+    """SSE stream of a live Find Trades run — quant signals score and pick."""
     import json as _json
-
     from fastapi.responses import StreamingResponse
-
-    from alphadesk.config import MAX_PICKS_PER_WINDOW
     from alphadesk.desk.stream import stream_find_trades
 
-    # Clamp caller-supplied run parameters — the daily run cap bounds RUNS, not
-    # debates-per-run or the news window (cost rails, not judgment).
-    hours = max(1.0, min(float(hours), 168.0))                    # ≤ 1 week lookback
-    max_debates = max(1, min(int(max_debates), MAX_PICKS_PER_WINDOW))
+    hours = max(1.0, min(float(hours), 168.0))
+    max_picks = max(1, min(int(max_picks), 12))
 
     async def gen():
-        if _cross_origin(request):
-            yield f"data: {_json.dumps({'type': 'status', 'msg': 'cross-origin request refused'})}\n\n"
-            yield f"data: {_json.dumps({'type': 'done', 'board': []})}\n\n"
-            return
-        if not _within_daily_cap():
-            from alphadesk.config import MAX_RUNS_PER_DAY
-            yield f"data: {_json.dumps({'type': 'status', 'msg': f'daily run cap reached ({MAX_RUNS_PER_DAY}/day) — try again tomorrow'})}\n\n"
-            yield f"data: {_json.dumps({'type': 'done', 'board': []})}\n\n"
-            return
-        _run_log.info("── Find Trades: scanning %.0fh%s ──", hours, " (deep)" if expose else "")
+        _run_log.info("── Find Trades: %.0fh window ──", hours)
         try:
             async for event in stream_find_trades(
-                hours=hours, max_debates=max_debates, expose=expose,
+                hours=hours, max_picks=max_picks,
                 is_disconnected=request.is_disconnected,
             ):
                 _log_run_event(event)

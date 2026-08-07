@@ -353,7 +353,20 @@ def due_for_grading(limit: int = 100) -> list[dict]:
         rows = conn.execute(
             "SELECT * FROM picks WHERE graded_at IS NULL ORDER BY id LIMIT ?", (limit,)
         ).fetchall()
-    return [dict(r) for r in rows]
+    return [_decode(dict(r)) for r in rows]
+
+
+def get_graded_exits(days: int = 30) -> list[dict]:
+    """Recently graded picks with exit info — for exit param optimization."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, symbol, direction, alpha_net, exit_ts, exit_reason, exit_price,"
+            " plan_target, plan_stop, plan_entry"
+            " FROM picks WHERE graded_at IS NOT NULL AND exit_ts IS NOT NULL"
+            " AND graded_at >= datetime('now', ?)"
+            " ORDER BY graded_at DESC LIMIT 200", (f"-{int(days)} days",),
+        ).fetchall()
+    return [_decode(dict(r)) for r in rows]
 
 
 def _decode(row: dict) -> dict:
@@ -627,11 +640,11 @@ def token_summary(days: int = 1) -> list[dict]:
 
 
 def install_token_sink() -> None:
-    from alphadesk import llm
-    llm.set_token_sink(token_sink)
+    pass
 
 
 def save_relationship(from_sym: str, to_sym: str, direction: str, chain: str) -> None:
+    pass
     """Cache a web-verified ripple relationship (the graph-lite grows on use)."""
     with _lock, _connect() as conn:
         conn.execute(
@@ -707,7 +720,7 @@ def symbols_debated_since(hours: int = 12) -> set:
     (anti-double-dip: an earnings/news name lingers as a candidate for days)."""
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT DISTINCT symbol FROM picks WHERE arm='TEAM'"
+            "SELECT DISTINCT symbol FROM picks WHERE arm IN ('TEAM','QUANT')"
             " AND ts >= datetime('now', ?)", (f"-{int(hours)} hours",),
         ).fetchall()
     return {r["symbol"].upper() for r in rows}
@@ -831,7 +844,7 @@ def live_picks() -> list[dict]:
             " order_type, mfe_pct, low_liquidity, broker_order_id, broker_fill_price,"
             " hedge_of, arm"
             " FROM picks"
-            " WHERE arm IN ('TEAM','HEDGE') AND plan_entry IS NOT NULL"
+             " WHERE arm IN ('TEAM','QUANT','HEDGE') AND plan_entry IS NOT NULL"
             "   AND taken = 1"
             "   AND graded_at IS NULL AND exit_ts IS NULL"
             "   AND datetime(ts, '+' || (horizon_days + 2) || ' days') >= datetime('now')"
@@ -1014,10 +1027,6 @@ def recently_reported(days: int = 3) -> list[dict]:
 
 
 def earnings_engagement(symbols: list[str], days_back: int = 6) -> dict[str, dict]:
-    """For each symbol, the desk's MOST RECENT engagement in the last `days_back`:
-    a TEAM pick (TOOK if the Head took it, else DEBATED) or a scout/gate SKIP.
-    Used to assess earnings coverage — did the desk act on the reporter, pass on
-    it, or never even see it (no row → UNSEEN, decided by the caller)."""
     if not symbols:
         return {}
     syms = sorted({s.upper() for s in symbols})
@@ -1025,7 +1034,7 @@ def earnings_engagement(symbols: list[str], days_back: int = 6) -> dict[str, dic
     with _connect() as conn:
         picks = conn.execute(
             f"SELECT symbol, id, direction, taken, alpha_net, verdict, thesis, debate, ts"
-            f" FROM picks WHERE arm='TEAM' AND symbol IN ({ph}) AND ts >= datetime('now', ?)"
+            f" FROM picks WHERE arm IN ('TEAM','QUANT') AND symbol IN ({ph}) AND ts >= datetime('now', ?)"
             " ORDER BY ts DESC", (*syms, f"-{int(days_back)} days"),
         ).fetchall()
         skips = conn.execute(
@@ -1034,11 +1043,11 @@ def earnings_engagement(symbols: list[str], days_back: int = 6) -> dict[str, dic
             (*syms, f"-{int(days_back)} days"),
         ).fetchall()
     out: dict[str, dict] = {}
-    for r in picks:                         # newest pick per symbol wins
+    for r in picks:
         s = r["symbol"].upper()
         if s in out:
             continue
-        why = ""                            # the judge's summary, else the thesis
+        why = ""
         try:
             why = (json.loads(r["debate"] or "{}") or {}).get("arbiter_summary") or ""
         except (ValueError, TypeError):
@@ -1081,6 +1090,35 @@ def upcoming_earnings(days: int = 7) -> list[dict]:
 
 
 def earnings_row(symbol: str, days: int = 4) -> dict | None:
+    """The most recent report for `symbol` within `days` (if it has one)."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT symbol, report_date, session, eps_estimate, eps_actual, surprise_pct"
+            " FROM earnings WHERE symbol=? AND eps_actual IS NOT NULL"
+            "   AND report_date >= ? AND report_date <= ?"
+            " ORDER BY report_date DESC LIMIT 1", (symbol.upper(), _et_date(-int(days)), _et_date(0)),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def earnings_reactions_batch(symbols: list[str]) -> dict[str, dict]:
+    """Latest reaction data per symbol from the earnings_reactions table."""
+    if not symbols:
+        return {}
+    syms = sorted({s.upper() for s in symbols})
+    ph = ",".join("?" for _ in syms)
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT symbol, reaction_total, direction, entry_price"
+            f" FROM earnings_reactions WHERE symbol IN ({ph})"
+            " ORDER BY ts DESC", syms,
+        ).fetchall()
+    out = {}
+    for r in rows:
+        s = r["symbol"].upper()
+        if s not in out:
+            out[s] = {"reaction_total": r["reaction_total"], "direction": r["direction"]}
+    return out
     """The most recent report for `symbol` within `days` (if it has one) — used at
     brief time to decide whether to web-read the report."""
     with _connect() as conn:

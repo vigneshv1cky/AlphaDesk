@@ -19,8 +19,16 @@ from alphadesk.config import LOW_LIQUIDITY_DOLLAR_VOL, now_et
 log = logging.getLogger("alphadesk.prices")
 
 _TTL_S = 120
+_CACHE_MAX_ENTRIES = 2000
 _cache: dict[str, tuple[float, dict]] = {}
 _cache_lock = threading.Lock()
+
+
+def _evict_expired(cache: dict[str, tuple[float, object]], ttl_s: float):
+    now = time.time()
+    stale = [k for k, v in cache.items() if now - v[0] > ttl_s * 2]
+    for k in stale:
+        del cache[k]
 
 _alpaca_client: Any = None
 _alpaca_client_lock = threading.Lock()
@@ -108,6 +116,22 @@ def get_context(symbol: str) -> Optional[dict]:
         base_vols = vols.iloc[max(0, ref - 20):ref]
         base_vol = float(base_vols.mean()) if len(base_vols) else 0.0
         rvol = round(float(vols.iloc[ref]) / base_vol, 2) if base_vol else None
+        # ATR (14-day): the stock's typical daily range as % of price. Used by
+        # quant signals to judge whether a move is routine or extraordinary, and
+        # by the watcher for volatility-scaled stop distances.
+        atr_pct: float | None = None
+        try:
+            hi = df["High"].astype(float)
+            lo = df["Low"].astype(float)
+            prev_c = closes.shift(1)
+            tr1 = hi - lo
+            tr2 = (hi - prev_c).abs()
+            tr3 = (lo - prev_c).abs()
+            true_range = tr1.combine(tr2, max).combine(tr3, max)
+            atr_val = float(true_range.tail(14).mean())
+            atr_pct = round(atr_val / last * 100, 2) if atr_val and last else None
+        except Exception:
+            pass
         ctx = {
             "symbol": sym,
             "last_price": round(last, 4),
@@ -122,9 +146,12 @@ def get_context(symbol: str) -> Optional[dict]:
             "rvol": rvol,          # latest-session volume ÷ its 20-session norm
             "low_liquidity": avg_dollar_vol < LOW_LIQUIDITY_DOLLAR_VOL,
             "closes_10d": [round(float(c), 2) for c in closes.tail(10)],
+            "atr_pct": atr_pct,
             "last_trade_ts": rt_ts,  # None if no real-time Alpaca trade (stale yfinance only)
         }
         with _cache_lock:
+            if len(_cache) >= _CACHE_MAX_ENTRIES:
+                _evict_expired(_cache, _TTL_S)
             _cache[sym] = (time.time(), ctx)
         return ctx
     except Exception as exc:
@@ -147,6 +174,12 @@ def get_fundamentals(symbol: str) -> Optional[dict]:
     try:
         import yfinance as yf
         info = yf.Ticker(sym).info or {}
+        def _si(v):
+            try:
+                f = float(str(v).replace("%", ""))
+                return round(f, 2) if f == f else None
+            except (TypeError, ValueError):
+                return None
         out = {
             "market_cap": info.get("marketCap"),
             "trailing_pe": info.get("trailingPE"),
@@ -155,12 +188,16 @@ def get_fundamentals(symbol: str) -> Optional[dict]:
             "revenue_growth": info.get("revenueGrowth"),
             "sector": info.get("sector"),
             "industry": info.get("industry"),
+            "short_float_pct": _si(info.get("shortPercentOfFloat")),
+            "days_to_cover": _si(info.get("shortRatio")),
         }
         if not any(v is not None for v in out.values()):
             out = None
     except Exception as exc:
         log.debug("fundamentals failed %s: %s", sym, exc)
     with _cache_lock:
+        if len(_fund_cache) >= _CACHE_MAX_ENTRIES:
+            _evict_expired(_fund_cache, _FUND_TTL_S)  # type: ignore[arg-type]
         _fund_cache[sym] = (time.time(), out)
     return out
 
@@ -264,6 +301,8 @@ def get_options_context(symbol: str) -> Optional[dict]:
         log.debug("options context failed %s: %s", sym, exc)
         out = None
     with _cache_lock:
+        if len(_opt_cache) >= _CACHE_MAX_ENTRIES:
+            _evict_expired(_opt_cache, _OPT_TTL_S)  # type: ignore[arg-type]
         _opt_cache[sym] = (time.time(), out)
     return out
 
@@ -730,3 +769,49 @@ def movers(limit: int = 10) -> list[dict[str, Any]]:
     except Exception as exc:
         log.debug("movers unavailable: %s", exc)
         return []
+
+
+# ── Sector ETF data ──────────────────────────────────────────────────────────
+
+_SECTOR_MAP = {
+    "Technology": "XLK", "Financial Services": "XLF", "Energy": "XLE",
+    "Healthcare": "XLV", "Industrials": "XLI", "Consumer Cyclical": "XLY",
+    "Consumer Defensive": "XLP", "Basic Materials": "XLB",
+    "Real Estate": "XLRE", "Utilities": "XLU",
+    "Communication Services": "XLC",
+}
+
+_sector_cache: dict[str, float] = {}
+_sector_cache_ts: float = 0.0
+_SECTOR_TTL_S = 300
+
+
+def sector_change_pct(sector: str | None) -> float | None:
+    """Today's % change for the sector ETF matching the stock's sector. Cached 5 min."""
+    global _sector_cache, _sector_cache_ts
+    if not sector:
+        return None
+    etf = _SECTOR_MAP.get(sector)
+    if not etf:
+        return None
+    now = time.time()
+    if _sector_cache and now - _sector_cache_ts < _SECTOR_TTL_S:
+        return _sector_cache.get(etf)
+    try:
+        import yfinance as yf
+        dfs = yf.download(list(_SECTOR_MAP.values()), period="2d", interval="1d",
+                          group_by="ticker", progress=False, threads=True,
+                          auto_adjust=True)
+        for sym in _SECTOR_MAP.values():
+            if isinstance(dfs.columns, __import__('pandas').MultiIndex) and sym in dfs.columns.get_level_values(0):
+                d = dfs[sym]
+            else:
+                continue
+            closes = d["Close"].dropna()
+            if len(closes) >= 2:
+                _sector_cache[sym] = round(
+                    (float(closes.iloc[-1]) - float(closes.iloc[-2])) / float(closes.iloc[-2]) * 100, 2)
+        _sector_cache_ts = now
+    except Exception as exc:
+        log.debug("sector ETF download failed: %s", exc)
+    return _sector_cache.get(etf)

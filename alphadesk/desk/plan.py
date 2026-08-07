@@ -1,62 +1,15 @@
-"""The execution desk — turns a committed directional call into an ACTIONABLE
-swing trade plan: entry, target, stop, and a plain one-line instruction.
+"""Execution desk — pure code. ATR-based trade plans + exit physics.
 
-The direction and horizon are already FIXED by the team (researcher→critic→judge);
-the planner does NOT re-decide them. It only reads the stock's recent price
-behaviour (facts the desk already pulled) and sets levels sized to that behaviour
-and the horizon. Levels come from an agent (judgment), never a hardcoded ATR
-multiple (Design law: agents own judgment, code owns arithmetic + the coherence
-rails below).
-
-Fail-open: a missing or incoherent plan never drops the pick — it just books
-without a plan (the directional call still stands). So trade_plan() returns None
-rather than raising.
-"""
+Direction and horizon are FIXED upstream; this module sets entry/target/stop
+from ATR math and provides level-crossing / fill-resolution logic."""
 
 import logging
 
-from alphadesk.llm import LLMError, call_role
-
 log = logging.getLogger("alphadesk.plan")
-
-_SYSTEM = (
-    "You are the execution desk of a swing-trading research team. The desk has "
-    "ALREADY committed to a directional call — you do NOT re-decide the direction "
-    "or horizon. Turn that call into a concrete, actionable trade plan from the "
-    "stock's recent price behaviour:\n"
-    "  • entry — the stock's CURRENT price right now. Entry is ALWAYS a market fill at the "
-    "current price (there are no resting limit entries), so quote the real current price — "
-    "NOT a hoped-for pullback level. If the market is closed and it gaps far from this at the "
-    "open, the trade is skipped as stale, so this MUST be the true current quote.\n"
-    "  • target — size it to the stock's typical daily range for THIS horizon. "
-    "For a 1-day hold, the target should capture a meaningful chunk of a normal "
-    "session move — not just a few basis points. The reward (target→entry) must "
-    "be at least 1.5× the risk (entry→stop). Err toward more ambitious targets: "
-    "tight targets leave money on the table when the move continues past them.\n"
-    "  • stop — the invalidation level. Keep it tight but OUTSIDE normal daily "
-    "noise: the stop must be at least 2% from entry (checked by code rails). "
-    "A stop inside 2% gets rejected — it's noise, not invalidation. Pair a "
-    "2%+ stop with a 3%+ target for 1.5× R/R.\n"
-    "  • note — ONE plain-English line telling a trader exactly what to do.\n"
-    "COHERENCE (required): for LONG, stop < entry < target. For SHORT, "
-    "target < entry < stop. Entry MUST equal the current price.\n"
-    'Return ONLY JSON: {"entry": <price>, "target": <price>, "stop": <price>, '
-    '"note": "<one line>"}'
-)
-
-_SCHEMA = {
-    "entry": {"type": (int, float), "min": 0},
-    "target": {"type": (int, float), "min": 0},
-    "stop": {"type": (int, float), "min": 0},
-    "note": {"type": str, "maxlen": 240},
-    "order": {"type": str, "enum": ["market", "limit"], "optional": True},
-}
 
 
 def _coherent(direction: str, entry: float, target: float, stop: float,
               last_price: float | None) -> bool:
-    """Rails on the agent's levels — reject a plan that contradicts the direction
-    or floats absurdly far from the current price (keep the pick, drop the plan)."""
     if min(entry, target, stop) <= 0:
         return False
     if direction == "LONG" and not (stop < entry < target):
@@ -64,35 +17,26 @@ def _coherent(direction: str, entry: float, target: float, stop: float,
     if direction == "SHORT" and not (target < entry < stop):
         return False
     if last_price and abs(entry - last_price) / last_price > 0.20:
-        return False  # entry way off the current price — not an executable swing entry
+        return False
     if abs(target - entry) / entry > 0.60:
-        return False  # target implausibly far — not a real objective for a days-long swing
+        return False
     if abs(stop - entry) / entry > 0.30:
-        return False  # stop so wide it can't invalidate — an effectively stopless plan
-    from alphadesk.config import MIN_RISK_REWARD_RATIO
+        return False
+    from alphadesk.config import MIN_RISK_REWARD_RATIO, MIN_STOP_DISTANCE_PCT
     reward = abs(target - entry) / entry
     risk = abs(stop - entry) / entry
     if risk > 0 and reward / risk < MIN_RISK_REWARD_RATIO:
-        return False  # reward smaller than risk → negative expected value
-    from alphadesk.config import MIN_STOP_DISTANCE_PCT
+        return False
     if risk < MIN_STOP_DISTANCE_PCT / 100.0:
-        return False  # stop too tight — normal noise triggers it before the thesis plays out
+        return False
     return True
 
 
 def realized_exit(direction: str, entry, exit_price, spy_then, spy_now,
                   low_liquidity: bool = False) -> dict:
-    """Realized performance of a position closed at exit_price: raw return
-    (direction-aware) and alpha vs SPY over the SAME holding window, net of
-    round-trip friction (doubled for low-liquidity names, matching the grader's
-    haircut so exit_alpha and alpha_net don't disagree on illiquid picks). Fields
-    are None when a baseline is missing. Frozen at the exit — distinct from the
-    horizon grade (alpha_net), which still settles at the declared horizon and
-    measures the CALL's edge regardless of when we got out.
-    This is the ONE definition the live mark, the exit stamp, and the UI share."""
     from alphadesk.config import FRICTION_BPS_PER_SIDE
     out: dict = {"exit_price": round(float(exit_price), 4) if exit_price else None,
-                 "exit_return_pct": None, "exit_alpha": None}
+                  "exit_return_pct": None, "exit_alpha": None}
     if not (entry and exit_price):
         return out
     sign = 1.0 if direction == "LONG" else -1.0
@@ -108,10 +52,6 @@ def realized_exit(direction: str, entry, exit_price, spy_then, spy_now,
 
 
 def level_crossed(direction: str, price: float, target: float, stop: float) -> str | None:
-    """Which committed plan level the current price has reached, if any: 'target',
-    'stop', or None. Pure arithmetic — a crossed level is a FACT that both the live
-    view and the position watcher key on (code owns physics/rails, not judgment),
-    so they share this one definition and can never disagree on what 'hit' means."""
     up = direction == "LONG"
     if (price >= target) if up else (price <= target):
         return "target"
@@ -122,25 +62,14 @@ def level_crossed(direction: str, price: float, target: float, stop: float) -> s
 
 def first_touch_exit(direction: str, target: float, stop: float,
                      bars: list[dict]) -> dict | None:
-    """Walk the intraday bar PATH and return the FIRST level actually touched:
-    {"level": "target"|"stop", "price": <realistic fill>}, or None if neither is hit.
-    Fixes the spot-quote watcher's three blind spots — it can now tell WHICH level came
-    first, price the fill at the level (not wherever the poll landed), and resolve gaps.
-    Rules per bar (chronological):
-      • a bar whose OPEN is already beyond a level = a gap you couldn't have filled at the
-        level → fill at the open;
-      • otherwise fill at the level the bar reached;
-      • a single bar straddling BOTH levels (sub-bar order unknowable at this granularity)
-        → assume the ADVERSE one (stop), conservative for realized P&L.
-    Pure code — the exit physics; bars must be chronological with open/high/low/close."""
     up = direction == "LONG"
     for b in bars:
         o, hi, lo = b["open"], b["high"], b["low"]
         if up:
             if o >= target:
-                return {"level": "target", "price": round(o, 4)}   # gapped up through target
+                return {"level": "target", "price": round(o, 4)}
             if o <= stop:
-                return {"level": "stop", "price": round(o, 4)}     # gapped down through stop
+                return {"level": "stop", "price": round(o, 4)}
             hit_t, hit_s = hi >= target, lo <= stop
         else:
             if o <= target:
@@ -149,7 +78,7 @@ def first_touch_exit(direction: str, target: float, stop: float,
                 return {"level": "stop", "price": round(o, 4)}
             hit_t, hit_s = lo <= target, hi >= stop
         if hit_t and hit_s:
-            return {"level": "stop", "price": round(stop, 4)}      # ambiguous → adverse
+            return {"level": "stop", "price": round(stop, 4)}
         if hit_t:
             return {"level": "target", "price": round(target, 4)}
         if hit_s:
@@ -161,43 +90,21 @@ def limit_fill(direction: str, order_type: str | None, entry: float | None,
                open_px: float | None, high_px: float | None, low_px: float | None,
                buffer_pct: float, stop: float | None = None,
                min_cushion_frac: float = 0.0) -> float | None:
-    """The Model-A fill PRICE for a pick, given its fill-day OHLC — or None if a
-    LIMIT order didn't fill ('not taken'). A fact, not a judgment:
-      • market (or no entry) → fill at the open (you're in immediately).
-      • limit LONG → filled if price traded down to the entry (within buffer): at the
-        open if it gapped at/below the level, else at the level; not filled if it
-        never came down.
-      • limit SHORT → mirror (filled if price traded UP to the entry within buffer).
-    The buffer widens the trigger so a near-miss still fills.
-
-    Gap-toward-invalidation guard (limit only): the stop is the plan's invalidation.
-    If the fill already sits most of the way from the planned entry TO the stop — i.e.
-    the reaction gapped against the thesis before you'd enter — the edge is gone and
-    you'd fill one nudge from being stopped, so it's NOT TAKEN. Keeps ≥
-    min_cushion_frac of the planned entry→stop cushion."""
     b = max(0.0, buffer_pct) / 100.0
     if order_type != "limit" or not entry or open_px is None:
         px: float | None = open_px
-        # ALWAYS-MARKET entry: fill at the CURRENT price (the fill-day open). GAP GUARD — a
-        # CLOSED-market decision whose open gapped away from the price the AI planned around
-        # (`entry` ≈ the decision-time price) by more than ENTRY_GAP_SKIP_PCT rested on a stale
-        # price that no longer holds → NOT TAKEN (re-evaluate live next run). The WAB failure.
         if px is not None and entry:
             from alphadesk.config import ENTRY_GAP_SKIP_PCT
             if ENTRY_GAP_SKIP_PCT > 0 and abs(px - entry) / entry > ENTRY_GAP_SKIP_PCT / 100.0:
                 return None
     elif direction == "LONG":
-        if open_px <= entry:                       # gapped at/below the limit → fill at open
+        if open_px <= entry:
             px = round(open_px, 4)
-        elif low_px is not None and low_px <= entry * (1 + b):   # dipped into the (buffered) limit
-            # Fill at a price that ACTUALLY traded: the limit only if price truly reached
-            # it, else the session low (a buffered near-miss). Filling at `entry` when the
-            # low stopped above it booked a price below the low — a fictitious better-than-
-            # market fill that contaminated paper P&L and alpha_net.
+        elif low_px is not None and low_px <= entry * (1 + b):
             px = round(entry if low_px <= entry else low_px, 4)
         else:
-            px = None                              # never reached → not taken
-    elif open_px >= entry:                         # SHORT: gapped at/above the limit → fill at open
+            px = None
+    elif open_px >= entry:
         px = round(open_px, 4)
     elif high_px is not None and high_px >= entry * (1 - b):
         px = round(entry if high_px >= entry else high_px, 4)
@@ -206,48 +113,47 @@ def limit_fill(direction: str, order_type: str | None, entry: float | None,
     if px is None:
         return None
     if order_type == "limit" and stop and entry and min_cushion_frac > 0:
-        planned = abs(entry - stop)                # planned distance to invalidation
-        cushion = (stop - px) if direction == "SHORT" else (px - stop)   # actual room left
+        planned = abs(entry - stop)
+        cushion = (stop - px) if direction == "SHORT" else (px - stop)
         if planned > 0 and cushion < min_cushion_frac * planned:
-            return None                            # gapped against the thesis → not taken
+            return None
     return px
 
 
+def atr_plan(symbol: str, direction: str, horizon_days: int,
+             last_price: float, atr_pct: float | None = None) -> dict | None:
+    if not last_price or last_price <= 0:
+        return None
+    from alphadesk.config import PLAN_TARGET_ATR, PLAN_STOP_ATR
+    atr = atr_pct or 2.0
+    atr = max(atr, 0.5)
+    atr_dec = atr / 100.0
+    tgt_mult = PLAN_TARGET_ATR
+    sl_mult = PLAN_STOP_ATR
 
+    if direction == "LONG":
+        target = round(last_price * (1 + atr_dec * tgt_mult), 4)
+        stop = round(last_price * (1 - atr_dec * sl_mult), 4)
+        min_dist = 0.10 if last_price < 10 else 0.25
+        if (last_price - stop) < min_dist:
+            stop = round(last_price - min_dist, 4)
+    else:
+        target = round(last_price * (1 - atr_dec * tgt_mult), 4)
+        stop = round(last_price * (1 + atr_dec * sl_mult), 4)
+        min_dist = 0.10 if last_price < 10 else 0.25
+        if (stop - last_price) < min_dist:
+            stop = round(last_price + min_dist, 4)
 
+    if horizon_days >= 3:
+        target_mult = min(horizon_days * 1.5, 6.0)
+        target = round(last_price * (1 + atr_dec * target_mult), 4) if direction == "LONG" \
+                 else round(last_price * (1 - atr_dec * target_mult), 4)
 
-def trade_plan(symbol: str, direction: str, horizon_days: int,
-               price_ctx: dict | None, thesis: str,
-               decision_id: str | None = None) -> dict | None:
-    """Actionable plan for a committed call → {entry, target, stop, note, hold}
-    or None (fail-open: no plan, pick still stands)."""
-    if not price_ctx or price_ctx.get("last_price") is None:
-        return None  # no price to anchor levels — skip the plan, keep the pick
-    last = price_ctx.get("last_price")
+    if not _coherent(direction, last_price, target, stop, last_price):
+        return None
+
     hold = "single-day" if horizon_days <= 1 else "multi-day"
-    user = (
-        f"Symbol: {symbol}\n"
-        f"Committed call: {direction} over {horizon_days} trading day(s) ({hold} swing).\n"
-        f"Thesis: {thesis[:400]}\n\n"
-        "Recent price context (facts):\n"
-        f"- current price: {last}\n"
-        f"- move today: {price_ctx.get('change_today_pct')}%\n"
-        f"- move 5d: {price_ctx.get('change_5d_pct')}%\n"
-        f"- move 20d: {price_ctx.get('change_20d_pct')}%\n"
-        f"- 90d high / low: {price_ctx.get('high_90d')} / {price_ctx.get('low_90d')}\n"
-        f"- last 10 daily closes: {price_ctx.get('closes_10d')}\n"
-    )
-    try:
-        out = call_role("plan", _SYSTEM, user, schema=_SCHEMA, decision_id=decision_id)
-    except LLMError as exc:
-        log.info("Trade plan skipped for %s (%s)", symbol, exc)
-        return None
-    out.pop("_downgraded_model", None)
-    entry, target, stop = float(out["entry"]), float(out["target"]), float(out["stop"])
-    if not _coherent(direction, entry, target, stop, last):
-        log.info("Incoherent plan for %s %s (e=%s t=%s s=%s) — dropped",
-                 symbol, direction, entry, target, stop)
-        return None
-    return {"entry": round(entry, 4), "target": round(target, 4),
-            "stop": round(stop, 4), "note": out["note"], "hold": hold,
-            "order": "market"}   # ALWAYS market — enter at the current price, never a resting limit
+    return {"entry": round(last_price, 4), "target": target, "stop": stop,
+            "note": f"{direction} {symbol} ATR={atr:.1f}% tgt={round(atr*tgt_mult)}% sl={round(atr*sl_mult)}%",
+            "hold": hold, "order": "market",
+            "target_atr_mult": tgt_mult, "stop_atr_mult": sl_mult}

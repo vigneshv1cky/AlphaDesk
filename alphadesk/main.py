@@ -10,7 +10,6 @@ import argparse
 import asyncio
 import logging
 import sys
-import time
 
 
 def _setup_logging() -> None:
@@ -41,16 +40,10 @@ def _web_server():
     ))
 
 
-async def _run() -> None:
-    """Legacy autonomous mode: 24/7 scheduler + dashboard."""
-    from alphadesk.app import scheduler
-    await asyncio.gather(scheduler.run_forever(), _web_server().serve())
-
-
 async def _serve() -> None:
-    """v2 on-demand mode: dashboard + hourly portfolio grader (pure code, no
-    LLM). Trades run only when you click Find Trades; the grader keeps the
-    paper portfolio marking even while nothing else runs."""
+    """v2 on-demand mode: dashboard + hourly portfolio grader (pure code).
+    Trades run on button click / autorun; the grader keeps the paper
+    portfolio marking even while nothing else runs."""
 
     async def _grader_loop():
         from alphadesk.app import scheduler
@@ -79,18 +72,10 @@ async def _serve() -> None:
             await asyncio.sleep(6 * 3600)   # 4×/day keeps upcoming + recent fresh
 
     async def _position_watch_loop():
-        """Watch open picks between runs — the ONLY price-based exit, and it is
-        pure code by design (a ledger exit stamp, never an order, never an LLM):
-        walk the intraday minute-bar path and close at the FIRST of target/stop
-        actually touched, priced at that level, gap-/order-aware. Price exits
-        belong to code (no judgment, no 'spent move' second-guessing — a spent
-        move closes at its target, a wrong one at its stop); news-driven exits
-        belong to the run-level reviewer, which is shown no prices at all.
-
-        Session-aware: OPEN hours get full bar-based monitoring + Model-A fill
-        resolution; PRE/AFTER hours get spot-price monitoring for extended-hours-
-        filled positions (broker fills — no intraday bars in extended hours); CLOSED
-        hours skip monitoring entirely."""
+        """Watch open picks between runs — the price-based exit (pure code):
+        walk intraday minute bars, close at the first target/stop touched.
+        OPEN hours: bar-based + Model-A fills; PRE/AFTER: spot-price for
+        extended-hours fills; CLOSED: skip monitoring."""
         from alphadesk.config import (
             LIMIT_FILL_BUFFER_PCT,
             LIMIT_FILL_MIN_CUSHION_FRAC,
@@ -111,7 +96,6 @@ async def _serve() -> None:
         log = logging.getLogger("alphadesk.watch")
         last_check: dict[int, object] = {}   # pick_id → ET ts we last walked bars up to
         _fill_quality_flagged: set[int] = set()  # picks we've already warned about (one-shot)
-        _macro_last_check_ts: float = 0.0   # throttle macro shock checks to once per 10 min
         while True:
             try:
                 sess = market_session()
@@ -248,34 +232,7 @@ async def _serve() -> None:
                             # its target; a wrong one at its stop; anything in between
                             # keeps working to the levels or the horizon).
 
-                    # ── HEDGE CLEANUP: close any hedge whose parent has exited ──
-                    hedges = await loop.run_in_executor(None, store.open_hedges)
-                    for h in hedges:
-                        parent_id = h.get("hedge_of")
-                        if not parent_id:
-                            continue
-                        parent_still_open = any(
-                            p["id"] == parent_id for p in open_pos
-                            if p.get("exit_ts") is None
-                        )
-                        if parent_still_open:
-                            continue
-                        cur = quotes.get(h["symbol"].upper())
-                        exit_px = cur if cur else (h.get("entry_price") or h.get("plan_entry"))
-                        if not exit_px:
-                            continue
-                        direction = h.get("direction", "SHORT")
-                        entry = h.get("entry_price") or h.get("plan_entry")
-                        perf = realized_exit(direction, entry, exit_px,
-                                             h.get("spy_price"), spy_now,
-                                             bool(h.get("low_liquidity")))
-                        reason = f"hedge closed: parent #{parent_id} exited"
-                        await loop.run_in_executor(
-                            None, lambda hid=h["id"], r=reason, pf=perf:
-                            store.record_exit(hid, r, **pf))
-                        log.info("Hedge closed #%d %s @ %s (parent #%d exited, %s%% vs SPY)",
-                                 h["id"], h["symbol"], exit_px, parent_id,
-                                 perf.get("exit_alpha"))
+
                 elif sess in ("PRE", "AFTER"):
                     # ── EXTENDED-HOURS monitoring: spot-price only for broker-filled
                     # positions (no intraday bars exist in extended hours). Model-A
@@ -315,113 +272,7 @@ async def _serve() -> None:
                                 log.info("Auto-exit #%d %s %s — %s (%s%% vs SPY) [ext-hours]",
                                          p["id"], p["symbol"], p["direction"], reason,
                                          perf.get("exit_alpha"))
-                # ── MACRO SHOCK DETECTION (every session, cooldown-limited): code
-                # detects significant VIX/rate dislocations. In OPEN hours: flag
-                # positions for the reviewer on the next run. In PRE/AFTER hours:
-                # auto-exit flagged positions at the current spot price — if we know
-                # a gap is coming at the open, exiting now at an extended-hours price
-                # is better than waiting for the 9:30 bloodbath. ──
-                now_ts = time.time()
-                if now_ts - _macro_last_check_ts > 600:   # once per 10 min (TTL-aligned)
-                    _macro_last_check_ts = now_ts
-                    try:
-                        from alphadesk.ingest.prices import macro_shock_check
-                        shock = await loop.run_in_executor(None, macro_shock_check)
-                        if shock:
-                            log.warning("Macro shock detected [%s]: %s", sess, shock["summary"])
-                            open_taken = await loop.run_in_executor(
-                                None, store.open_taken_picks)
-                            if open_taken:
-                                from alphadesk.desk.macro import macro_review as mr
-                                flagged = await loop.run_in_executor(
-                                    None, mr, shock, open_taken)
-                                if flagged:
-                                    if sess in ("PRE", "AFTER"):
-                                        # Book companion SHORT hedges for flagged longs.
-                                        # A hedge captures the overnight gap — if the long
-                                        # was wrong, the hedge gains; if the shock was a
-                                        # false alarm, the stop cuts the hedge at -3%.
-                                        # Never double-hedge the same parent.
-                                        f_syms = sorted({f["symbol"] for f in flagged})
-                                        f_quotes = await loop.run_in_executor(
-                                            None, prices.latest_prices,
-                                            f_syms + ["SPY"])
-                                        spy_now = f_quotes.get("SPY")
-                                        for f in flagged:
-                                            pid = f["pick_id"]
-                                            p = next((p for p in open_taken
-                                                      if p["id"] == pid), None)
-                                            if not p:
-                                                continue
-                                            # Skip if already hedged
-                                            existing = await loop.run_in_executor(
-                                                None, store.open_hedge_for, pid)
-                                            if existing:
-                                                log.info("Macro hedge: #%d %s already hedged by #%d",
-                                                         pid, p["symbol"], existing["id"])
-                                                continue
-                                            cur = f_quotes.get(f["symbol"].upper())
-                                            if not cur:
-                                                continue
-                                            from alphadesk.desk.macro import book_hedge
-                                            h_id = await loop.run_in_executor(
-                                                None, book_hedge, p, cur,
-                                                shock["summary"], sess, spy_now)
-                                            if h_id:
-                                                log.warning(
-                                                    "Macro-hedged #%d %s LONG with SHORT #%d @ %s [%s]: %s",
-                                                    pid, p["symbol"], h_id, cur, sess,
-                                                    f["concern"])
-                                        # ── MACRO SCOUT: find new positions to profit
-                                        # from the shock, not just hedge existing ones ──
-                                        try:
-                                            from alphadesk.desk.macro import (
-                                                macro_scout, macro_trade,
-                                            )
-                                            movers = await loop.run_in_executor(
-                                                None, prices.movers, 15)
-                                            scout_picks = await loop.run_in_executor(
-                                                None, macro_scout, shock, movers)
-                                            for sp in scout_picks:
-                                                sym = sp["symbol"]
-                                                px = f_quotes.get(sym.upper())
-                                                if not px:
-                                                    # Try fetching price for this symbol
-                                                    sq = await loop.run_in_executor(
-                                                        None, prices.latest_prices,
-                                                        [sym])
-                                                    px = sq.get(sym.upper())
-                                                if not px:
-                                                    continue
-                                                # Skip if already held (long or hedged)
-                                                sym_upper = sym.upper()
-                                                already_held = any(
-                                                    p["symbol"].upper() == sym_upper
-                                                    for p in open_taken
-                                                )
-                                                if already_held:
-                                                    log.info("Macro scout: skipping %s — already held", sym)
-                                                    continue
-                                                trade = await loop.run_in_executor(
-                                                    None, macro_trade, sym,
-                                                    sp["reason"], sp["direction"],
-                                                    px, shock, spy_now)
-                                                if trade:
-                                                    tid = await loop.run_in_executor(
-                                                        None, store.record_pick, trade)
-                                                    log.warning(
-                                                        "Macro trade #%d %s %s @ %s — %s",
-                                                        tid, sym, sp["direction"],
-                                                        px, sp["reason"][:80])
-                                        except Exception as exc:
-                                            log.debug("Macro scout failed: %s", exc)
-                                    else:
-                                        for f in flagged:
-                                            log.warning(
-                                                "Macro-flagged #%d %s: %s — REVIEW on next run",
-                                                f["pick_id"], f["symbol"], f["concern"])
-                    except Exception as exc:
-                        log.debug("Macro shock check failed: %s", exc)
+
             except Exception as exc:
                 log.error("position watch error: %s", exc)
             from alphadesk.app import scheduler
@@ -429,24 +280,19 @@ async def _serve() -> None:
             await asyncio.sleep(WATCH_INTERVAL_S)   # configurable; default 60s
 
     async def _autorun_loop():
-        """Auto-fire Find Trades every AUTORUN_INTERVAL_HOURS within [START, END] ET on
-        trading days — the SAME pipeline as the button (drains the SSE flow, so take-all /
-        cap / gap-guard all apply). Interval-gated off the LEDGER's last run (manual or auto),
-        so it's restart-safe and respects the interval regardless of source. The 24h repick
-        cooldown makes each run only debate NEW catalysts, so hourly polling stays cheap and
-        information-driven. Disabled if the interval is <=0 or START is empty."""
+        """Auto-fire Find Trades every AUTORUN_INTERVAL_MINUTES within [START, END] ET."""
         from datetime import datetime, timedelta
 
         from alphadesk.config import (
             AUTORUN_END_ET,
-            AUTORUN_INTERVAL_HOURS,
+            AUTORUN_INTERVAL_MINUTES,
             AUTORUN_START_ET,
             ET,
             now_et,
         )
         from alphadesk.ledger import store
         log = logging.getLogger("alphadesk.autorun")
-        if AUTORUN_INTERVAL_HOURS <= 0 or not AUTORUN_START_ET:
+        if AUTORUN_INTERVAL_MINUTES <= 0 or not AUTORUN_START_ET:
             log.info("Auto-run disabled")
             return
         try:
@@ -455,8 +301,7 @@ async def _serve() -> None:
         except Exception:
             log.error("Bad AUTORUN_START/END_ET — auto-run disabled")
             return
-        interval = timedelta(hours=AUTORUN_INTERVAL_HOURS)
-        log.info("Auto-run: every %gh, %s–%s ET", AUTORUN_INTERVAL_HOURS,
+        log.info("Auto-run: every %dm, %s–%s ET", int(AUTORUN_INTERVAL_MINUTES),
                  AUTORUN_START_ET, AUTORUN_END_ET)
         running = False
         while True:
@@ -465,22 +310,18 @@ async def _serve() -> None:
                 in_window = (now.weekday() < 5
                              and (now.hour, now.minute) >= (s_h, s_m)
                              and (now.hour, now.minute) < (e_h, e_m))
-                # Align to clock: fire at the CURRENT interval boundary (the last one
-                # that has passed). A run at 4:17 fires the 4:00 slot. Drift-free.
-                # The +1 in the old formula always pointed to the NEXT slot, so
-                # now >= next_slot was never true — the autorun never fired.
                 window_start = now.replace(hour=s_h, minute=s_m, second=0, microsecond=0)
                 mins_since_start = (now - window_start).total_seconds() / 60
-                elapsed = int(mins_since_start) // (AUTORUN_INTERVAL_HOURS * 60)
-                current_slot = window_start + timedelta(
-                    hours=elapsed * AUTORUN_INTERVAL_HOURS)
+                interval_min = int(AUTORUN_INTERVAL_MINUTES)
+                elapsed = int(mins_since_start) // interval_min
+                current_slot = window_start + timedelta(minutes=elapsed * interval_min)
                 if in_window and not running and now >= current_slot:
                     lt = store.last_run_time("FIND_TRADES")
                     last_slot = None
                     if lt:
                         try:
                             last_dt = datetime.fromisoformat(lt).astimezone(ET)
-                            last_slot = last_dt.replace(minute=int(last_dt.minute // 60) * 60,
+                            last_slot = last_dt.replace(minute=int(last_dt.minute // interval_min) * interval_min,
                                                         second=0, microsecond=0)
                         except (ValueError, TypeError):
                             pass
@@ -489,54 +330,120 @@ async def _serve() -> None:
                         try:
                             log.info("Auto-run: firing Find Trades")
                             from alphadesk.desk.stream import stream_find_trades
+                            picks_found = 0
+                            quant_picks = 0
+                            quant_dropped = 0
                             async for _ev in stream_find_trades(hours=24.0):
-                                pass
-                            log.info("Auto-run complete")
+                                t = _ev.get("type", "")
+                                if t == "decision":
+                                    picks_found += 1
+                                elif t == "status":
+                                    msg = _ev.get("msg", "")
+                                    if "Quant pre-filter dropped" in msg:
+                                        quant_dropped = int(
+                                            msg.split()[4]) if len(msg.split()) > 4 else 0
+                                    elif msg.startswith("Quant-only:"):
+                                        quant_picks += 1
+                            summary_parts = [f"{picks_found} pick(s)"]
+                            if quant_picks:
+                                summary_parts.append(f"{quant_picks} quant-only")
+                            if quant_dropped:
+                                summary_parts.append(f"{quant_dropped} pre-filtered out")
+                            log.info("Auto-run complete — %s", ", ".join(summary_parts))
                         finally:
                             running = False
             except Exception as exc:
                 log.error("auto-run error: %s", exc)
             await asyncio.sleep(60)   # check each minute
 
-    async def _portfolio_loop():
-        """Reconcile the Alpaca PAPER account with the ledger's open-taken positions (open
-        missing, close exited), conviction-weighted. OPT-IN (PAPER_TRADING); idempotent."""
-        from alphadesk.config import PAPER_TRADING
-        log = logging.getLogger("alphadesk.portfolio")
-        if not PAPER_TRADING:
-            log.info("Paper trading OFF (set PAPER_TRADING=1 to route booked picks to Alpaca)")
+    async def _quantity_watch_loop():
+        """Quant-tiered exits (trailing stop, spike detection, stale expiry) — runs
+        alongside the main position watcher. Uses live WebSocket prices when streaming
+        is enabled, falls back to REST prices otherwise."""
+        from alphadesk.config import QUANT_TIERED_EXITS, QUANT_STREAM_ENABLED, session as market_session
+        log = logging.getLogger("alphadesk.quant")
+        if not QUANT_TIERED_EXITS:
             return
-        from alphadesk.desk import portfolio
+        if QUANT_STREAM_ENABLED:
+            try:
+                from alphadesk.quant import stream as qstream
+                log.info("Starting Alpaca WebSocket stream for real-time prices")
+                await qstream.start_stream()
+            except Exception as exc:
+                log.warning("Alpaca stream start failed: %s — using REST price checks", exc)
+        from alphadesk.quant import watcher as qwatcher
+        from alphadesk.desk.plan import realized_exit
+        from alphadesk.ledger import store as qstore
         loop = asyncio.get_running_loop()
-        log.info("Paper trading ON — reconciling Alpaca paper account every 120s")
+        watch_interval = 5  # seconds — quant watcher runs faster than main watcher
         while True:
             try:
-                summary = await loop.run_in_executor(None, portfolio.reconcile)
-                if summary.get("opened") or summary.get("closed") or summary.get("error"):
-                    log.info("PM reconcile: %s", summary)
+                sess = market_session()
+                if sess == "CLOSED":
+                    await asyncio.sleep(watch_interval)
+                    continue
+                positions = await loop.run_in_executor(None, qstore.live_picks)
+                monitorable = [p for p in positions
+                               if p.get("taken") and p.get("entry_price")
+                               and p.get("plan_target") and p.get("plan_stop")]
+                if not monitorable:
+                    await asyncio.sleep(watch_interval)
+                    continue
+                live_prices = {}
+                if QUANT_STREAM_ENABLED:
+                    from alphadesk.quant import stream as qs
+                    live_prices = qs.get_prices()
+                    for p in monitorable:
+                        s = p["symbol"].upper()
+                        if s not in live_prices:
+                            qs.register(s)
+                if not live_prices:
+                    from alphadesk.ingest import prices
+                    syms = [p["symbol"] for p in monitorable] + ["SPY"]
+                    live_prices = await loop.run_in_executor(None, prices.latest_prices, syms)
+                for p in monitorable:
+                    cur = live_prices.get(p["symbol"].upper())
+                    if not cur:
+                        continue
+                    entry = p["entry_price"]
+                    if not entry:
+                        continue
+                    qwatcher.update_price(p["id"], cur)
+                    result = qwatcher.check_exits(
+                        p["id"], p["direction"], entry,
+                        p["plan_target"], p["plan_stop"], cur)
+                    if result:
+                        spy_now = live_prices.get("SPY")
+                        perf = realized_exit(p["direction"], entry, result["price"],
+                                             p.get("spy_price"), spy_now,
+                                             bool(p.get("low_liquidity")))
+                        reason = f"quant-{result['reason']}"
+                        await loop.run_in_executor(
+                            None, lambda pid=p["id"], r=reason, pf=perf:
+                            qstore.record_exit(pid, r, **pf))
+                        qwatcher.clear_position(p["id"])
+                        log.info("Quant exit #%d %s — %s (%.1f%% vs SPY)",
+                                 p["id"], p["symbol"], reason,
+                                 perf.get("exit_alpha"))
             except Exception as exc:
-                log.error("portfolio loop error: %s", exc)
-            await asyncio.sleep(120)
+                log.error("quant watcher error: %s", exc)
+            await asyncio.sleep(watch_interval)
 
     await asyncio.gather(_grader_loop(), _earnings_loop(), _autorun_loop(),
-                         _position_watch_loop(), _portfolio_loop(), _web_server().serve())
+                         _position_watch_loop(), _quantity_watch_loop(),
+                         _web_server().serve())
 
 
 def main() -> None:
     _setup_logging()
     parser = argparse.ArgumentParser(prog="alphadesk")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("run", help="autonomous: 24/7 scheduler + dashboard (legacy)")
-    sub.add_parser("dashboard", help="v2 on-demand: dashboard only — trades run on button click")
+    sub.add_parser("dashboard", help="dashboard — trades run on button click")
     p_back = sub.add_parser("backfill")
     p_back.add_argument("--hours", type=float, default=72)
     p_desk = sub.add_parser("desk", help="convene the team NOW on recent news")
     p_desk.add_argument("--hours", type=float, default=8,
                         help="news lookback for the candidate window")
-    p_world = sub.add_parser("world", help="one GDELT world-news tick (optionally to the desk)")
-    p_world.add_argument("--categories", type=int, default=3)
-    p_world.add_argument("--to-desk", action="store_true",
-                         help="send exposure candidates to the team")
     sub.add_parser("grade")
     sub.add_parser("status")
     sub.add_parser("abtest", help="reaction-gate A/B: forward alpha bucketed by reaction size")
@@ -544,59 +451,30 @@ def main() -> None:
     sub.add_parser("earnings", help="refresh the earnings calendar and show upcoming / recent")
     args = parser.parse_args()
 
-    if args.cmd == "run":
-        from alphadesk.ledger import store
-        store.install_token_sink()
-        asyncio.run(_run())
-    elif args.cmd == "dashboard":
-        from alphadesk.ledger import store
-        store.install_token_sink()
+    if args.cmd == "dashboard":
         log = logging.getLogger("alphadesk")
         log.info("Dashboard on http://%s:%s — click Find Trades to run",
                  __import__("os").environ.get("DASHBOARD_HOST", "127.0.0.1"),
                  __import__("os").environ.get("DASHBOARD_PORT", "8000"))
         asyncio.run(_serve())
     elif args.cmd == "backfill":
-        from alphadesk.ingest.news import catch_up
-        from alphadesk.ledger import store
-        store.install_token_sink()
-        n = catch_up(args.hours)
-        print(f"backfilled {n} articles")
+        from alphadesk.ingest.earnings import refresh_calendar
+        n = refresh_calendar(days_back=int(args.hours / 24) or 5)
+        print(f"earnings calendar refreshed: {n} reporters")
     elif args.cmd == "desk":
-        from datetime import datetime, timedelta, timezone
-
         from alphadesk.desk.workflow import research_run
-        from alphadesk.ingest import news
-        from alphadesk.ledger import store
-        store.install_token_sink()
-
+        from alphadesk.ingest.earnings import drift_candidates
+        from alphadesk.config import EARNINGS_DRIFT_DAYS
         async def _adhoc() -> None:
-            n, candidates = await asyncio.get_running_loop().run_in_executor(
-                None, news.poll,
-                datetime.now(timezone.utc) - timedelta(hours=args.hours),
-            )
-            print(f"{n} fresh articles, {len(candidates)} candidate symbols")
+            candidates = await asyncio.get_running_loop().run_in_executor(
+                None, drift_candidates, EARNINGS_DRIFT_DAYS)
+            print(f"{len(candidates)} earnings drift candidates")
             if candidates:
                 ids = await research_run(candidates, trigger_src="DEEP_RUN")
-                print(f"team produced {len(ids)} decisions — see the dashboard")
+                print(f"{len(ids)} picks booked")
             else:
-                print("no fresh candidates in that window")
-
+                print("no candidates")
         asyncio.run(_adhoc())
-    elif args.cmd == "world":
-        from alphadesk.ingest import world
-        from alphadesk.ledger import store
-        store.install_token_sink()
-        n, candidates = world.poll(categories_per_tick=args.categories)
-        print(f"{n} relevant world events → {len(candidates)} exposure candidates")
-        for sym, arts in candidates.items():
-            for a in arts:
-                print(f"  {sym}: {a['title'][:90]}")
-                print(f"     {a['summary'][:160]}")
-        if args.to_desk and candidates:
-            from alphadesk.desk.workflow import research_run
-            ids = asyncio.run(research_run(candidates, trigger_src="STREAM"))
-            print(f"team produced {len(ids)} decisions")
     elif args.cmd == "grade":
         from alphadesk.ledger.grader import grade_due
         print(f"graded {grade_due()} picks")
