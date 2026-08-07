@@ -30,8 +30,12 @@ def _bucket(mag: float) -> int:
     return len(BUCKETS) - 1
 
 
-def _load_hist(symbols: list[str], period: str = "6mo") -> dict:
-    """Batch-download raw daily OHLC for all symbols + returns {SYM: df}."""
+def _load_hist(symbols: list[str], period: str = "6mo", chunk: int = 40) -> dict:
+    """Batch-download raw daily OHLC for all symbols + returns {SYM: df}.
+
+    Chunked (~40 tickers per yfinance call): a full window can be 2000+ reporters,
+    and a single threads=True download of that many spawns a thread per ticker and
+    dies with 'can't start new thread' on a small VM."""
     import pandas as pd
     import yfinance as yf
 
@@ -39,27 +43,30 @@ def _load_hist(symbols: list[str], period: str = "6mo") -> dict:
     syms = sorted({s.upper() for s in symbols if s})
     if not syms:
         return out
-    try:
-        df = yf.download(syms, period=period, interval="1d", group_by="ticker",
-                         auto_adjust=False, progress=False, threads=True)
-        if df is None:
-            return out
-        multi = isinstance(df.columns, pd.MultiIndex)
-        for s in syms:
-            try:
-                if multi and s in df.columns.get_level_values(0):
-                    sub = df[s]
-                elif len(syms) == 1:
-                    sub = df
-                else:
-                    continue
-                sub = sub.dropna(subset=["Close"]) if isinstance(sub, pd.DataFrame) else None
-                if sub is not None and len(sub) > 0:
-                    out[s] = sub
-            except Exception:
+    for i in range(0, len(syms), chunk):
+        batch = syms[i:i + chunk]
+        try:
+            df = yf.download(batch, period=period, interval="1d", group_by="ticker",
+                             auto_adjust=False, progress=False, threads=True)
+            if df is None:
                 continue
-    except Exception as exc:
-        log.warning("history download failed: %s", exc)
+            multi = isinstance(df.columns, pd.MultiIndex)
+            for s in batch:
+                try:
+                    if multi and s in df.columns.get_level_values(0):
+                        sub = df[s]
+                    elif len(batch) == 1:
+                        sub = df
+                    else:
+                        continue
+                    sub = sub.dropna(subset=["Close"]) if isinstance(sub, pd.DataFrame) else None
+                    if sub is not None and len(sub) > 0:
+                        out[s] = sub
+                except Exception:
+                    continue
+        except Exception as exc:
+            log.warning("history batch %d failed: %s", i // chunk, exc)
+            continue
     return out
 
 
