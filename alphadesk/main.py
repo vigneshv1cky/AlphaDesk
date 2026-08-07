@@ -95,27 +95,25 @@ async def _serve() -> None:
         last_check: dict[int, object] = {}   # pick_id → ET ts we last walked bars up to
         _fill_quality_flagged: set[int] = set()  # picks we've already warned about (one-shot)
 
-        async def _sweep_session_close(positions) -> int:
-            """NO-CARRY-OVER guarantee: force-close every FILLED open position once
-            its OWN session is at/after the close minute (PRE 9:30 / OPEN 16:00 /
-            AFTER 20:00 — exact, no buffer). Runs even after the market clock has
-            moved on (at 20:00 the session flips to CLOSED), so nothing is stranded.
-            The quant watcher enforces the same per-pick with live stream prices;
-            this sweep is the belt-and-suspenders. record_exit is idempotent."""
-            due = [p for p in positions
-                   if session_close_due(p.get("session"))
-                   and p.get("taken")
-                   and (p.get("entry_price") is not None
-                        or p.get("broker_fill_price") is not None)
-                   and p.get("plan_target") and p.get("plan_stop")]
+        async def _sweep_session_close(open_pos, quotes) -> int:
+            """NO-CARRY-OVER guarantee: force-close every filled open position at the
+            current price once its session is at/after the close minute (PRE 9:25 /
+            OPEN 15:55 / AFTER 19:55). The quant watcher enforces this per-pick with
+            live stream prices; this sweep is the belt-and-suspenders so a position
+            NEVER carries into another market even if tiered exits are disabled.
+            record_exit is idempotent, so both closing a pick is safe."""
+            due = session_close_due()
             if not due:
                 return 0
-            quotes = await loop.run_in_executor(
-                None, prices.latest_prices,
-                [p["symbol"] for p in due] + ["SPY"])
+            sess = due[0]
             spy_now = quotes.get("SPY")
             n = 0
-            for p in due:
+            for p in open_pos:
+                if not (p.get("taken")
+                        and (p.get("entry_price") is not None
+                             or p.get("broker_fill_price") is not None)
+                        and p.get("plan_target") and p.get("plan_stop")):
+                    continue
                 cur = quotes.get(p["symbol"].upper())
                 if not cur:
                     continue
@@ -124,26 +122,32 @@ async def _serve() -> None:
                 perf = realized_exit(p["direction"], entry, cur,
                                      p.get("spy_price"), spy_now,
                                      bool(p.get("low_liquidity")))
-                reason = f"session-close ({p.get('session')})"
+                reason = f"session-close ({sess})"
                 await loop.run_in_executor(
                     None, lambda pid=p["id"], r=reason, pf=perf:
                     store.record_exit(pid, r, **pf))
                 n += 1
             if n:
-                log.info("Session-close sweep: exited %d position(s) at close", n)
+                log.info("Session-close sweep: exited %d position(s) at %s close", n, sess)
             return n
         while True:
             try:
                 sess = market_session()
-                # ── NO CARRY-OVER ACROSS MARKETS: every filled position exits at the
-                # exact close of its own session (PRE 9:30 / OPEN 16:00 / AFTER 20:00).
-                # Checked on every tick regardless of the current session so a position
-                # closing at a boundary (16:00 → AFTER, 20:00 → CLOSED) still exits. ──
-                open_pos = await loop.run_in_executor(None, store.live_picks)
-                if open_pos:
-                    await _sweep_session_close(open_pos)
                 if sess == "CLOSED":
-                    pass   # no monitoring outside market windows (sweep already ran)
+                    pass   # no monitoring outside market windows
+                else:
+                    # ── NO CARRY-OVER ACROSS MARKETS: every filled position exits
+                    # at the close of the session it's in (PRE 9:25 / OPEN 15:55 /
+                    # AFTER 19:55), so a trade NEVER survives into another session.
+                    # The quant watcher closes per-pick with live stream prices;
+                    # this sweep is the guarantee even if tiered exits are off. ──
+                    if session_close_due():
+                        open_pos = await loop.run_in_executor(None, store.live_picks)
+                        if open_pos:
+                            quotes = await loop.run_in_executor(
+                                None, prices.latest_prices,
+                                [p["symbol"] for p in open_pos] + ["SPY"])
+                            await _sweep_session_close(open_pos, quotes)
                 if sess == "OPEN":
                     # ── FULL-SESSION monitoring: bar-based exits + spot fallback. ──
                     open_pos = await loop.run_in_executor(None, store.live_picks)
@@ -403,7 +407,7 @@ async def _serve() -> None:
         """Quant-tiered exits (trailing stop, spike detection, stale expiry) — runs
         alongside the main position watcher. Uses live WebSocket prices when streaming
         is enabled, falls back to REST prices otherwise."""
-        from alphadesk.config import QUANT_TIERED_EXITS, QUANT_STREAM_ENABLED
+        from alphadesk.config import QUANT_TIERED_EXITS, QUANT_STREAM_ENABLED, session as market_session
         log = logging.getLogger("alphadesk.quant")
         if not QUANT_TIERED_EXITS:
             return
@@ -422,9 +426,10 @@ async def _serve() -> None:
         watch_interval = 5  # seconds — quant watcher runs faster than main watcher
         while True:
             try:
-                # No session gate: the loop self-skips when nothing is monitorable.
-                # This also lets it run right past the AFTER→CLOSED boundary (20:00)
-                # to exit positions at the exact close.
+                sess = market_session()
+                if sess == "CLOSED":
+                    await asyncio.sleep(watch_interval)
+                    continue
                 positions = await loop.run_in_executor(None, qstore.live_picks)
                 monitorable = [p for p in positions
                                if p.get("taken") and p.get("entry_price")
@@ -464,8 +469,7 @@ async def _serve() -> None:
                     qwatcher.update_price(p["id"], cur)
                     result = qwatcher.check_exits(
                         p["id"], p["direction"], entry,
-                        p["plan_target"], p["plan_stop"], cur,
-                        sess=p.get("session"))
+                        p["plan_target"], p["plan_stop"], cur)
                     if result:
                         spy_now = live_prices.get("SPY")
                         perf = realized_exit(p["direction"], entry, result["price"],

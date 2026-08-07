@@ -51,27 +51,24 @@ STALE_MIN_MOVE_PCT = 0.5
 
 # Session-scoped model: every position exits at the close of the session it was
 # booked in — no carry-over across markets. Each tradeable window is its own
-# trade: PRE (4:00–9:30), OPEN (9:30–16:00), AFTER (16:00–20:00). Pure quant, no
-# human — no early buffer needed, so exits happen EXACTLY at the close.
-SESSION_CLOSE_TIMES = {"PRE": 9 * 60 + 30, "OPEN": 16 * 60, "AFTER": 20 * 60}
+# trade: PRE (4:00–9:30), OPEN (9:30–16:00), AFTER (16:00–20:00). Close a few
+# minutes before the boundary so the exit clears the session.
+SESSION_CLOSE_TIMES = {"PRE": 9 * 60 + 25, "OPEN": 15 * 60 + 55, "AFTER": 19 * 60 + 55}
 
 
-def session_close_due(sess: str | None = None) -> tuple[str, int] | None:
-    """(session, close_minute) if `sess` (a position's own session, defaulting to
-    the current market session) is at/after its close time, else None.
-
-    Keying on the position's OWN session is what lets an exit happen exactly at
-    the boundary — at 16:00 the market flips to AFTER and at 20:00 to CLOSED, so
-    checking the current session would strand the just-closed positions."""
+def session_close_due() -> tuple[str, int] | None:
+    """(session, close_minute) if the current session is at/after its close time,
+    else None. Shared by the quant watcher and the main position watcher so both
+    enforce the same no-carry-over exit."""
     from alphadesk.config import session as _market_session, now_et as _now_et
-    s = sess or _market_session()
-    close_min = SESSION_CLOSE_TIMES.get(s)
+    sess = _market_session()
+    close_min = SESSION_CLOSE_TIMES.get(sess)
     if close_min is None:
         return None
     now = _now_et()
     minutes = now.hour * 60 + now.minute
     if minutes >= close_min:
-        return s, close_min
+        return sess, close_min
     return None
 
 # Per-pick tracking state
@@ -128,14 +125,9 @@ def update_price(pick_id: int, price: float):
 
 
 def check_exits(pick_id: int, direction: str, entry: float,
-                target: float, stop: float, current: float,
-                sess: str | None = None) -> Optional[dict]:
+                target: float, stop: float, current: float) -> Optional[dict]:
     """Check all exit tiers for a position. Returns the FIRST exit triggered,
     or None if no exit condition is met.
-
-    sess = the position's own market session (PRE/OPEN/AFTER) — used so the
-    session-close tier exits EXACTLY at that session's close even after the
-    market clock has already moved to the next session.
 
     Returns {level, price, reason} or None.
     """
@@ -205,8 +197,8 @@ def check_exits(pick_id: int, direction: str, entry: float,
                         "tier": EXIT_SPIKE}
 
     # Tier 5: session-close exit — session-scoped model (no carry-over across
-    # markets): every position exits EXACTLY at the close of its own session.
-    due = session_close_due(sess)
+    # markets): every position exits at the close of the session it's in.
+    due = session_close_due()
     if due:
         return {"level": "session-close", "price": round(ptr, 4),
                 "reason": f"session-close exit ({due[0]})", "tier": EXIT_CLOSE}
