@@ -410,13 +410,22 @@ def report_selection(trades: list[dict]) -> None:
     _print_table("pre-filtered (<5)", rej)
     print()
     print("  by score bucket:")
-    print(f"  {'score':10} {'n':>4} {'mean α':>9} {'win%':>6}")
     for lo, hi, label in ((0, 5, "<5"), (5, 10, "5-10"), (10, 20, "10-20"), (20, 100, ">20")):
-        ts = [t for t in trades if lo <= t["score"] < hi]
-        _print_table(label, ts)
+        _print_table(label, [t for t in trades if lo <= t["score"] < hi])
     print()
     print("  by direction (selected arm):")
     for d in ("LONG", "SHORT"):
         _print_table(d, [t for t in sel if t["direction"] == d])
-    print("\n  If selected > pre-filtered and higher score buckets pay more, the quant")
-    print("  filter is selecting real alpha even though the raw reaction thesis is flat.")
+    print()
+    print("  by session (selected arm):")
+    for s in ("PRE", "OPEN", "AFTER"):
+        _print_table(s, [t for t in sel if t["session"] == s])
+    print()
+    print("  key subsets (selected arm):")
+    _print_table("OPEN only", [t for t in sel if t["session"] == "OPEN"])
+    _print_table("LONG only", [t for t in sel if t["direction"] == "LONG"])
+    _print_table("OPEN + LONG", [t for t in sel if t["session"] == "OPEN" and t["direction"] == "LONG"])
+    _print_table("OPEN LONG 5-10", [t for t in sel if t["session"] == "OPEN" and t["direction"] == "LONG" and 5 <= t["score"] < 10])
+    _print_table("PRE+AFTER", [t for t in sel if t["session"] in ("PRE", "AFTER")])
+    print("\n  If a subset (e.g. OPEN LONG score 5-10) shows strongly positive alpha with a")
+    print("  real sample, that's the pocket to trade; the rest is noise dragging it down.")
