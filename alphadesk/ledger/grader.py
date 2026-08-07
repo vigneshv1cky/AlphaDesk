@@ -336,7 +336,9 @@ def grade_due() -> int:
                         continue
         except Exception as exc:
             log.warning("Batch history download failed: %s — falling back to per-symbol", exc)
-    spy = _history_cache.get("SPY") or _daily_history("SPY")
+    spy = _history_cache.get("SPY")
+    if spy is None:
+        spy = _daily_history("SPY")
     _time.sleep(1)  # cooldown after batch download
     graded = 0
     calibrated_picks: list[dict] = []
