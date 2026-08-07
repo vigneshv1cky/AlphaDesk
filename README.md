@@ -87,10 +87,11 @@ recommendations (widening the stop if >60% of exits are stops, etc.).
   OPEN 9:30–16:00, AFTER 16:00–20:00. A pick entered in a session exits at that
   session's close — **nothing carries into another market**. Night is not tradeable;
   a pick decided at night is stamped PRE and enters at the next 4:00 open.
-- **Per-market buffers** (`config.py`): `START_BUFFER_MIN` (5) skips the volatile
-  open, `ENTRY_BUFFER_MIN` (15) stops entries near the close, `EXIT_BUFFER_MIN` (5)
-  closes positions before the boundary. Entries: PRE 4:05–9:15, OPEN 9:35–15:45,
-  AFTER 16:05–19:45. Exits: 9:25 / 15:55 / 19:55.
+- **Per-market buffers** (`config.py`): `START_BUFFER_MIN` (15) skips the volatile
+  open, `ENTRY_BUFFER_MIN` (60) stops entries in the final hour — never buy when
+  we're about to close — and `EXIT_BUFFER_MIN` (15) closes positions before the
+  boundary. Entries: PRE 4:15–8:30, OPEN 9:45–15:00, AFTER 16:15–19:00. Exits:
+  9:15 / 15:45 / 19:45 (the last entry still gets ~45 min).
 - **Entry** fills at the live price when found; a pick with no live trade is not
   taken. **Exit** is pure code (target/stop/trailing/spike/stale/session-close).
 

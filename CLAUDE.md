@@ -36,11 +36,11 @@ cd alphadesk/ui && pnpm build           # rebuild SPA → app/static/
   session's close — **nothing carries into another market**. Night (20:00–4:00)
   is not tradeable; a pick decided at night is stamped PRE and enters at the next
   4:00 open.
-- **Per-market buffers** (`config.py`): START_BUFFER_MIN=5 (no entries in the
-  first minutes — the open is volatile), ENTRY_BUFFER_MIN=15 (no entries in the
-  last 15 min), EXIT_BUFFER_MIN=5 (positions close 5 min before the boundary).
-  So entries are allowed PRE 4:05–9:15, OPEN 9:35–15:45, AFTER 16:05–19:45; exits
-  at 9:25 / 15:55 / 19:55.
+- **Per-market buffers** (`config.py`): START_BUFFER_MIN=15 (skip the volatile
+  open), ENTRY_BUFFER_MIN=60 (no new entries in the final hour — never buy when
+  we're about to close), EXIT_BUFFER_MIN=15 (positions close before the boundary).
+  So entries: PRE 4:15–8:30, OPEN 9:45–15:00, AFTER 16:15–19:00; exits: 9:15 /
+  15:45 / 19:45 — the last entry still gets ~45 min before the exit.
 - **Entry** fills at the live price when found (autorun every 5 min); a pick with
   no live trade is not taken. **Exit** is pure code: hard target/stop, trailing
   stop, spike reversal, stale expiry, and the session-close sweep — all in
