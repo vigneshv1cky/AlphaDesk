@@ -509,6 +509,9 @@ def main() -> None:
                         help="news lookback for the candidate window")
     sub.add_parser("grade")
     sub.add_parser("status")
+    p_bt = sub.add_parser("backtest", help="replay past earnings → does the drift edge pay vs SPY?")
+    p_bt.add_argument("--days", type=int, default=90, help="lookback window in calendar days")
+    p_bt.add_argument("--horizon", type=int, default=1, help="forward trading days to grade")
     sub.add_parser("abtest", help="reaction-gate A/B: forward alpha bucketed by reaction size")
     sub.add_parser("alpha", help="honest alpha: SPY-relative alpha_net vs beta-adjusted, borrow-aware alpha_adj")
     sub.add_parser("earnings", help="refresh the earnings calendar and show upcoming / recent")
@@ -545,6 +548,14 @@ def main() -> None:
         from alphadesk.ledger import store
         print("ledger:", store.stats()["total"])
         print("tokens:", store.token_summary(days=1))
+    elif args.cmd == "backtest":
+        from alphadesk.ingest.earnings import refresh_calendar
+        from alphadesk.ledger.backtest import backtest_drift, report
+        print(f"Refreshing {args.days} days of earnings calendar…")
+        n = refresh_calendar(days_back=args.days, days_fwd=0)
+        print(f"{n} calendar rows")
+        trades = backtest_drift(days=args.days, horizon=args.horizon)
+        report(trades)
     elif args.cmd == "abtest":
         from alphadesk.config import MATERIAL_REACTION_PCT
         from alphadesk.ledger import store
