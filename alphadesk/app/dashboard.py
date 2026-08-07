@@ -74,6 +74,83 @@ def api_sources(days: int = 30):
     return {"days": days, "sources": store.source_scorecard(days)}
 
 
+@app.get("/api/performance")
+def api_performance(days: int = 30):
+    """Performance analytics from realized exits: equity curve (equal-weight
+    cumulative return), drawdown, per-trade + annualized-daily Sharpe, per-market
+    P&L, and the full per-trade list for the drill-down. Pure arithmetic on the
+    ledger — the honest read of whether the desk is making money."""
+    import math
+    from collections import defaultdict
+    from datetime import datetime
+
+    from alphadesk.config import ET
+
+    days = max(1, min(days, 365))
+    rows = store.performance_rows(days)
+
+    curve = []
+    cum = 0.0
+    alpha_cum = 0.0
+    for r in rows:
+        cum += r.get("exit_return_pct") or 0
+        alpha_cum += r.get("exit_alpha") or r.get("alpha_net") or 0
+        curve.append({"ts": r["exit_ts"], "symbol": r["symbol"],
+                      "cum": round(cum, 3), "alpha": round(alpha_cum, 3)})
+
+    peak = float("-inf")
+    max_dd = 0.0
+    for p in curve:
+        peak = max(peak, p["cum"])
+        max_dd = max(max_dd, peak - p["cum"])
+
+    rets = [float(r.get("exit_return_pct") or 0.0) for r in rows]
+    n = len(rets)
+    mean = sum(rets) / n if n else 0.0
+    var = sum((x - mean) ** 2 for x in rets) / n if n else 0.0
+    std = var ** 0.5
+    trade_sharpe = round(mean / std, 3) if n > 1 and std else None
+
+    daily_map: dict[str, float] = defaultdict(float)
+    for r in rows:
+        try:
+            day = datetime.fromisoformat(r["exit_ts"]).astimezone(ET).date().isoformat()
+        except (ValueError, TypeError):
+            continue
+        daily_map[day] += r.get("exit_return_pct") or 0
+    dvals = list(daily_map.values())
+    daily_sharpe = None
+    if len(dvals) >= 2:
+        dm = sum(dvals) / len(dvals)
+        dv = sum((x - dm) ** 2 for x in dvals) / len(dvals)
+        dstd = dv ** 0.5
+        if dstd:
+            daily_sharpe = round(dm / dstd * math.sqrt(252), 3)
+
+    per_market = {}
+    for r in rows:
+        s = r.get("session") or "?"
+        pm = per_market.setdefault(s, {"n": 0, "pnl": 0.0, "wins": 0})
+        pm["n"] += 1
+        pm["pnl"] += r.get("exit_return_pct") or 0
+        if (r.get("exit_return_pct") or 0) > 0:
+            pm["wins"] += 1
+
+    return {
+        "days": days,
+        "curve": curve,
+        "n": n,
+        "total_return": round(cum, 3),
+        "mean_return": round(mean, 3),
+        "win_rate": round(100.0 * sum(1 for x in rets if x > 0) / n, 1) if n else None,
+        "max_drawdown": round(max_dd, 3),
+        "trade_sharpe": trade_sharpe,
+        "daily_sharpe": daily_sharpe,
+        "per_market": {k: {**v, "pnl": round(v["pnl"], 3)} for k, v in per_market.items()},
+        "trades": rows,
+    }
+
+
 @app.get("/api/system")
 def api_system():
     """System-health panel: is the desk alive and covering? Last run, run cadence

@@ -7,6 +7,7 @@ const LINKS = [
   { to: "/open", label: "Open" },
   { to: "/after", label: "After" },
   { to: "/earnings", label: "Earnings" },
+  { to: "/performance", label: "Performance" },
   { to: "/system", label: "Health" },
 ]
 

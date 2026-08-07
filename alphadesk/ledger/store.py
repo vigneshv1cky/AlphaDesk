@@ -1239,6 +1239,21 @@ def runs_today(kind: str = "FIND_TRADES") -> int:
     return int(n)
 
 
+def performance_rows(days: int = 30) -> list[dict]:
+    """Exited picks with everything the performance page needs — realized P&L,
+    alpha, path (MFE/MAE), plan levels, and the quant signals that fired."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, ts, symbol, direction, session, horizon_days,"
+            " exit_ts, exit_return_pct, exit_alpha, alpha_net, mfe_pct, mae_pct,"
+            " plan_entry, plan_target, plan_stop, entry_price, exit_price,"
+            " score, adjusted_score, thesis, debate"
+            " FROM picks WHERE exit_ts IS NOT NULL AND exit_return_pct IS NOT NULL"
+            "   AND ts >= datetime('now', ?) ORDER BY exit_ts",
+            (f"-{int(days)} days",)).fetchall()
+    return [_decode(dict(r)) for r in rows]
+
+
 def runs_summary_today(kind: str = "FIND_TRADES") -> dict:
     """Run-activity for the system-health panel: total runs today, how many actually
     booked picks (top_picks non-empty), and the most recent run time."""

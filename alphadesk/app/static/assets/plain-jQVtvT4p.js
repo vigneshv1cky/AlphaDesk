@@ -1,0 +1,1 @@
+var e=e=>e===`LONG`?`Long`:`Short`,t=e=>e===`LONG`;export{e as n,t};

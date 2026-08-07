@@ -263,6 +263,40 @@ export interface SystemInfo {
   market: string
 }
 
+export interface PerfTrade {
+  id: number
+  symbol: string
+  direction: "LONG" | "SHORT"
+  session: string
+  exit_ts: string | null
+  exit_return_pct: number | null
+  exit_alpha: number | null
+  alpha_net: number | null
+  entry_price: number | null
+  plan_entry: number | null
+  plan_target: number | null
+  plan_stop: number | null
+  mfe_pct: number | null
+  mae_pct: number | null
+  score: number | null
+  thesis: string | null
+  debate: { quant_signals?: Record<string, number> } | null
+}
+
+export interface PerformanceInfo {
+  days: number
+  curve: { ts: string; symbol: string; cum: number; alpha: number }[]
+  n: number
+  total_return: number
+  mean_return: number
+  win_rate: number | null
+  max_drawdown: number
+  trade_sharpe: number | null
+  daily_sharpe: number | null
+  per_market: Record<string, { n: number; pnl: number; wins: number }>
+  trades: PerfTrade[]
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path)
   if (!res.ok) throw new Error(`${path}: ${res.status}`)
@@ -275,6 +309,7 @@ export const api = {
   timelines: () => get<{ symbols: SymbolTimeline[]; market: string }>("/api/timelines"),
   stats: () => get<Stats>("/api/stats"),
   system: () => get<SystemInfo>("/api/system"),
+  performance: (days = 30) => get<PerformanceInfo>(`/api/performance?days=${days}`),
   tokens: (days = 1) => get<{ usage: TokenRow[] }>(`/api/tokens?days=${days}`),
   sources: (days = 30) => get<{ sources: SourceStat[] }>(`/api/sources?days=${days}`),
   earnings: () =>
