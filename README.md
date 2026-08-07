@@ -1,26 +1,22 @@
 # AlphaDesk
 
-A predictive **multi-agent stock research engine**. You trigger a run; it reads earnings
-drift + financial news, a **team** of specialized LLM agents debates the best opportunities
-live, a **Head** ranks them head-to-head, and every call is written to a self-grading ledger
-that scores itself forward against SPY.
+A pure-quant **post-earnings-drift research engine**. No LLM, no agents — a weighted
+set of statistical signals scores each earnings reporter, the desk books
+session-scoped paper positions, and a self-grading ledger scores every call forward
+vs SPY.
 
-**Research / paper only  --  no order execution.** Supports Claude (via `claude-agent-sdk`),
-DeepSeek, and Kimi as LLM backends.
-
+**Research / paper only — no live order execution.** (Alpaca PAPER fills are opt-in
+and off by default.)
 
 ## Table of contents
 
 - [The idea](#the-idea)
-- [Alpha thesis](#alpha-thesis)
 - [How a run works](#how-a-run-works)
-- [The agent team](#the-agent-team)
-- [LLM backends](#llm-backends)
-- [LLM guardrail stack](#llm-guardrail-stack)
-- [Macro awareness](#macro-awareness)
-- [Extended-hours execution](#extended-hours-execution)
-- [Hedging](#hedging)
+- [The signals](#the-signals)
+- [Trading model](#trading-model)
+- [Risk rails](#risk-rails)
 - [Ledger and grading](#ledger-and-grading)
+- [Backtesting](#backtesting)
 - [Quick start](#quick-start)
 - [Commands](#commands)
 - [Configuration](#configuration)
@@ -29,176 +25,115 @@ DeepSeek, and Kimi as LLM backends.
 - [Status](#status)
 - [Disclaimer](#disclaimer)
 
-
 ## The idea
 
-Markets price a headline in seconds, but the *consequences* take days to propagate. A supplier
-hasn't repriced yet. A theme is still building. A big move has more room to run. AlphaDesk
-hunts those lags  --  and keeps score of whether it was right.
-
-It is a simulated research desk: a scout allocates attention, specialists write briefs, a
-researcher argues a thesis, a critic attacks it (and may flip it), a judge rules, a head
-ranks. Then reality grades every call at its pre-committed horizon.
-
-
-## Alpha thesis
-
-Three slow-digestion edges:
-
-- **MOMENTUM**  --  big moves (especially post-earnings) continue for days; bet the continuation
-  in the direction of the *reaction*, not the *result*.
-- **SPILLOVER**  --  a shocked company reprices instantly; its suppliers, customers, and
-  competitors drift for days. The **Connections desk** maps the shock to connected,
-  still-unmoved names.
-- **THEME**  --  investment themes build over days; mention-velocity leads the crowd.
-
-Every pick declares `direction · horizon · edge · confidence` and is graded at exactly that
-horizon vs SPY, net of friction. Horizon is pre-committed per edge (default 1 day), not
-chosen by the judge  --  no garden-of-forking-paths.
-
+Markets price a headline in seconds, but the *consequences* take days to propagate.
+Post-earnings drift (PEAD) is the classic example: after a big earnings reaction,
+the move often keeps going as algos price the headline but miss the nuance. The
+desk watches the Nasdaq earnings calendar, waits for a material reaction, scores it,
+and bets the continuation.
 
 ## How a run works
 
-Clicking **Find Trades** streams the full pipeline live to the terminal:
+Every `AUTORUN_INTERVAL_MINUTES` (5 on the VM) during 04:00–19:00 ET:
 
 ```
-Earnings drift + financial news + optional GDELT world news
+Nasdaq earnings calendar (BMO/AMC/DAY, EPS estimate/actual/surprise)
         │
-   [Position review]  re-check open picks on fresh news only (price-blind reviewer)
-   [Macro check]      VIX spike / rate move? → review + hedge + scout beneficiaries
+   drift candidates — recently-public reporters with a material reaction (≥1.5%)
         │
-   [Anti-double-dip]  drop held names, same-story within cooldown
-   [Connections desk] top-N shocks → spillover candidates (code-first: EDGAR + Polygon)
+   anti-double-dip — drop held symbols + 24h re-pick cooldown
         │
-   SCOUT  ── picks ≤5, reason for every pick and skip (materiality-ranked)
-   GATE   ── drop picks with no verifiable external catalyst (fail-open)
-        │  per surviving pick, in parallel:
-   NOTES  (market + news) + earnings evidence + calibration scorecard
+   quant scoring — top 40 movers, batched price/options/fundamental context,
+   one batched moves_since_report, 8-way concurrent scoring
         │
-   RESEARCHER → CRITIC → code fact-check → RESEARCHER rebuttal → JUDGE
-   PLAN   entry / target / stop
-   every Nth pick → LONER control arm
+   composite = 6 weighted signals → −100..+100 → direction (LONG/SHORT)
         │
-   HEAD   head-to-head ranking, concentration cap per sector+direction
+   risk rails — max open positions, per-sector·direction concentration,
+   daily-loss stop, session-aware sizing
         │
-   LEDGER (SQLite/WAL) → GRADER (hourly, alpha_net + alpha_adj vs SPY)
-   POSITION WATCHER (~180s)  --  bar-based first-touch exit (pure code)
+   ATR plan → book → funnel (why-picked / why-dropped)
+        │
+   watchers — tiered exits (target / trailing / stop / spike / stale / session-close)
+        │
+   grader — realized exit = the grade (alpha vs SPY, net friction)
 ```
 
-Every step streams to the browser in a terminal-style UI, so you watch the desk debate in
-real time.
+The desk also **pre-arms** upcoming reporters (pre-report close + options-implied
+move stored ahead of release) so the moment a report goes public the reaction is
+measured instantly.
 
+## The signals
 
-## The agent team
+Each signal returns −100 (strong SHORT) to +100 (strong LONG), weighted into a
+composite:
 
-| Role | Tier | Job |
-|------|------|-----|
-| **Scout** | sonnet | Sees every news-active symbol + price context. Picks ≤5, reasons for every pick and skip. |
-| **Gate** | haiku | Pre-debate catalyst screen. Drops picks with no real external catalyst. Fail-open. |
-| **Notes** | haiku | Two parallel briefs: market (price + valuation + priced-in + spent-move ratio) and news. |
-| **Connections** | opus | Code-first spillover desk: EDGAR 10-K disclosures + Polygon peers + news relation graph. |
-| **Researcher** | sonnet | Directional thesis from briefs + track record. |
-| **Critic** | opus | Attacks with evidence. Can FLIP the call, STAND_ASIDE, or SUPPORT. |
-| **Judge** | opus | Always commits to LONG/SHORT. Approved = conviction call; else = thin lean. |
-| **Plan** | sonnet | Entry at current price, realistic target, invalidation stop. |
-| **Loner** | opus | Single-agent control arm. Off by default (`SOLO_ARM_EVERY_N=0`). |
-| **Head** | opus | Head-to-head ranking across all debated ideas. Concentration cap applied. |
-| **Review** | opus | Re-checks open positions on fresh news (price-blind  --  price exits are code only). |
+| Signal | Weight | What it measures |
+|--------|--------|------------------|
+| `earnings_drift` | 0.30 | reaction + drift continuation vs the gap (underreaction gauge) |
+| `volume_expansion` | 0.20 | post-report volume confirms real new information |
+| `sector_divergence` | 0.15 | company-specific move vs sector rotation |
+| `short_interest_risk` | −0.10 | squeeze/borrow penalty for SHORTs, fuel for LONGs |
+| `price_structure` | 0.15 | trend strength vs ATR exhaustion |
+| `liquidity` | 0.10 | the drift sweet spot ($0.5B–$10B, enough volume) |
 
-**CHEAP_MODELS** (default ON) downgrades opus judgment roles to sonnet for cheap hourly
-runs. Every pick is model-tagged so you can compare cohorts.
+Weights are **learned** (`quant/calibrate.py`): online nudges after every graded
+outcome, batch re-calibration from the last 200 closed trades, plus exit-parameter
+recommendations (widening the stop if >60% of exits are stops, etc.).
 
+## Trading model
 
-## LLM backends
+- **Session-scoped trades.** Each market window is its own trade: PRE 4:00–9:30,
+  OPEN 9:30–16:00, AFTER 16:00–20:00. A pick entered in a session exits at that
+  session's close — **nothing carries into another market**. Night is not tradeable;
+  a pick decided at night is stamped PRE and enters at the next 4:00 open.
+- **Per-market buffers** (`config.py`): `START_BUFFER_MIN` (5) skips the volatile
+  open, `ENTRY_BUFFER_MIN` (15) stops entries near the close, `EXIT_BUFFER_MIN` (5)
+  closes positions before the boundary. Entries: PRE 4:05–9:15, OPEN 9:35–15:45,
+  AFTER 16:05–19:45. Exits: 9:25 / 15:55 / 19:55.
+- **Entry** fills at the live price when found; a pick with no live trade is not
+  taken. **Exit** is pure code (target/stop/trailing/spike/stale/session-close).
 
-All-or-nothing: exactly ONE provider serves every role. Set via `MODEL_PROVIDER`:
+## Risk rails
 
-| Provider | Env var | Notes |
-|----------|---------|-------|
-| `claude_sdk` (default) |  --  | Requires Claude Max subscription + Claude Code CLI |
-| `deepseek` | `DEEPSEEK_API_KEY` | Tier→model: opus→`v4-pro`, sonnet/haiku→`v4-flash` |
-| `kimi` | `KIMI_API_KEY` or `MOONSHOT_API_KEY` | Tier→model: all→`kimi-k2.6` (k3 opt-in) |
+Paper-desk circuit breakers, all env-overridable:
 
-Override per-tier models: `DEEPSEEK_MODEL_OPUS=...`, `DEEPSEEK_MODEL_SONNET=...`, etc.
-Override per-role: `MODEL_CRITIC=...`, `MODEL_JUDGE=...`, etc.
+- `MAX_OPEN_POSITIONS` (20) — the book is capped; new entries are gated at the cap.
+- `CONCENTRATION_MAX_PER_CLUSTER` (2) — max taken picks per sector·direction per day.
+- `DAILY_LOSS_STOP_PCT` (10) — stop opening after that much realized loss today.
+- 0.5× conviction sizing in thin PRE/AFTER sessions.
 
-
-## LLM guardrail stack
-
-Every call passes through `llm.call_role`:
-
-1. **Model resolution**  --  tier + env override + rate-limit downgrade ladder
-2. **Injection defense**  --  external text wrapped in `<data:*>` delimiters; web results tagged UNTRUSTED
-3. **Breaker check**  --  circuit breaker opens when bottom tier is rate-limited
-4. **Input-size cap**  --  48k chars per call (cost + DoS guard)
-5. **Schema validation**  --  strict JSON schema; one re-ask then safe default
-6. **Universe whitelist**  --  every ticker validated against Alpaca-tradable universe
-7. **Concurrency + budget**  --  semaphore caps parallel calls; tool budget per web-grounded call
-8. **Token telemetry**  --  per role/model/decision, written to the ledger
-
-Fail-safe: a failed call drops that candidate. **Never a phantom pick, never a retry storm.**
-
-
-## Macro awareness
-
-The system tracks macro conditions and reacts to dislocations in real time:
-
-- **Macro snapshot**  --  10Y yield, Fed funds rate (13-week T-bill proxy), VIX with 1-month
-  deltas. Cached every 10 minutes. Fed to every agent prompt.
-- **FOMC calendar**  --  hardcoded 2026 schedule. Agents see graduated warnings: decision day
-  (don't open new positions), within 3 days (size down on rate-sensitive names), etc.
-- **Macro shock detection**  --  VIX spike >20% or 10Y move >15bp triggers review of all open
-  positions. In PRE/AFTER hours: auto-hedge flagged longs + scout for beneficiary stocks.
-- **Macro scout**  --  when a shock hits in extended hours, a single call finds stocks
-  positioned to profit from the specific event (rate plays, VIX products, gold miners, etc.).
-
-
-## Extended-hours execution
-
-- **PRE (4:00–9:30 ET) / AFTER (16:00–20:00 ET)**  --  watcher runs spot-price monitoring for
-  broker-filled positions. Stops/targets enforced. BMO reports are tradeable from 4am PRE;
-  AMC reports from 4pm AFTER.
-- **Macro shocks in extended hours**  --  flagged longs get companion SHORT hedges; macro scout
-  books profit positions before the gap.
-- **OPEN (9:30–16:00 ET)**  --  full bar-based monitoring with intraday minute bars.
-- **CLOSED (20:00–4:00 ET)**  --  no monitoring.
-
-
-## Hedging
-
-Two complementary mechanisms:
-
-- **Macro hedge**  --  triggered by shock detection in PRE/AFTER. Mechanical companion SHORT
-  for each flagged LONG. Target = parent's stop, stop = +3%. Auto-closed when parent exits.
-- **Conviction hedge**  --  config-driven (`HEDGE_CONFIDENCE_THRESHOLD`). Below-threshold LONGs
-  get a companion SHORT at booking time. Off by default (0).
-
-Both are recorded in the ledger with `hedge_of` linking to the parent. The grader measures
-whether hedging adds or costs over the sample.
-
+Every trigger records a funnel/skip reason so it's visible, never silent.
 
 ## Ledger and grading
 
-Every evaluation is one row in `~/.alphadesk/ledger.db`. The grader is pure code:
+Every evaluation is one row in `~/.alphadesk/ledger.db` (SQLite/WAL). The grader is
+pure code:
 
-- **Entry.** Model A: closed-market picks fill at the next 9:30 open. Broker-filled picks
-  (extended hours) use the actual fill price.
-- **Outcomes.** `ret_horizon` at the pre-committed horizon, direction-aware. SPY over
-  identical window.
-- **Alpha.** `alpha_net` = directional return − SPY − friction. `alpha_adj` = same plus
-  beta-adjustment and short-borrow charge (honest-alpha prototype).
-- **Paths.** MFE/MAE from daily high/low over the hold window. Split-adjusted for dividends/splits.
+- **Entry.** Closed-market picks fill at the next open; broker-filled picks use the
+  actual fill. Entry precedence: broker fill → live price → Model-A open.
+- **Outcomes.** `alpha_net` = directional return − SPY − friction (doubled for
+  low-liquidity names). `alpha_adj` = the same plus beta-adjustment and short-borrow.
+- **Realized exits are the grade.** A closed session trade is stamped `alpha_net` +
+  `graded_at` at exit, so the forward grader never re-grades it.
+- **Paths.** MFE/MAE from daily high/low over the hold window.
+- **Anti-survivorship.** Gate-dropped reporters (reaction A/B) and quant drops
+  (day-deduped skips) are all graded forward.
 
-Anti-survivorship: rejected picks, scout skips, and reaction-gate drops are all graded
-forward. The ledger earns trust from its scorecard, not its prose.
+## Backtesting
 
+`python -m alphadesk.main backtest --days 90` replays past earnings with the same
+entry/benchmark/friction model as a live pick, bucketed by reaction size, session,
+direction — and with `--selection`, graded in the composite's direction by score.
+Reads a **local daily-price cache** (`price_daily` table): backfill once, then
+re-runs take ~1 minute instead of being yfinance-rate-limited.
 
 ## Quick start
 
 ```bash
 pip install -r requirements.txt
 
-# Web dashboard + hourly grader + auto-run loop
+# Web dashboard + autorun + watchers + grader
 python -m alphadesk.main dashboard        # http://localhost:8000
 
 # One-shot headless run
@@ -208,149 +143,103 @@ python -m alphadesk.main desk
 cd alphadesk/ui && pnpm build
 ```
 
-
 ## Commands
 
 ```bash
-python -m alphadesk.main dashboard     # v2: dashboard + hourly grader + auto-run + watcher (primary)
-python -m alphadesk.main desk          # one-shot headless run
-python -m alphadesk.main world         # one GDELT world-news tick
-python -m alphadesk.main grade         # grade all due picks
-python -m alphadesk.main status        # ledger summary + token usage
-python -m alphadesk.main backfill      # one-shot news backfill
-python -m alphadesk.main earnings      # refresh calendar; show upcoming + recent
-python -m alphadesk.main abtest        # reaction-gate A/B: forward alpha vs SPY by reaction size
-python -m alphadesk.main alpha         # honest alpha: beta-adjusted + borrow-aware
-python -m alphadesk.main run           # legacy 24/7 scheduler
+python -m alphadesk.main dashboard    # FastAPI + SPA + autorun + watchers + grader
+python -m alphadesk.main desk         # one-shot run
+python -m alphadesk.main grade        # grade due picks / MFE-MAE
+python -m alphadesk.main status       # ledger summary
+python -m alphadesk.main backtest     # does drift pay on history? (--selection)
+python -m alphadesk.main abtest       # reaction-gate A/B
+python -m alphadesk.main alpha        # alpha_net vs beta-adjusted alpha_adj
+python -m alphadesk.main earnings     # refresh calendar, show upcoming/recent
 ```
-
 
 ## Configuration
 
-Set via `.env` file or environment.
+Set via `.env` or environment.
 
 **Required**
 
 ```ini
 ALPACA_API_KEY=...            # market data + tradable universe
 ALPACA_SECRET_KEY=...
-POLYGON_API_KEY=...           # financial news (optional but recommended)
-ADMIN_USERNAME=admin          # dashboard Basic Auth
-ADMIN_PASSWORD=...
 ```
 
-**LLM provider** (pick ONE)
+**Key knobs** (all optional, defaults shown)
 
 ```ini
-MODEL_PROVIDER=deepseek       # claude_sdk | deepseek | kimi
-DEEPSEEK_API_KEY=sk-...       # for deepseek
-# KIMI_API_KEY=sk-...         # for kimi
+ALPHADESK_DATA=~/.alphadesk
+AUTORUN_INTERVAL_MINUTES=5
+AUTORUN_START_ET=04:00
+AUTORUN_END_ET=19:00
+MATERIAL_REACTION_PCT=1.5
+QUANT_PREFILTER_MIN_SCORE=5.0
+QUANT_SCORE_CANDIDATES=40
+MAX_OPEN_POSITIONS=20
+CONCENTRATION_MAX_PER_CLUSTER=2
+DAILY_LOSS_STOP_PCT=10
+START_BUFFER_MIN=5
+ENTRY_BUFFER_MIN=15
+EXIT_BUFFER_MIN=5
+PAPER_TRADING=0              # route picks to Alpaca PAPER for real fills
+PM_BASE_USD=1000
+PM_MAX_POSITION_USD=2500
+ALERTS_WEBHOOK_URL=          # Telegram/Slack/Discord incoming webhook
+SHORT_BORROW_APR=2.0         # honest-alpha borrow charge
+SHORT_BORROW_APR_ILLIQUID=30.0
 ```
-
-**Tuning knobs** (all optional)
-
-```ini
-CHEAP_MODELS=1                # 1=downgrade opus→sonnet for cheap hourly runs (default); 0=full tiers
-LEAN_MODE=1                   # 1=cost rails: earnings-primary, tighter caps (default); 0=full mode
-HEDGE_CONFIDENCE_THRESHOLD=0  # auto-hedge LONGs with confidence below this (0=off)
-AUTORUN_INTERVAL_HOURS=1      # auto-fire Find Trades every N hours within ET window
-AUTORUN_START_ET=09:35        # window start
-AUTORUN_END_ET=16:00          # window end
-WORLD_MAX_CATEGORIES=0        # GDELT world news in Find Trades (0=off)
-PAPER_TRADING=0               # route to Alpaca paper account (0=off)
-PM_EXTENDED_HOURS=0           # extended-hours limit orders for PRE/AFTER picks
-CONCENTRATION_MAX_PER_CLUSTER=2  # max TAKEN picks per sector+direction per day
-SCOUT_MAX_CANDIDATES=60       # materiality-ranked candidate window size
-MATERIAL_REACTION_PCT=1.5     # post-earnings drift needs ≥ this reaction
-ENTRY_GAP_SKIP_PCT=2.0        # skip closed-market pick if open gapped > this from planned price
-SOLO_ARM_EVERY_N=0            # Nth pick → loner control arm (0=off)
-MAX_RUNS_PER_DAY=50           # runaway guard
-LLM_MAX_CONCURRENCY=4         # parallel LLM calls
-MODEL_<ROLE>=...              # override any role's tier, e.g. MODEL_JUDGE=opus
-```
-
-## GCP Deployment
-
-Terraform config in `terraform/` provisions everything:
-
-```bash
-cd terraform
-cp terraform.tfvars.example terraform.tfvars   # fill in your keys
-terraform init -backend=false
-terraform apply
-```
-
-Creates an e2-small VM (Ubuntu 22.04) with a 20GB persistent disk for the ledger,
-a static IP, and a firewall opening port 8000. A startup script clones the repo,
-installs deps, writes `.env`, and runs the dashboard as a systemd service that
-survives reboots. ~$18/month.
 
 ## Repository layout
 
 ```
 alphadesk/
-  config.py            model map, caps, sessions, tradable universe
-  llm.py               guarded LLM call stack  --  every call through call_role
+  config.py            sessions, buffers, risk rails, tradable universe
+  main.py              CLI + 5 async loops (grader, earnings+arm, autorun, watcher, quant watcher)
   ingest/
-    news.py            Polygon poll → enrichment → candidates
-    earnings.py        Nasdaq calendar → drift candidates (time-aware, gap vs drift)
-    prices.py          real-time Alpaca + yfinance context + macro snapshot + FOMC calendar
-    relations.py       SEC EDGAR 10-K + Polygon peers + news relation graph
-    world.py           GDELT world-news (11-cat taxonomy, off by default)
+    earnings.py        Nasdaq calendar → drift candidates + pre-earnings + pre-arm
+    prices.py          price context, options IV, sector ETFs, macro
+  quant/
+    signals.py         6 weighted signals → composite → direction
+    calibrate.py       online + batch weight learning
+    watcher.py         tiered exits (TP/trail/stop/spike/stale/session-close)
+    stream.py          Alpaca WebSocket live prices
   desk/
-    stream.py          on-demand "Find Trades" SSE flow (v2 primary)
-    workflow.py        research_run()  --  batch pipeline
-    debate.py          shared researcher→critic→judge core (both entry points)
-    scout.py           attention allocation, one prompt
-    gate.py            pre-debate catalyst screen (fail-open)
-    notes.py           market + news brief subagents
-    team.py            researcher, critic, judge, head prompts + fact-check + concentration cap
-    connections.py     code-first spillover discovery + web backstop
-    plan.py            trade plan + pure-code exit physics
-    loner.py           single-agent control arm
-    review.py          price-blind position review
-    macro.py           macro shock detection, hedging, macro scout + trade
-    news_check.py      same-story vs new-catalyst check
-    earnings_reader.py code-fetched earnings facts (no LLM in number path)
-    portfolio.py       Alpaca paper portfolio manager (opt-in, reconciliation loop)
+    stream.py          Find Trades pipeline (candidates → risk rails → score → book)
+    workflow.py        research_run() batch twin
+    plan.py            ATR-based entry/target/stop
+    portfolio.py       opt-in Alpaca paper order routing + reconcile
   ledger/
-    store.py           SQLite/WAL: picks, runs, funnel, earnings, tokens, hedges
-    grader.py          forward grading vs SPY + MFE/MAE  --  pure code
+    store.py           SQLite/WAL: picks, runs, funnel, skips, earnings, price_daily
+    grader.py          forward grading vs SPY + MFE/MAE + reaction A/B
+    backtest.py        replay history (local price cache)
   app/
-    dashboard.py       FastAPI + Basic Auth + SSE + SPA
-    scheduler.py       hourly grader loop; legacy 24/7 loop
-  main.py              CLI entrypoint + position watcher
-  ui/                  React 19 + TS + Vite → built into app/static/
+    dashboard.py       FastAPI: /api/* + SPA
+    alerts.py          webhook notifications
+  ui/                  React 19 + TS + Vite → app/static/
 ```
-
 
 ## Design principles
 
-- **Agents own judgment; code owns facts, physics, safety, and scoring.** No hardcoded
-  thresholds. The scout has no RVOL cutoff. The grader is pure arithmetic.
-- **Attention is information-driven, never price-driven.** Decisions come from causes (news,
-  earnings), not price narration. Price exits belong to code (watcher), news exits to the LLM
-  (price-blind reviewer).
-- **Forward-only evidence.** Every pick declares direction + horizon + edge + confidence and
-  is graded at exactly that horizon vs SPY. The system earns trust from its ledger.
-- **Fail safe.** A failed stage drops one candidate. Never a phantom pick, never a retry storm.
-- **Code-first evidence.** Earnings facts, relationships, and macro data are fetched in code.
-  LLMs interpret facts, they don't retrieve them.
-
+- **Code owns facts, physics, safety, and scoring; signals own judgment.** No LLM,
+  no hardcoded narrative. Price exits are code; grading is pure arithmetic.
+- **Forward-only evidence.** Every pick declares direction + horizon and is graded
+  at that horizon vs SPY. The system earns trust from its ledger.
+- **Fail safe.** A failed stage drops that candidate. Never a phantom pick.
+- **Anti-survivorship.** Rejected candidates and skips are graded forward too.
 
 ## Status
 
-Early and **unproven.** The ledger clock is running but the sample is tiny (~28 graded as of
-2026-07-22, direction ≈ coin-flip, mean alpha negative). The calibration prior and kill
-criteria stay dormant until the sample is large enough.
-
-Recent work (2026-07-26): switched to DeepSeek, added macro awareness (FOMC calendar, shock
-detection, hedging), extended-hours execution with BMO reports at 4am PRE, clock-aligned
-hourly autorun (04:00–19:00 ET weekdays), and redesigned the UI as a terminal-style console.
-The system is ready to accumulate a real sample.
-
+Early and **unproven.** As of 2026-08-07: backtests (1700+ reports) and 300+ live
+exits land near-zero-to-negative — the drift edge is not validated. The composite
+**selection** adds value in a narrow pocket (score 5–10, OPEN session, LONGs), while
+high scores, PRE/AFTER sessions, and SHORTs lose consistently. The desk is running
+all sessions to build the live sample before tuning toward that pocket. Everything
+is instrumented (performance page, backtest, funnel, risk rails) to make that
+decision data-backed.
 
 ## Disclaimer
 
-For educational and informational purposes only. **Not financial advice.** This system does
-not place trades. Algorithmic trading carries significant risk of loss.
+For educational and informational purposes only. **Not financial advice.** This
+system does not place trades. Algorithmic trading carries significant risk of loss.
