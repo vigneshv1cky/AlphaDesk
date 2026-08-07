@@ -52,6 +52,10 @@ QUANT_STREAM_ENABLED = os.environ.get("QUANT_STREAM_ENABLED", "1") not in ("0", 
 QUANT_PREFILTER_MIN_SCORE = float(os.environ.get("QUANT_PREFILTER_MIN_SCORE", "5.0"))
 QUANT_TIERED_EXITS = os.environ.get("QUANT_TIERED_EXITS", "1") not in ("0", "", "false", "False", "no")
 QUANT_CALIBRATE = os.environ.get("QUANT_CALIBRATE", "1") not in ("0", "", "false", "False", "no")
+# How many candidates each Find Trades run scores (by reaction magnitude). A run
+# must finish within the 5-min autorun cadence to catch intraday movers, so keep
+# this small — each scored name costs a yfinance price/options/fundamental fetch.
+QUANT_SCORE_CANDIDATES = int(os.environ.get("QUANT_SCORE_CANDIDATES", "40"))
 
 # ── Exit parameters (self-optimizing via calibrator) ─────────────────────────
 PLAN_TARGET_ATR = float(os.environ.get("PLAN_TARGET_ATR", "2.0"))        # target = entry ± ATR × this

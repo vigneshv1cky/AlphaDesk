@@ -181,7 +181,11 @@ def api_earnings():
         r = reactions.get(e["symbol"].upper())
         if r:
             e["move_since_report_pct"] = r["reaction_total"]
-            e["move_drift_pct"] = r["reaction_total"]
+            # The honest miss gauge is the CAPTURABLE drift from the first post-report
+            # open — a gap move (total big, drift ~0) is not a tradeable miss. When no
+            # regular session had traded at sighting, drift is NULL and the whole move
+            # is extended-hours (capturable) → fall back to the total.
+            e["move_drift_pct"] = r.get("reaction_drift") if r.get("reaction_drift") is not None else r["reaction_total"]
     return {"upcoming": upcoming, "reported": reported}
 
 

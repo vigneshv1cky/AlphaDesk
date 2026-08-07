@@ -273,6 +273,7 @@ def drift_candidates(days: int) -> dict[str, list[dict]]:
                 "direction": "LONG" if total >= 0 else "SHORT",
                 "horizon_days": REACTION_AB_HORIZON_DAYS,
                 "reaction_total": round(total, 3),
+                "reaction_drift": round(mv["drift"], 3) if (mv and mv.get("drift") is not None) else None,
                 "gate_passed": int(abs(total) >= MATERIAL_REACTION_PCT),
                 "entry_price": live_now.get(esym.upper()),
             })

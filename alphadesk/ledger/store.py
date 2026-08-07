@@ -282,6 +282,10 @@ def init() -> None:
             conn.execute("ALTER TABLE earnings_reactions ADD COLUMN mkt_session TEXT")
         except sqlite3.OperationalError:
             pass  # already migrated
+        try:   # capturable drift (from the first post-report open) — the honest miss gauge
+            conn.execute("ALTER TABLE earnings_reactions ADD COLUMN reaction_drift REAL")
+        except sqlite3.OperationalError:
+            pass  # already migrated
         for col, decl in (("hedge_of", "INTEGER"),):
             try:   # macro hedge — companion SHORT protecting a LONG through overnight shock
                 conn.execute(f"ALTER TABLE picks ADD COLUMN {col} {decl}")
@@ -911,15 +915,26 @@ def record_exit(pick_id: int, reason: str, exit_price: float | None = None,
 
 
 def record_skips(skips: list[dict], cap: int = 30) -> None:
-    """Persist scout skips individually so their forward moves can be graded
-    (anti-survivorship: did we skip a name that then moved big?). Capped per
-    window to bound later grading cost."""
-    rows = [(_now(), (s.get("symbol") or "").upper(), (s.get("reason") or "")[:200])
-            for s in (skips or [])[:cap] if s.get("symbol")]
-    if not rows:
+    """Persist skipped candidates individually so their forward moves can be graded
+    (anti-survivorship: did we pass on a name that then moved big?). Capped per
+    window to bound later grading cost, and DEDUPED per symbol per day — the quant
+    pipeline re-evaluates the same candidates every run, so only the first skip of
+    the day is kept (the reason closest to the event)."""
+    if not skips:
         return
+    day_start = _et_day_start_utc()
     with _lock, _connect() as conn:
-        conn.executemany("INSERT INTO skips (ts, symbol, reason) VALUES (?,?,?)", rows)
+        seen = {r[0] for r in conn.execute(
+            "SELECT DISTINCT symbol FROM skips WHERE ts >= ?", (day_start,))}
+        rows = []
+        for s in skips[:cap]:
+            sym = (s.get("symbol") or "").upper()
+            if not sym or sym in seen:
+                continue
+            seen.add(sym)
+            rows.append((_now(), sym, (s.get("reason") or "")[:200]))
+        if rows:
+            conn.executemany("INSERT INTO skips (ts, symbol, reason) VALUES (?,?,?)", rows)
 
 
 def due_skips(limit: int = 300) -> list[dict]:
@@ -1140,7 +1155,7 @@ def earnings_reactions_batch(symbols: list[str]) -> dict[str, dict]:
     ph = ",".join("?" for _ in syms)
     with _connect() as conn:
         rows = conn.execute(
-            f"SELECT symbol, reaction_total, direction, entry_price"
+            f"SELECT symbol, reaction_total, reaction_drift, direction, entry_price"
             f" FROM earnings_reactions WHERE symbol IN ({ph})"
             " ORDER BY ts DESC", syms,
         ).fetchall()
@@ -1148,7 +1163,9 @@ def earnings_reactions_batch(symbols: list[str]) -> dict[str, dict]:
     for r in rows:
         s = r["symbol"].upper()
         if s not in out:
-            out[s] = {"reaction_total": r["reaction_total"], "direction": r["direction"]}
+            out[s] = {"reaction_total": r["reaction_total"],
+                      "reaction_drift": r["reaction_drift"],
+                      "direction": r["direction"]}
     return out
     """The most recent report for `symbol` within `days` (if it has one) — used at
     brief time to decide whether to web-read the report."""

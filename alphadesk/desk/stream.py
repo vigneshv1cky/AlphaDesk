@@ -115,28 +115,31 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
         yield _ev("done", board=[])
         return
 
-    # Quant scoring — limited to prevent yfinance rate-limiting on large slates
+    # Quant scoring — capped and BATCHED so a run finishes within the 5-min autorun
+    # cadence (each scored name costs yfinance fetches; the old per-candidate
+    # moves_since_report call was the bottleneck — one download per name).
+    from alphadesk.config import QUANT_SCORE_CANDIDATES
     from alphadesk.quant import signals as qs
     from alphadesk.quant import calibrate as qc
     weights = qc.load_weights()
 
-    # Cap candidates to score: order by reaction magnitude, take top 100
     scored_candidates = sorted(candidates.items(), key=lambda kv: -abs(
         next((a.get("reaction_pct", 0) for a in kv[1] if a.get("reaction_pct")), 0)),
-    )[:100]
+    )[:QUANT_SCORE_CANDIDATES]
 
-    scored: list[tuple[str, float, str, dict]] = []
-    for sym, arts in scored_candidates:
-        if await _gone():
-            return
+    # One batched download for EVERY candidate's post-report move (gap/drift/total).
+    all_items = [
+        {"symbol": a.get("tickers", [sym])[0] if a.get("tickers") else sym,
+         "report_date": a.get("published_at", "")[:10] if a.get("published_at") else "",
+         "session": a.get("mentions", [{}])[0].get("category", "DAY")}
+        for sym, arts in scored_candidates for a in arts if a.get("published_at")
+    ]
+    moves = (await loop.run_in_executor(None, prices.moves_since_report, all_items)
+             if all_items else {})
+
+    async def _score_one(sym: str, arts: list[dict]):
         pctx = await loop.run_in_executor(None, prices.get_context, sym) or {}
-        moves = await loop.run_in_executor(
-            None, lambda a=arts: prices.moves_since_report(
-                [{"symbol": a.get("tickers", [sym])[0] if a.get("tickers") else sym,
-                  "report_date": a.get("published_at", "")[:10] if a.get("published_at") else "",
-                  "session": a.get("mentions", [{}])[0].get("category", "DAY")}
-                 for a in a if a.get("published_at")])) if any(a.get("published_at") for a in arts) else {}
-        move = moves.get(sym, {})
+        move = moves.get(sym) or {}   # may be None for unmeasurable names
         # Implied move: prefer the PRE-ARMED options context (stored when the
         # reporter was armed ahead of release — instant, exact baseline); fall back
         # to a live fetch if never armed.
@@ -178,20 +181,44 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
             "short_float_pct": fund.get("short_float_pct"),
             "days_to_cover": fund.get("days_to_cover"),
         }
-        result = qs.compute_composite(rctx, weights)
+        return sym, qs.compute_composite(rctx, weights)
+
+    scored: list[tuple[str, float, str, dict]] = []
+    scored_map: dict[str, dict] = {}
+    drop_reasons: list[dict] = []
+    sem = asyncio.Semaphore(8)   # bound concurrent yfinance fetches
+
+    async def _guarded(sym, arts):
+        async with sem:
+            return await _score_one(sym, arts)
+
+    for coro in asyncio.as_completed([_guarded(s, a) for s, a in scored_candidates]):
+        if await _gone():
+            return
+        sym, result = await coro
+        scored_map[sym] = result
         if QUANT_PREFILTER_MIN_SCORE > 0 and result["score"] < QUANT_PREFILTER_MIN_SCORE:
+            drop_reasons.append({"symbol": sym,
+                                 "reason": f"quant pre-filter: score {result['score']:.1f}"})
             continue
         scored.append((sym, result["composite"], result["direction"], result))
 
     # Sort by score, take top N
     scored.sort(key=lambda x: -abs(x[1]))
     top = scored[:max_picks]
+    for sym, composite, direction, result in scored[max_picks:]:
+        drop_reasons.append({"symbol": sym,
+                             "reason": f"not in top {max_picks} (score {result['score']:.1f})"})
     if top:
         log.info("Quant scored %d candidates → top %d: %s",
                  len(scored), len(top),
                  ", ".join(f"{s[0]}={s[1]:+.0f}" for s in top[:8]))
 
     if not top:
+        store.funnel_add(ingested=len(candidates), candidates=len(scored_candidates),
+                         picked=0, skipped=len(drop_reasons), skip_reasons=drop_reasons)
+        if drop_reasons:
+            store.record_skips(drop_reasons)
         await loop.run_in_executor(None, store.add_run, "FIND_TRADES", [])
         yield _ev("status", msg="No candidates passed the quant filter.")
         yield _ev("done", board=[])
@@ -213,6 +240,7 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
             return
         pctx = await loop.run_in_executor(None, prices.get_context, sym) or {}
         if cur_sess in ("PRE", "AFTER") and not pctx.get("last_trade_ts"):
+            drop_reasons.append({"symbol": sym, "reason": "no trades in extended session"})
             yield _ev("gate", symbol=sym, reason="no trades in extended session")
             continue
 
@@ -220,6 +248,7 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
         if direction == "SHORT":
             short_ok = await loop.run_in_executor(None, _shortable, sym)
             if not short_ok:
+                drop_reasons.append({"symbol": sym, "reason": "SHORT not shortable at broker"})
                 yield _ev("gate", symbol=sym,
                           reason="SHORT skipped — not shortable at broker")
                 continue
@@ -299,5 +328,12 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
     store.add_run("FIND_TRADES", board)
     store.mark_taken([r["id"] for r in board])
     _pending_run_picks = []
+    # Coverage ledger: candidates seen → picked vs why-not (also recorded as skips
+    # so the grader forward-scores the drops, and the UI shows a real reason).
+    store.funnel_add(ingested=len(candidates), candidates=len(scored_candidates),
+                     picked=picks_count, skipped=len(drop_reasons),
+                     skip_reasons=drop_reasons)
+    if drop_reasons:
+        store.record_skips(drop_reasons)
     yield _ev("status", msg=f"Run complete — {picks_count} quant pick(s)")
     yield _ev("done", board=board)
