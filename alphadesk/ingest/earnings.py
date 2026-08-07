@@ -162,6 +162,33 @@ def refresh_calendar(days_back: int = 5, days_fwd: int = 14) -> int:
     return len(rows)
 
 
+def arm_upcoming_reports(days_ahead: int = 2) -> int:
+    """PRE-ARM today's+upcoming reporters: warm each symbol's price/options caches
+    and store its pre-report close + options-implied move in the calendar. The
+    moment a report drops, the drift reaction is measured instantly against the
+    exact pre-report baseline and the underreaction gauge already has the implied
+    move — no cold fetch at release time. Best-effort; runs off the earnings loop."""
+    from alphadesk.ingest import prices
+    up = store.upcoming_earnings(days_ahead)
+    n = 0
+    for e in up:
+        try:
+            sym = e["symbol"]
+            ctx = prices.get_context(sym)
+            opt = prices.get_options_context(sym)
+            pre_close = ctx.get("last_price") if ctx else None
+            implied = None
+            if opt:
+                implied = opt.get("expected_move_1d_pct") or opt.get("expected_move_to_expiry_pct")
+            store.update_earnings_arm(sym, e["report_date"], pre_close, implied)
+            n += 1
+        except Exception:
+            continue
+    if n:
+        log.info("Armed %d upcoming reporters (pre-report close + implied move)", n)
+    return n
+
+
 def drift_candidates(days: int) -> dict[str, list[dict]]:
     """Recently-reported names → synthetic [EARNINGS] candidate articles, keyed by
     symbol. A CANDIDATE SOURCE, parallel to news.poll: it lets post-earnings drift
@@ -284,6 +311,8 @@ def drift_candidates(days: int) -> dict[str, list[dict]]:
             "source": "EarningsCalendar", "url": "", "published_at": e["report_date"],
             "category": "EARNINGS", "tickers": [esym],
             "reaction_pct": round(total, 2),   # the raw reaction size — the scout-window rank signal
+            "implied_move_pct": e.get("implied_move_pct"),   # pre-armed, exact baseline (1d options move)
+            "pre_report_close": e.get("pre_report_close"),   # pre-armed close the reaction is measured from
             "mentions": [{"symbol": esym, "sentiment": sent,
                           "label": ("positive" if sent > 0 else "negative" if sent < 0 else "neutral"),
                           "category": "EARNINGS"}],

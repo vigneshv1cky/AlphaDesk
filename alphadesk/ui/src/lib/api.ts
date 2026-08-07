@@ -203,6 +203,9 @@ export interface EarningsRow {
   move_drift_pct?: number | null // capturable drift from the first post-report open — what you could trade
   market_cap?: number | null // for ranking big names first within a run-day
   run_at?: string | null // when to run the desk to catch the drift (9:30 ET, next session)
+  public_at?: string | null // when the report becomes tradeable (BMO/DAY 4:00, AMC 16:00 ET)
+  pre_report_close?: number | null // pre-armed close the drift reaction is measured from
+  implied_move_pct?: number | null // pre-armed options-implied move (the market's own expectation)
   // coverage self-assessment (reported names only): did the desk act on this reporter?
   engagement?: "TOOK" | "DEBATED" | "SKIPPED" | "UNSEEN"
   engagement_pick_id?: number | null

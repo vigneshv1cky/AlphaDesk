@@ -67,6 +67,7 @@ async def _serve() -> None:
         while True:
             try:
                 await loop.run_in_executor(None, earnings.refresh_calendar)
+                await loop.run_in_executor(None, earnings.arm_upcoming_reports)
             except Exception as exc:
                 log.error("earnings refresh error: %s", exc)
             await asyncio.sleep(6 * 3600)   # 4×/day keeps upcoming + recent fresh

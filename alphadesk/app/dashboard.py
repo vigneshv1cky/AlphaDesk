@@ -131,6 +131,7 @@ def api_earnings():
     upcoming, reported = [], []
     for e in store.earnings_window(days_back=4, days_fwd=14):
         pub = reported_public(e["report_date"], e.get("session"))
+        e["public_at"] = pub.isoformat() if pub else None   # when the report becomes tradeable (BMO/DAY 4:00, AMC 16:00 ET)
         if pub is not None and now >= pub:
             reported.append(e)
         else:

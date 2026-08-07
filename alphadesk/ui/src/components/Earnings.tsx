@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react"
 import { ChevronDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import type { EarningsRow } from "@/lib/api"
+import { etDateKey, type EarningsRow } from "@/lib/api"
 import { InfoTip } from "@/components/InfoTip"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
@@ -338,6 +338,74 @@ function ReportedDayGroup({ g }: { g: DayGroup }) {
   )
 }
 
+// BMO/DAY reports go public at 4:00 ET (pre-market open); AMC at 16:00 ET.
+function publicAtLabel(e: EarningsRow): string {
+  return (e.session === "AMC" ? "16:00" : "4:00") + " ET"
+}
+
+// "Reports today" watch strip — the names releasing THIS session-day, with when
+// they go public, whether the desk already acted, the pre-armed implied move
+// (what options expect) and the live drift for the ones already out.
+function TodayStrip({
+  earnings,
+}: {
+  earnings: { upcoming: EarningsRow[]; reported: EarningsRow[] }
+}) {
+  const today = etDateKey(new Date().toISOString())
+  const rows: EarningsRow[] = [
+    ...earnings.reported.filter((e) => (e.report_date || "").startsWith(today)),
+    ...earnings.upcoming.filter((e) => (e.report_date || "").startsWith(today)),
+  ]
+  if (rows.length === 0) return null
+  return (
+    <Panel
+      title="Reports today"
+      sub="watch closely — the desk pre-arms these (pre-report close + implied move) and measures the drift the moment they go public"
+    >
+      <div className="mb-1 flex items-center gap-2 border-b border-border pb-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        <span className="w-16">Symbol</span>
+        <span className="w-10">Session</span>
+        <span className="w-24">Public</span>
+        <span className="w-20">Desk</span>
+        <span className="w-24 text-right">Implied</span>
+        <span className="ml-auto text-right">Drift</span>
+      </div>
+      <div className="divide-y divide-border">
+        {rows.map((e) => {
+          const implied = e.implied_move_pct
+          const drift = e.move_drift_pct ?? e.move_since_report_pct
+          return (
+            <div key={e.symbol + e.report_date} className="flex items-center gap-2 py-1.5 text-sm">
+              <span className="w-16 font-semibold">{e.symbol}</span>
+              <span className="w-10 text-xs text-muted-foreground">{e.session}</span>
+              <span className="w-24 text-xs text-muted-foreground">
+                {e.engagement ? "out" : "public"} {publicAtLabel(e)}
+              </span>
+              <span className="w-20">
+                <EngBadge state={e.engagement} />
+              </span>
+              <span className="w-24 text-right font-mono text-xs tabular-nums text-muted-foreground">
+                {implied != null ? `${implied.toFixed(1)}%` : "—"}
+              </span>
+              <span
+                className={`ml-auto text-right font-mono text-xs tabular-nums ${
+                  drift != null
+                    ? drift >= 0
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-red-600 dark:text-red-400"
+                    : "text-muted-foreground"
+                }`}
+              >
+                {drift != null ? `${drift >= 0 ? "+" : ""}${drift.toFixed(1)}%` : "—"}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </Panel>
+  )
+}
+
 export function Earnings({
   earnings,
 }: {
@@ -365,6 +433,7 @@ export function Earnings({
 
   return (
     <div className="space-y-3">
+      <TodayStrip earnings={earnings} />
       {earnings.reported.length > 0 && (
         <Panel
           title="Just reported"

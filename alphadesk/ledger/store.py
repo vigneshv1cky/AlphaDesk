@@ -240,6 +240,11 @@ def init() -> None:
             conn.execute("ALTER TABLE earnings ADD COLUMN market_cap REAL")
         except sqlite3.OperationalError:
             pass  # already migrated
+        for col in ("pre_report_close", "implied_move_pct"):   # pre-armed reporter context
+            try:
+                conn.execute(f"ALTER TABLE earnings ADD COLUMN {col} REAL")
+            except sqlite3.OperationalError:
+                pass  # already migrated
         for col, decl in (("plan_entry", "REAL"), ("plan_target", "REAL"),
                           ("plan_stop", "REAL"), ("plan_note", "TEXT"),
                           ("source", "TEXT"), ("decision_id", "TEXT"),
@@ -1001,6 +1006,20 @@ def upsert_earnings(rows: list[dict]) -> None:
             " eps_actual, surprise_pct, market_cap, fetched_at) VALUES (?,?,?,?,?,?,?,?)", data)
 
 
+def update_earnings_arm(symbol: str, report_date: str,
+                        pre_close: float | None = None,
+                        implied: float | None = None) -> None:
+    """Store pre-armed context for an upcoming reporter: the pre-report close (the
+    drift baseline) and the options-implied move. COALESCE keeps the EARLIEST arm
+    (the closest to the report, before any post-announcement repricing)."""
+    with _lock, _connect() as conn:
+        conn.execute(
+            "UPDATE earnings SET pre_report_close=COALESCE(pre_report_close, ?),"
+            " implied_move_pct=COALESCE(implied_move_pct, ?)"
+            " WHERE symbol=? AND report_date=?",
+            (pre_close, implied, symbol.upper(), report_date))
+
+
 def purge_legacy_earnings() -> int:
     """Drop stale rows keyed by the OLD full-timestamp report_date (e.g.
     '2026-07-22T16:00:00-04:00'). The market-wide calendar now stores date-only
@@ -1019,7 +1038,8 @@ def recently_reported(days: int = 3) -> list[dict]:
     reaction, not the result, so we don't wait for it."""
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT symbol, report_date, session, eps_estimate, eps_actual, surprise_pct, market_cap"
+            "SELECT symbol, report_date, session, eps_estimate, eps_actual, surprise_pct,"
+            " market_cap, pre_report_close, implied_move_pct"
             " FROM earnings WHERE report_date >= ? AND report_date <= ?"
             # PRIORITY into the scout's capped window: freshest day first, then BIGGEST
             # by market cap. On a heavy day (~200 reporters) the scout only sees the top
@@ -1081,7 +1101,7 @@ def earnings_window(days_back: int = 4, days_fwd: int = 14) -> list[dict]:
     with _connect() as conn:
         rows = conn.execute(
             "SELECT symbol, report_date, session, eps_estimate, eps_actual, surprise_pct,"
-            " market_cap FROM earnings"
+            " market_cap, pre_report_close, implied_move_pct FROM earnings"
             " WHERE report_date >= ? AND report_date <= ?"
             " ORDER BY report_date", (_et_date(-int(days_back)), _et_date(int(days_fwd))),
         ).fetchall()
@@ -1092,7 +1112,8 @@ def upcoming_earnings(days: int = 7) -> list[dict]:
     """Companies REPORTING in the next `days` — the 'be ready' watch."""
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT symbol, report_date, session, eps_estimate, market_cap FROM earnings"
+            "SELECT symbol, report_date, session, eps_estimate, market_cap,"
+            " pre_report_close, implied_move_pct FROM earnings"
             " WHERE eps_actual IS NULL AND report_date >= ?"
             "   AND report_date <= ? ORDER BY report_date", (_et_date(0), _et_date(int(days))),
         ).fetchall()

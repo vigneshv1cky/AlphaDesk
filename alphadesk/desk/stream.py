@@ -137,13 +137,18 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
                   "session": a.get("mentions", [{}])[0].get("category", "DAY")}
                  for a in a if a.get("published_at")])) if any(a.get("published_at") for a in arts) else {}
         move = moves.get(sym, {})
-        implied_move = None
-        try:
-            opt = await loop.run_in_executor(None, prices.get_options_context, sym)
-            if opt:
-                implied_move = opt.get("expected_move_pct")
-        except Exception:
-            pass
+        # Implied move: prefer the PRE-ARMED options context (stored when the
+        # reporter was armed ahead of release — instant, exact baseline); fall back
+        # to a live fetch if never armed.
+        implied_move = next((a.get("implied_move_pct") for a in arts
+                             if a.get("implied_move_pct")), None)
+        if implied_move is None:
+            try:
+                opt = await loop.run_in_executor(None, prices.get_options_context, sym)
+                if opt:
+                    implied_move = opt.get("expected_move_1d_pct") or opt.get("expected_move_to_expiry_pct")
+            except Exception:
+                pass
         fund = await loop.run_in_executor(None, prices.get_fundamentals, sym) or {}
         sector_chg = await loop.run_in_executor(
             None, prices.sector_change_pct, fund.get("sector"))
