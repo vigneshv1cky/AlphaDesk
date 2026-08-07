@@ -955,6 +955,22 @@ def today_realized_pnl_pct() -> float:
         return float(row[0] or 0)
 
 
+def today_exit_stats() -> dict:
+    """Today's realized exits: total equal-weight P&L, count, and the per-session split."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT session, exit_return_pct FROM picks"
+            " WHERE exit_ts IS NOT NULL AND exit_ts >= ?", (_et_day_start_utc(),)).fetchall()
+    total = 0.0
+    per: dict[str, float] = {}
+    for r in rows:
+        total += r["exit_return_pct"] or 0
+        s = r["session"] or "?"
+        per[s] = per.get(s, 0.0) + (r["exit_return_pct"] or 0)
+    return {"total": round(total, 2), "n": len(rows),
+            "per_session": {k: round(v, 2) for k, v in per.items()}}
+
+
 def cluster_take_count(cluster: str) -> int:
     """How many TAKEN picks today share this (sector|direction) cluster."""
     with _connect() as conn:

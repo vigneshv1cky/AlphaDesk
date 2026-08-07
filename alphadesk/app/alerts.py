@@ -24,7 +24,7 @@ def enabled() -> bool:
 def notify(text: str, level: str = "info") -> None:
     if not _WEBHOOK_URL:
         return
-    prefix = {"info": "ℹ️", "warn": "⚠️", "error": "🚨", "pick": "📈"}.get(level, "ℹ️")
+    prefix = {"info": "ℹ️", "warn": "⚠️", "error": "🚨", "pick": "📈", "summary": "📊"}.get(level, "ℹ️")
 
     def _send():
         try:
@@ -41,3 +41,26 @@ def notify(text: str, level: str = "info") -> None:
         threading.Thread(target=_send, daemon=True).start()
     except Exception:
         pass
+
+
+def daily_summary() -> str:
+    """End-of-day report from the ledger: today's realized P&L (per market), open
+    positions, run cadence, coverage funnel, and the all-time scorecard."""
+    from datetime import date
+
+    from alphadesk.ledger import store
+
+    today = store.today_exit_stats()
+    runs = store.runs_summary_today()
+    funnel = store.funnel_today()
+    s = store.stats()["total"]
+    sess_txt = ", ".join(f"{k}:{v:+.1f}%" for k, v in today["per_session"].items()) or "—"
+    return (
+        f"{date.today().isoformat()} — realized {today['total']:+.2f}% "
+        f"({today['n']} exits; {sess_txt})\n"
+        f"open {store.open_position_count()} · runs {runs['total']} "
+        f"({runs['with_picks']} booked) · funnel {funnel['candidates']}→{funnel['picked']}"
+        f"→{funnel['skipped']}\n"
+        f"all-time: {s.get('graded')} graded, avg α {s.get('avg_alpha_net')}%, "
+        f"win {s.get('wins')}/{s.get('graded')}"
+    )

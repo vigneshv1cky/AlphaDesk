@@ -505,9 +505,29 @@ async def _serve() -> None:
                 log.error("quant watcher error: %s", exc)
             await asyncio.sleep(watch_interval)
 
+    async def _daily_summary_loop():
+        """Once per trading day, after the AFTER session closes (≥20:00 ET), send an
+        end-of-day summary to the webhook (no-op without ALERTS_WEBHOOK_URL)."""
+        from alphadesk.app.alerts import daily_summary, notify
+        from alphadesk.config import now_et
+        from alphadesk.config import session as market_session
+        log = logging.getLogger("alphadesk.summary")
+        sent_day = None
+        while True:
+            try:
+                now = now_et()
+                today = now.date().isoformat()
+                if (now.weekday() < 5 and now.hour >= 20
+                        and market_session() == "CLOSED" and sent_day != today):
+                    notify(daily_summary(), "summary")
+                    sent_day = today
+            except Exception as exc:
+                log.error("daily summary error: %s", exc)
+            await asyncio.sleep(300)
+
     await asyncio.gather(_grader_loop(), _earnings_loop(), _autorun_loop(),
                          _position_watch_loop(), _quantity_watch_loop(),
-                         _web_server().serve())
+                         _daily_summary_loop(), _web_server().serve())
 
 
 def main() -> None:
