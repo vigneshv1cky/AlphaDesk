@@ -142,12 +142,19 @@ def _composite(df, dlist, entry_day, entry_open, baseline, reaction_pct, weights
     """Approximate the quant composite from historical daily bars, using only what
     was visible at the DECISION moment (the open). Live-only inputs — options
     implied move, short interest, sector, spread — are absent here and contribute 0.
-    The composite is what the desk actually trades on, so this is the selection test."""
+    The composite is what the desk actually trades on, so this is the selection test.
+
+    Vectorized: extracts numpy arrays once instead of a pandas lookup per day
+    (the old version was O(days²) and took ~10 min for 400 reports)."""
+    import numpy as np
+
     from alphadesk.quant import signals as qs
 
     eidx = dlist.index(entry_day)
-    closes = [c for c in (_bar(df, d, "Close") for d in dlist[:eidx]) if c]
-    vols = [v for v in (_bar(df, d, "Volume") for d in dlist[:eidx]) if v]
+    closes = df["Close"].astype(float).values[:eidx]
+    highs = df["High"].astype(float).values[:eidx]
+    lows = df["Low"].astype(float).values[:eidx]
+    vols = df["Volume"].astype(float).values[:eidx]
     if len(closes) < 5 or not entry_open:
         return None
 
@@ -158,25 +165,22 @@ def _composite(df, dlist, entry_day, entry_open, baseline, reaction_pct, weights
     if len(vols) >= 3:
         ref = len(vols) - 1
         base_vols = vols[max(0, ref - 20):ref]
-        base = sum(base_vols) / len(base_vols) if base_vols else 0.0
-        rvol = round(vols[ref] / base, 2) if base else None
+        base = float(base_vols.mean()) if len(base_vols) else 0.0
+        rvol = round(float(vols[ref]) / base, 2) if base else None
 
     atr_pct = None
-    hi = [_bar(df, d, "High") for d in dlist[:eidx]]
-    lo = [_bar(df, d, "Low") for d in dlist[:eidx]]
-    trs = []
-    for i in range(1, len(closes)):
-        h, l, pc = hi[i], lo[i], closes[i - 1]
-        if h and l and pc:
-            trs.append(max(h - l, abs(h - pc), abs(l - pc)))
-    if len(trs) >= 14:
-        atr_val = sum(trs[-14:]) / 14
-        atr_pct = round(atr_val / entry_open * 100, 2) if entry_open else None
+    if len(closes) >= 15:
+        pc = closes[:-1]
+        tr = np.maximum(highs[1:] - lows[1:],
+                        np.maximum(np.abs(highs[1:] - pc), np.abs(lows[1:] - pc)))
+        if len(tr) >= 14:
+            atr_val = float(tr[-14:].mean())
+            atr_pct = round(atr_val / entry_open * 100, 2) if entry_open else None
 
     avg_dollar_vol = None
     if len(closes) >= 5 and len(vols) >= 5:
-        dv = [c * v for c, v in zip(closes[-20:], vols[-20:])]
-        avg_dollar_vol = sum(dv) / len(dv)
+        dv = closes[-20:] * vols[-20:]
+        avg_dollar_vol = float(dv.mean())
 
     rctx = {
         "reaction_pct": reaction_pct,
