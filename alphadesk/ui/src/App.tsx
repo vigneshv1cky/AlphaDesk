@@ -1,26 +1,30 @@
-import { useEffect, useState, useCallback } from "react"
+import { lazy, Suspense, useEffect, useState } from "react"
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom"
 import { api, type LivePick, type SymbolTimeline, type Stats, type EarningsRow } from "@/lib/api"
 import { useTheme } from "@/lib/theme"
 import { Header } from "@/components/Header"
-import { LivePositions } from "@/components/LivePositions"
-import { History } from "@/components/History"
-import { Earnings } from "@/components/Earnings"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Nav } from "@/components/Nav"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Moon, Monitor, Sun } from "lucide-react"
 
-function readHash(): string {
-  const h = window.location.hash.replace("#", "")
-  return h && ["live","history","earnings"].includes(h) ? h : "live"
+// Lazy routes — each page is its own chunk, so it loads like a real page.
+const LivePage = lazy(() => import("@/pages/LivePage"))
+const HistoryPage = lazy(() => import("@/pages/HistoryPage"))
+const EarningsPage = lazy(() => import("@/pages/EarningsPage"))
+
+const TITLES: Record<string, string> = {
+  "/live": "Live Positions · AlphaDesk",
+  "/history": "History · AlphaDesk",
+  "/earnings": "Earnings · AlphaDesk",
 }
 
-export default function App() {
+function Shell() {
+  const { pathname } = useLocation()
   const [theme, toggleTheme] = useTheme()
-  const [tab, setTab] = useState(readHash)
 
-  // All data lives here — survives tab unmounts
+  // All data lives here — survives page navigation (real multipage URLs, SPA data).
   const [liveRows, setLiveRows] = useState<LivePick[]>([])
   const [market, setMarket] = useState("")
   const [liveLoaded, setLiveLoaded] = useState(false)
@@ -41,7 +45,7 @@ export default function App() {
     return () => { alive = false; clearInterval(t) }
   }, [])
 
-  // History: 60s poll
+  // History + stats: 60s poll
   useEffect(() => {
     let alive = true
     const load = () => {
@@ -53,18 +57,19 @@ export default function App() {
     return () => { alive = false; clearInterval(t) }
   }, [])
 
-  // Earnings: 5min poll, lazy first load
-  const [earningsTabVisited, setEarningsTabVisited] = useState(false)
+  // Earnings: lazy — fetch once the Earnings page is first visited, then 5min poll
+  const [earningsVisited, setEarningsVisited] = useState(false)
+  useEffect(() => { if (pathname === "/earnings") setEarningsVisited(true) }, [pathname])
   useEffect(() => {
-    if (!earningsTabVisited || earnings) return
-    api.earnings().then(d => setEarnings(d || { upcoming: [], reported: [] })).catch(() => setEarnings({ upcoming: [], reported: [] }))
-  }, [earningsTabVisited, earnings])
+    if (!earningsVisited) return
+    const load = () => api.earnings().then(d => setEarnings(d || { upcoming: [], reported: [] })).catch(() => setEarnings(prev => prev ?? { upcoming: [], reported: [] }))
+    load()
+    const t = setInterval(load, 300_000)
+    return () => clearInterval(t)
+  }, [earningsVisited])
 
-  const onTabChange = useCallback((value: string) => {
-    setTab(value)
-    window.location.hash = value
-    if (value === "earnings") setEarningsTabVisited(true)
-  }, [])
+  // Per-page document title
+  useEffect(() => { document.title = TITLES[pathname] ?? "AlphaDesk" }, [pathname])
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
@@ -81,8 +86,10 @@ export default function App() {
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />auto
           </Badge>
           <Separator orientation="vertical" className="mx-1 h-8" />
-          <Header liveOpenCount={liveOpen} />
+          <Nav />
           <Separator orientation="vertical" className="mx-1 h-8" />
+          <div className="flex-1" />
+          <Header liveOpenCount={liveOpen} />
           <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label="Toggle theme" className="h-8 w-8 shrink-0">
             {theme === "dark" ? <Moon className="h-4 w-4" /> : theme === "light" ? <Sun className="h-4 w-4" /> : <Monitor className="h-4 w-4" />}
           </Button>
@@ -90,18 +97,25 @@ export default function App() {
       </header>
       <main className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[1200px] space-y-4 px-5 py-5">
-          <Tabs value={tab} onValueChange={onTabChange}>
-            <TabsList className="h-9">
-              <TabsTrigger value="live" className="px-4 text-sm data-[state=active]:bg-indigo-600 data-[state=active]:text-white">Live</TabsTrigger>
-              <TabsTrigger value="history" className="px-4 text-sm data-[state=active]:bg-indigo-600 data-[state=active]:text-white">History</TabsTrigger>
-              <TabsTrigger value="earnings" className="px-4 text-sm data-[state=active]:bg-indigo-600 data-[state=active]:text-white">Earnings</TabsTrigger>
-            </TabsList>
-            <TabsContent value="live"><LivePositions rows={liveRows} market={market} loading={!liveLoaded} /></TabsContent>
-            <TabsContent value="history"><History symbols={symbols} stats={stats} loading={!historyLoaded} /></TabsContent>
-            <TabsContent value="earnings"><Earnings earnings={earnings} /></TabsContent>
-          </Tabs>
+          <Suspense fallback={<div className="text-sm text-muted-foreground">Loading…</div>}>
+            <Routes>
+              <Route path="/" element={<Navigate to="/live" replace />} />
+              <Route path="/live" element={<LivePage rows={liveRows} market={market} loading={!liveLoaded} />} />
+              <Route path="/history" element={<HistoryPage symbols={symbols} stats={stats} loading={!historyLoaded} />} />
+              <Route path="/earnings" element={<EarningsPage earnings={earnings} />} />
+              <Route path="*" element={<Navigate to="/live" replace />} />
+            </Routes>
+          </Suspense>
         </div>
       </main>
     </div>
+  )
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Shell />
+    </BrowserRouter>
   )
 }
