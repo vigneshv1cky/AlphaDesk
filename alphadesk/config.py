@@ -174,20 +174,17 @@ def entry_fill_time(ts_iso: str, sess: str | None) -> datetime | None:
 
 
 # ── Per-market entry/exit buffers ─────────────────────────────────────────────
-# Each tradeable window is its own trade. Give it room to work at both ends AND
-# a settled start:
-#   • START buffer — the first minutes of a session are the most volatile (wide
-#     spreads, unreliable fills at the 9:30 open); no NEW entries until
-#     START_BUFFER_MIN after the session opens.
-#   • EXIT buffer  — every position exits EXIT_BUFFER_MIN before its session's
-#     close, so the close clears before the market flips to the next window.
-#   • ENTRY buffer — no NEW positions in the last ENTRY_BUFFER_MIN of a session;
-#     a pick opened then would barely have time to work before that exit.
+# Each tradeable window is its own trade. Trade only the SETTLED middle of each
+# session — the open and the run-up to the close are the worst fills (wide
+# spreads, thin books, end-of-session imbalance):
+#   • START buffer — no NEW entries until START_BUFFER_MIN after the session opens.
+#   • EXIT buffer  — every position exits EXIT_BUFFER_MIN before the session close.
+#   • ENTRY buffer — no NEW positions in the last ENTRY_BUFFER_MIN of a session.
 # Night (CLOSED) is exempt on all three — nothing trades 20:00–4:00; night-decided
 # picks queue for the next 4:00 open and get a full window.
-EXIT_BUFFER_MIN = int(os.environ.get("EXIT_BUFFER_MIN", "5"))
-ENTRY_BUFFER_MIN = int(os.environ.get("ENTRY_BUFFER_MIN", "15"))
-START_BUFFER_MIN = int(os.environ.get("START_BUFFER_MIN", "5"))
+EXIT_BUFFER_MIN = int(os.environ.get("EXIT_BUFFER_MIN", "15"))
+ENTRY_BUFFER_MIN = int(os.environ.get("ENTRY_BUFFER_MIN", "30"))
+START_BUFFER_MIN = int(os.environ.get("START_BUFFER_MIN", "15"))
 
 SESSION_OPEN_MIN = {"PRE": 4 * 60, "OPEN": 9 * 60 + 30, "AFTER": 16 * 60}
 SESSION_CLOSE_MIN = {"PRE": 9 * 60 + 30, "OPEN": 16 * 60, "AFTER": 20 * 60}
