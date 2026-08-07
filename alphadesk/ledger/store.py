@@ -873,7 +873,7 @@ def live_picks() -> list[dict]:
             " approved, adjusted_score, confidence, taken, spy_price, entry_price,"
             " plan_entry, plan_target, plan_stop, plan_note, thesis, triage_reason,"
             " order_type, mfe_pct, low_liquidity, broker_order_id, broker_fill_price,"
-            " hedge_of, arm"
+            " broker_qty, hedge_of, arm"
             " FROM picks"
              " WHERE arm IN ('TEAM','QUANT','HEDGE') AND plan_entry IS NOT NULL"
             "   AND taken = 1"

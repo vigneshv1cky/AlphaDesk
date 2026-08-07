@@ -84,10 +84,10 @@ async def _serve() -> None:
             now_et,
         )
         from alphadesk.config import session as market_session
+        from alphadesk.desk import portfolio
         from alphadesk.desk.plan import (
             first_touch_exit,
             level_crossed,
-            realized_exit,
         )
         from alphadesk.quant.watcher import session_close_due
         from alphadesk.ingest import prices
@@ -119,15 +119,10 @@ async def _serve() -> None:
                 cur = quotes.get(p["symbol"].upper())
                 if not cur:
                     continue
-                entry = (p.get("entry_price") or p.get("broker_fill_price")
-                         or p.get("plan_entry"))
-                perf = realized_exit(p["direction"], entry, cur,
-                                     p.get("spy_price"), spy_now,
-                                     bool(p.get("low_liquidity")))
-                reason = f"session-close ({sess})"
+                reason = f"session-close ({p.get('session')})"
                 await loop.run_in_executor(
-                    None, lambda pid=p["id"], r=reason, pf=perf:
-                    store.record_exit(pid, r, **pf))
+                    None, lambda pk=p, r=reason, px=cur, sn=spy_now:
+                    portfolio.close_and_exit(pk, r, px, sn))
                 n += 1
             if n:
                 log.info("Session-close sweep: exited %d position(s) at close", n)
@@ -256,15 +251,11 @@ async def _serve() -> None:
                                 label = "target hit" if ft["level"] == "target" else "stopped out"
                                 exit_px = ft["price"]
                                 reason = f"{label} @ {exit_px} (first-touch {ft['level']})"
-                                perf = realized_exit(p["direction"], entry, exit_px,
-                                                     p.get("spy_price"), spy_now,
-                                                     bool(p.get("low_liquidity")))
                                 await loop.run_in_executor(
-                                    None, lambda pid=p["id"], r=reason, pf=perf:
-                                    store.record_exit(pid, r, **pf))
-                                log.info("Auto-exit #%d %s %s — %s (%s%% vs SPY)",
-                                         p["id"], p["symbol"], p["direction"], reason,
-                                         perf.get("exit_alpha"))
+                                    None, lambda pk=p, r=reason, px=exit_px, sn=spy_now:
+                                    portfolio.close_and_exit(pk, r, px, sn))
+                                log.info("Auto-exit #%d %s %s — %s (broker close sent)",
+                                         p["id"], p["symbol"], p["direction"], reason)
                                 continue
                             # No level crossed → nothing to do. The watcher is the ONLY
                             # price-based exit and it is pure code: no give-back screen,
@@ -325,15 +316,11 @@ async def _serve() -> None:
                                 label = "target hit" if hit == "target" else "stopped out"
                                 exit_px = p["plan_target"] if hit == "target" else p["plan_stop"]
                                 reason = f"{label} @ {exit_px} (ext-hours spot {hit})"
-                                perf = realized_exit(p["direction"], entry, exit_px,
-                                                     p.get("spy_price"), spy_now,
-                                                     bool(p.get("low_liquidity")))
                                 await loop.run_in_executor(
-                                    None, lambda pid=p["id"], r=reason, pf=perf:
-                                    store.record_exit(pid, r, **pf))
-                                log.info("Auto-exit #%d %s %s — %s (%s%% vs SPY) [ext-hours]",
-                                         p["id"], p["symbol"], p["direction"], reason,
-                                         perf.get("exit_alpha"))
+                                    None, lambda pk=p, r=reason, px=exit_px, sn=spy_now:
+                                    portfolio.close_and_exit(pk, r, px, sn))
+                                log.info("Auto-exit #%d %s %s — %s (broker close sent) [ext-hours]",
+                                         p["id"], p["symbol"], p["direction"], reason)
 
             except Exception as exc:
                 log.error("position watch error: %s", exc)
@@ -438,7 +425,7 @@ async def _serve() -> None:
             except Exception as exc:
                 log.warning("Alpaca stream start failed: %s — using REST price checks", exc)
         from alphadesk.quant import watcher as qwatcher
-        from alphadesk.desk.plan import realized_exit
+        from alphadesk.desk import portfolio
         from alphadesk.ledger import store as qstore
         loop = asyncio.get_running_loop()
         watch_interval = 5  # seconds — quant watcher runs faster than main watcher
@@ -490,17 +477,13 @@ async def _serve() -> None:
                         p["plan_target"], p["plan_stop"], cur)
                     if result:
                         spy_now = live_prices.get("SPY")
-                        perf = realized_exit(p["direction"], entry, result["price"],
-                                             p.get("spy_price"), spy_now,
-                                             bool(p.get("low_liquidity")))
                         reason = f"quant-{result['reason']}"
                         await loop.run_in_executor(
-                            None, lambda pid=p["id"], r=reason, pf=perf:
-                            qstore.record_exit(pid, r, **pf))
+                            None, lambda pk=p, r=reason, px=result["price"], sn=spy_now:
+                            portfolio.close_and_exit(pk, r, px, sn))
                         qwatcher.clear_position(p["id"])
-                        log.info("Quant exit #%d %s — %s (%.1f%% vs SPY)",
-                                 p["id"], p["symbol"], reason,
-                                 perf.get("exit_alpha"))
+                        log.info("Quant exit #%d %s — %s (broker close sent)",
+                                 p["id"], p["symbol"], reason)
             except Exception as exc:
                 log.error("quant watcher error: %s", exc)
             await asyncio.sleep(watch_interval)

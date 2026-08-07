@@ -81,6 +81,73 @@ def route_pick(pick_id: int, symbol: str, direction: str, price: float,
         return False
 
 
+def _place_close(pick: dict, price: float) -> float | None:
+    """Place the order that CLOSES a routed position on the broker (SELL a LONG,
+    buy-to-cover a SHORT), at the routed qty. Market in regular hours, extended-hours
+    limit at the current price otherwise. Polls briefly for a market fill; returns
+    the actual fill price, or None if not filled in time (the ledger then uses the
+    planned exit price and the DAY limit may still fill later). Best-effort."""
+    import time
+
+    from alpaca.trading.enums import OrderSide, TimeInForce
+    from alpaca.trading.requests import LimitOrderRequest, MarketOrderRequest
+
+    from alphadesk.config import PM_EXTENDED_HOURS
+    from alphadesk.config import session as market_session
+
+    try:
+        qty = float(pick.get("broker_qty") or 0)
+        if qty <= 0:
+            return None
+        side = OrderSide.SELL if pick["direction"] == "LONG" else OrderSide.BUY
+        client = _trading_client()
+        if market_session() == "OPEN":
+            req = MarketOrderRequest(symbol=pick["symbol"], qty=qty, side=side,
+                                     time_in_force=TimeInForce.DAY)
+        elif PM_EXTENDED_HOURS:
+            req = LimitOrderRequest(symbol=pick["symbol"], qty=qty, side=side,
+                                    limit_price=round(price, 2),
+                                    time_in_force=TimeInForce.DAY, extended_hours=True)
+        else:
+            return None
+        order = client.submit_order(req)
+        order_id = str(getattr(order, "id", ""))
+        log.info("Close order %s for #%d %s qty=%s → %s", order_id, pick["id"],
+                 pick["symbol"], qty, pick["direction"])
+        for _ in range(10):   # ~5s to catch a market fill
+            time.sleep(0.5)
+            o = client.get_order_by_id(order_id)
+            st = getattr(o, "status", "")
+            if st == "filled":
+                fap = getattr(o, "filled_avg_price", None)
+                return float(fap) if fap else price
+            if st in ("cancelled", "expired", "rejected"):
+                return None
+        return None
+    except Exception as exc:
+        log.warning("close_position #%d %s failed: %s", pick["id"], pick["symbol"], exc)
+        return None
+
+
+def close_and_exit(pick: dict, reason: str, exit_px: float, spy_now: float | None) -> bool:
+    """CLOSE a routed position on the broker (real paper fill at the actual price),
+    then record the exit in the ledger with that fill. For non-routed (Model-A)
+    picks this is just a normal ledger exit. Idempotent (record_exit guards it)."""
+    from alphadesk.config import PAPER_TRADING
+    from alphadesk.desk.plan import realized_exit
+    from alphadesk.ledger import store
+
+    if PAPER_TRADING and pick.get("broker_order_id"):
+        filled = _place_close(pick, exit_px)
+        exit_px = filled if filled else exit_px
+    entry = (pick.get("entry_price") or pick.get("broker_fill_price")
+             or pick.get("plan_entry"))
+    perf = realized_exit(pick["direction"], entry, exit_px,
+                         pick.get("spy_price"), spy_now,
+                         bool(pick.get("low_liquidity")))
+    return store.record_exit(pick["id"], reason, **perf)
+
+
 def reconcile_all() -> int:
     """Sync broker order status for routed-but-unfilled picks: stamp fills
     (broker_fill_price/ts become the ledger entry) and mark terminal non-fills
