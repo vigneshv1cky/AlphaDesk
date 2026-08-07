@@ -25,13 +25,17 @@ export function LivePositions({ rows, market, loading }: { rows: LivePick[]; mar
   const down = rows.filter(p => (p.pnl_pct ?? 0) < 0).length
   const total = up + down
   const winRate = total > 0 ? Math.round((up / total) * 100) : null
-  // Equal-weight open-book return: the sum of per-position % moves is a misleading
-  // triple-digit number once the book grows past ~50 names (each +2% adds 2). The
-  // honest read is the AVERAGE per position — what one equal-weight $N-per-name
-  // paper book would show. Pending / unquoted rows (pnl_pct null) aren't in yet.
-  const totalPnl = rows.reduce((s, p) => s + (p.pnl_pct ?? 0), 0)
-  const pnlCount = rows.filter(p => p.pnl_pct != null).length
-  const avgPnl = pnlCount > 0 ? totalPnl / pnlCount : null
+  // Dollar P&L = the total of the P&L column (sum of the per-position $ moves).
+  // Each position counts as 1 share, equal shares per name — so the sum is the
+  // unrealized $ gain on an equal-share book; scale by shares-per-name for the
+  // actual $ on your capital. Same math as the P&L cell (plan_entry vs current),
+  // so the card total always matches the column. Unquoted/pending rows (no
+  // current price) aren't in it yet.
+  const pnlUsd = rows.reduce((s, p) => {
+    if (p.current == null || p.plan_entry == null) return s
+    return s + (p.direction === "LONG" ? (p.current - p.plan_entry) : (p.plan_entry - p.current))
+  }, 0)
+  const pnlCount = rows.filter(p => p.current != null && p.plan_entry != null).length
 
   if (loading) return (
     <div className="space-y-2">
@@ -57,10 +61,10 @@ export function LivePositions({ rows, market, loading }: { rows: LivePick[]; mar
           <div className="text-[10px] text-muted-foreground">{up}/{down} open</div>
         </CardContent></Card>
         <Card><CardContent className="flex flex-col items-center gap-1 py-3">
-          <TrendingUp className={`h-4 w-4 ${(avgPnl ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`} />
+          <TrendingUp className={`h-4 w-4 ${pnlUsd >= 0 ? "text-emerald-500" : "text-red-500"}`} />
           <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Live P&amp;L</div>
-          <div className={`font-mono text-lg font-bold tabular-nums ${(avgPnl ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}>{avgPnl != null ? `${avgPnl >= 0 ? "+" : ""}${avgPnl.toFixed(1)}%` : "—"}</div>
-          <div className="text-[10px] text-muted-foreground">avg per position · {pnlCount} open</div>
+          <div className={`font-mono text-lg font-bold tabular-nums ${pnlUsd >= 0 ? "text-emerald-500" : "text-red-500"}`}>{pnlUsd >= 0 ? "+" : ""}${pnlUsd.toFixed(2)}</div>
+          <div className="text-[10px] text-muted-foreground">1 share each · {pnlCount} open</div>
         </CardContent></Card>
       </div>
       <Separator />
