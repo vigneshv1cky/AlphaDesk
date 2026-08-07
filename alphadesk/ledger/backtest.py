@@ -30,46 +30,99 @@ def _bucket(mag: float) -> int:
     return len(BUCKETS) - 1
 
 
-def _load_hist(symbols: list[str], period: str = "6mo", chunk: int = 40) -> dict:
-    """Batch-download raw daily OHLC for all symbols + returns {SYM: df}.
-
-    Chunked (~40 tickers per yfinance call, a short pause between chunks): a full
-    window can be 2000+ reporters, and a single threads=True download of that many
-    spawns a thread per ticker and dies with 'can't start new thread' on a small
-    VM — and hammering yfinance wholesale trips its rate limiter. Callers should
-    pass a BOUNDED symbol set (see backtest_drift's max_symbols cap)."""
+def _backfill_daily(symbols: list[str], start, end, chunk: int = 40) -> int:
+    """Download daily OHLC for missing symbols and persist to the local price cache.
+    Chunked with a pause between chunks (yfinance throttles bulk downloads)."""
     import time as _time
+    from datetime import timedelta
 
     import pandas as pd
     import yfinance as yf
 
-    out = {}
+    from alphadesk.ledger import store
+
+    saved = 0
+    for i in range(0, len(symbols), chunk):
+        batch = symbols[i:i + chunk]
+        try:
+            df = yf.download(batch, start=start, end=end + timedelta(days=2), interval="1d",
+                             group_by="ticker", auto_adjust=False, progress=False, threads=True)
+            if df is None:
+                continue
+            multi = isinstance(df.columns, pd.MultiIndex)
+            rows = []
+            for s in batch:
+                try:
+                    if multi and s in df.columns.get_level_values(0):
+                        sub = df[s]
+                    elif len(batch) == 1:
+                        sub = df
+                    else:
+                        continue
+                    for idx, r in sub.iterrows():
+                        if r["Close"] != r["Close"]:   # NaN
+                            continue
+                        rows.append({"symbol": s, "date": idx.date().isoformat(),
+                                     "open": _f(r.get("Open")), "high": _f(r.get("High")),
+                                     "low": _f(r.get("Low")), "close": _f(r.get("Close")),
+                                     "volume": _f(r.get("Volume"))})
+                except Exception:
+                    continue
+            if rows:
+                saved += store.save_cached_daily(rows)
+        except Exception as exc:
+            log.warning("backfill batch %d failed: %s", i // chunk, exc)
+        _time.sleep(0.4)
+    return saved
+
+
+def _f(v):
+    try:
+        f = float(v)
+        return f if f == f else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _load_hist(symbols: list[str], period: str = "6mo", chunk: int = 40) -> dict:
+    """Daily OHLC per symbol from the LOCAL price cache, backfilling missing symbols
+    once via yfinance (then persisted) — so repeat runs never hammer the rate limiter.
+
+    Returns {SYM: df} with a normalized DatetimeIndex."""
+    from datetime import date, timedelta
+
+    import pandas as pd
+
+    from alphadesk.ledger import store
+
     syms = sorted({s.upper() for s in symbols if s})
     if not syms:
-        return out
-    for i in range(0, len(syms), chunk):
-        batch = syms[i:i + chunk]
-        try:
-            df = yf.download(batch, period=period, interval="1d", group_by="ticker",
-                             auto_adjust=False, progress=False, threads=True)
-            if df is not None:
-                multi = isinstance(df.columns, pd.MultiIndex)
-                for s in batch:
-                    try:
-                        if multi and s in df.columns.get_level_values(0):
-                            sub = df[s]
-                        elif len(batch) == 1:
-                            sub = df
-                        else:
-                            continue
-                        sub = sub.dropna(subset=["Close"]) if isinstance(sub, pd.DataFrame) else None
-                        if sub is not None and len(sub) > 0:
-                            out[s] = sub
-                    except Exception:
-                        continue
-        except Exception as exc:
-            log.warning("history batch %d failed: %s", i // chunk, exc)
-        _time.sleep(0.4)   # be polite to yfinance between chunks
+        return {}
+
+    span_days = 200 if period == "6mo" else 90
+    end = date.today()
+    start = end - timedelta(days=span_days)
+
+    cached = store.cached_daily(syms, start.isoformat(), end.isoformat())
+    # a symbol is "covered" if it has most of the span; missing/partial → backfill
+    missing = [s for s in syms if len(cached.get(s, [])) < span_days // 2]
+    if missing:
+        log.info("backfilling %d symbols into the price cache", len(missing))
+        _backfill_daily(missing, start, end)
+        cached = store.cached_daily(syms, start.isoformat(), end.isoformat())
+
+    out = {}
+    for s in syms:
+        rows = cached.get(s, [])
+        if not rows:
+            continue
+        df = pd.DataFrame(rows).sort_values("date")
+        df["dt"] = pd.to_datetime(df["date"])
+        # yfinance-style capitalized columns so _bar/backtest access unchanged
+        df = df.set_index("dt")[["open", "high", "low", "close", "volume"]]
+        df.columns = ["Open", "High", "Low", "Close", "Volume"]
+        df.index = df.index.normalize()
+        out[s] = df
     return out
 
 

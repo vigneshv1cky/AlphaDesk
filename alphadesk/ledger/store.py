@@ -213,6 +213,16 @@ CREATE TABLE IF NOT EXISTS enrichment_cache (
     ticker_sentiment TEXT,     -- JSON {TICKER: {sentiment, label}} — per-company overrides
     ts               TEXT
 );
+
+-- Local daily OHLC cache — backtests (and anything replaying history) fill this
+-- once and never hammer yfinance again (its rate limiter throttles bulk downloads).
+CREATE TABLE IF NOT EXISTS price_daily (
+    symbol TEXT NOT NULL,
+    date   TEXT NOT NULL,      -- YYYY-MM-DD (calendar date)
+    open   REAL, high REAL, low REAL, close REAL, volume REAL,
+    PRIMARY KEY (symbol, date)
+);
+CREATE INDEX IF NOT EXISTS idx_pricedaily_sym ON price_daily (symbol);
 """
 
 
@@ -956,6 +966,46 @@ def cluster_take_count(cluster: str) -> int:
 def set_cluster(pick_id: int, cluster: str | None) -> None:
     with _lock, _connect() as conn:
         conn.execute("UPDATE picks SET cluster=? WHERE id=?", (cluster, int(pick_id)))
+
+
+def cached_daily(symbols: list[str], start: str, end: str) -> dict[str, list[dict]]:
+    """Daily OHLC rows per symbol in [start, end] (ISO dates), from the local cache."""
+    if not symbols:
+        return {}
+    syms = sorted({s.upper() for s in symbols})
+    ph = ",".join("?" for _ in syms)
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT symbol, date, open, high, low, close, volume FROM price_daily"
+            f" WHERE symbol IN ({ph}) AND date >= ? AND date <= ?",
+            (*syms, start, end)).fetchall()
+    out = {s: [] for s in syms}
+    for r in rows:
+        out.setdefault(r["symbol"], []).append(dict(r))
+    return out
+
+
+def save_cached_daily(rows: list[dict]) -> int:
+    """Insert/replace daily OHLC rows into the local cache. Returns rows saved."""
+    data = [(r["symbol"].upper(), r["date"], r.get("open"), r.get("high"), r.get("low"),
+             r.get("close"), r.get("volume"))
+            for r in rows if r.get("symbol") and r.get("date")]
+    if not data:
+        return 0
+    with _lock, _connect() as conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO price_daily (symbol, date, open, high, low, close, volume)"
+            " VALUES (?,?,?,?,?,?,?)", data)
+    return len(data)
+
+
+def cached_daily_span(symbol: str) -> tuple[str, str] | None:
+    """(min_date, max_date) cached for a symbol, or None if nothing cached."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT min(date) AS lo, max(date) AS hi FROM price_daily WHERE symbol=?",
+            (symbol.upper(),)).fetchone()
+    return (row["lo"], row["hi"]) if row and row["lo"] else None
 
 
 def record_skips(skips: list[dict], cap: int = 30) -> None:
