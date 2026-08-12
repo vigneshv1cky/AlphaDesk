@@ -381,6 +381,49 @@ function ReportedDayGroup({ g, forceExpanded }: { g: DayGroup; forceExpanded?: b
   )
 }
 
+// One reported day-block — same collapsible-day-header treatment as RunGroup
+// in "Reporting soon". "Just reported" is almost always a single day in
+// practice, but this keeps the interaction consistent and ready if that
+// window ever widens. Only the nearest day is open by default.
+function ReportedDayBlock({
+  g,
+  defaultOpen = false,
+  forceExpanded,
+}: {
+  g: DayGroup
+  defaultOpen?: boolean
+  forceExpanded?: boolean
+}) {
+  const [open, setOpen] = useState(defaultOpen || !!forceExpanded)
+  useEffect(() => {
+    if (forceExpanded) setOpen(true)
+  }, [forceExpanded])
+  return (
+    <div>
+      <Button
+        variant="ghost"
+        onClick={() => setOpen((v) => !v)}
+        className="group -mx-1 flex h-auto w-full items-center gap-2 rounded-md px-1 py-1 text-left"
+      >
+        <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+          Reported {dayLabel(g.day)}
+        </span>
+        <span className="text-[11px] text-muted-foreground">{g.rows.length} names</span>
+        <ChevronDown
+          className={`ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground/50 transition-transform group-hover:text-foreground ${
+            open ? "" : "-rotate-90"
+          }`}
+        />
+      </Button>
+      {open && (
+        <div className="divide-y divide-border">
+          <ReportedDayGroup g={g} forceExpanded={forceExpanded} />
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function Earnings({
   earnings,
 }: {
@@ -457,18 +500,8 @@ export function Earnings({
             <span className="ml-auto">Drift · gap</span>
           </div>
           <div className="space-y-3">
-            {groupByDay(filteredReported, (e) => e.report_date.slice(0, 10)).map((g) => (
-              <div key={g.day}>
-                <div className="mb-1 flex items-baseline justify-between">
-                  <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
-                    Reported {dayLabel(g.day)}
-                  </span>
-                  <span className="text-[11px] text-muted-foreground">{g.rows.length} names</span>
-                </div>
-                <div className="divide-y divide-border">
-                  <ReportedDayGroup g={g} forceExpanded={searching} />
-                </div>
-              </div>
+            {groupByDay(filteredReported, (e) => e.report_date.slice(0, 10)).map((g, i) => (
+              <ReportedDayBlock key={g.day} g={g} defaultOpen={i === 0} forceExpanded={searching} />
             ))}
           </div>
         </Panel>
