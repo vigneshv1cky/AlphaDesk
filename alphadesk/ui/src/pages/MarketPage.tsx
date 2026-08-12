@@ -34,6 +34,15 @@ function fmtTs(ts: string | null) {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " " + d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
 }
 
+function fmtFill(price: number | null, ts: string | null) {
+  return (
+    <div className="flex flex-col items-end">
+      <span>{price != null ? `$${price.toFixed(2)}` : "—"}</span>
+      <span className="text-[10px] text-muted-foreground">{fmtTs(ts)}</span>
+    </div>
+  )
+}
+
 function timeAgo(ts: string): string {
   const d = new Date(ts)
   if (isNaN(d.getTime())) return "—"
@@ -172,8 +181,8 @@ export default function MarketPage({
                     return (<TableRow key={e.id}>
                       <TableCell className="font-bold">{e.symbol}</TableCell>
                       <TableCell><Badge variant={up ? "default" : "destructive"} className="font-medium">{dirWord(e.direction)}</Badge></TableCell>
-                      <TableCell className="text-right text-xs font-mono text-muted-foreground">{fmtTs(e.entry_ts)}</TableCell>
-                      <TableCell className="text-right text-xs font-mono text-muted-foreground">{fmtTs(e.exit_ts)}</TableCell>
+                      <TableCell className="text-right text-xs font-mono text-muted-foreground">{fmtFill(e.entry_price, e.entry_ts)}</TableCell>
+                      <TableCell className="text-right text-xs font-mono text-muted-foreground">{fmtFill(e.exit_price, e.exit_ts)}</TableCell>
                       <TableCell className={`text-right font-mono tabular-nums font-semibold ${(e.alpha_net ?? 0) > 0 ? "text-emerald-500" : (e.alpha_net ?? 0) < 0 ? "text-red-500" : ""}`}>{e.alpha_net != null ? `${e.alpha_net >= 0 ? "+" : ""}${e.alpha_net.toFixed(2)}%` : "—"}</TableCell>
                       <TableCell className={`text-right font-mono tabular-nums font-semibold ${(e.exit_return_pct ?? 0) > 0 ? "text-emerald-500" : (e.exit_return_pct ?? 0) < 0 ? "text-red-500" : ""}`}>{e.exit_return_pct != null ? `${e.exit_return_pct >= 0 ? "+" : ""}${e.exit_return_pct.toFixed(2)}%` : "—"}</TableCell>
                     </TableRow>)
