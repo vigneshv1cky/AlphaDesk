@@ -151,7 +151,10 @@ def close_and_exit(pick: dict, reason: str, exit_px: float, spy_now: float | Non
     if PAPER_TRADING and pick.get("broker_order_id"):
         filled = _place_close(pick, exit_px)
         exit_px = filled if filled else exit_px
-    entry = (pick.get("entry_price") or pick.get("broker_fill_price")
+    # broker_fill_price is the price actually paid — prefer it over entry_price
+    # (a pre-fill decision-time quote that can differ sharply from the real fill
+    # on a thin/low-liquidity name) so realized P&L reflects the real trade.
+    entry = (pick.get("broker_fill_price") or pick.get("entry_price")
              or pick.get("plan_entry"))
     perf = realized_exit(pick["direction"], entry, exit_px,
                          pick.get("spy_price"), spy_now,

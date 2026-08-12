@@ -430,7 +430,13 @@ def api_timelines(days: int = 30):
             state = ("not_taken" if not_taken
                      else "exited" if e["exit_ts"]
                      else "graded" if e["graded_at"] else "open")
+            # broker_fill_price is the price actually paid — prefer it over
+            # entry_price (a pre-fill decision-time quote that can differ
+            # sharply from the real fill on a thin/low-liquidity name) so the
+            # displayed entry and any P&L derived from it reflect the real trade.
+            real_entry = e.get("broker_fill_price") or e.get("entry_price")
             ev = dict(e, state=state, entry_ts=(fill.isoformat() if fill else e["ts"]),
+                      entry_price=real_entry,
                       current=None, pnl_pct=None, status=None, alpha_so_far=None)
             if state == "open":
                 cur = quotes.get(sym.upper())
