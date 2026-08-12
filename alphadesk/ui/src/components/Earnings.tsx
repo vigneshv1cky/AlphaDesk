@@ -450,14 +450,20 @@ export function Earnings({
     )
   }
 
+  // Below THIN_CAP is already treated elsewhere on this page as "too illiquid to
+  // trade at size" (see assess()) — don't even list those, since the desk was
+  // never going to act on them. Unknown market cap stays in (can't tell).
+  const tradeableReported = earnings.reported.filter((e) => (e.market_cap ?? THIN_CAP) >= THIN_CAP)
+  const tradeableUpcoming = earnings.upcoming.filter((e) => (e.market_cap ?? THIN_CAP) >= THIN_CAP)
+
   const q = query.trim().toUpperCase()
   const searching = q.length > 0
   const filteredReported = searching
-    ? earnings.reported.filter((e) => e.symbol.toUpperCase().includes(q))
-    : earnings.reported
+    ? tradeableReported.filter((e) => e.symbol.toUpperCase().includes(q))
+    : tradeableReported
   const filteredUpcoming = searching
-    ? earnings.upcoming.filter((e) => e.symbol.toUpperCase().includes(q))
-    : earnings.upcoming
+    ? tradeableUpcoming.filter((e) => e.symbol.toUpperCase().includes(q))
+    : tradeableUpcoming
   const noMatches = searching && filteredReported.length === 0 && filteredUpcoming.length === 0
 
   return (
