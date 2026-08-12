@@ -203,8 +203,20 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
             continue
         scored.append((sym, result["composite"], result["direction"], result))
 
-    # Sort by score, take top N
-    scored.sort(key=lambda x: -abs(x[1]))
+    # Sort candidates: prefer the empirically-validated pocket first — OPEN
+    # session, LONG direction, composite score 5-10 is the only bucket that's
+    # shown positive alpha in backtest (see ledger/backtest.py's score-bucket
+    # selection test; >20 backtests consistently negative). This doesn't
+    # exclude other buckets — a run still books outside the pocket when
+    # nothing in it qualifies, so sample collection across sessions/
+    # directions/scores keeps going. It just stops the picker from favoring
+    # the most extreme (and empirically worst) scores by default.
+    cur_sess = session()
+
+    def _in_pocket(direction: str, score: float) -> bool:
+        return cur_sess == "OPEN" and direction == "LONG" and 5.0 <= score < 10.0
+
+    scored.sort(key=lambda x: (not _in_pocket(x[2], x[3]["score"]), -abs(x[1])))
     top = scored[:max_picks]
     for sym, composite, direction, result in scored[max_picks:]:
         drop_reasons.append({"symbol": sym,
@@ -261,7 +273,6 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
         return
 
     # Liquidity gate + shortability check
-    cur_sess = session()
     # Night (CLOSED, 20:00–4:00) is not tradeable: the market is closed, so a pick
     # decided then enters at the next 4:00 PRE open. Stamp it PRE so it lives on the
     # Pre-Market page (and its session-close exit is the PRE close, not a phantom
