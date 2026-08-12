@@ -1,7 +1,7 @@
-import { useState, type ReactNode } from "react"
-import { ChevronDown } from "lucide-react"
+import { useEffect, useState, type ReactNode } from "react"
+import { ChevronDown, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { type EarningsRow } from "@/lib/api"
+import { etDateKey, type EarningsRow } from "@/lib/api"
 import { InfoTip } from "@/components/InfoTip"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
@@ -27,6 +27,11 @@ function Panel({
   count?: number
 }) {
   const [open, setOpen] = useState(defaultOpen)
+  // defaultOpen can flip true later (e.g. a search starts matching) — force the
+  // panel open when that happens, but don't fight a manual close afterward.
+  useEffect(() => {
+    if (defaultOpen) setOpen(true)
+  }, [defaultOpen])
   if (collapsible && title) {
     // controlled Collapsible: keeps the exact chevron/count/sub look while adding
     // the animated height reveal + aria-expanded/controls for free.
@@ -284,8 +289,11 @@ function ReportedRow({ e }: { e: EarningsRow }) {
 
 // One run-day group in "Reporting soon" — shows the biggest 8, with the rest
 // expandable/collapsible via the "+N more / show less" toggle.
-function RunGroup({ g }: { g: DayGroup }) {
-  const [expanded, setExpanded] = useState(false)
+function RunGroup({ g, forceExpanded }: { g: DayGroup; forceExpanded?: boolean }) {
+  const [expanded, setExpanded] = useState(!!forceExpanded)
+  useEffect(() => {
+    if (forceExpanded) setExpanded(true)
+  }, [forceExpanded])
   const shown = expanded ? g.rows : g.rows.slice(0, 8)
   const more = g.rows.length - 8
   return (
@@ -318,8 +326,11 @@ function RunGroup({ g }: { g: DayGroup }) {
   )
 }
 
-function ReportedDayGroup({ g }: { g: DayGroup }) {
-  const [showAll, setShowAll] = useState(false)
+function ReportedDayGroup({ g, forceExpanded }: { g: DayGroup; forceExpanded?: boolean }) {
+  const [showAll, setShowAll] = useState(!!forceExpanded)
+  useEffect(() => {
+    if (forceExpanded) setShowAll(true)
+  }, [forceExpanded])
   const shown = showAll ? g.rows : g.rows.slice(0, 50)
   const more = g.rows.length - 50
   return (
@@ -343,6 +354,7 @@ export function Earnings({
 }: {
   earnings?: { upcoming: EarningsRow[]; reported: EarningsRow[] } | null
 }) {
+  const [query, setQuery] = useState("")
   if (earnings === null || earnings === undefined) {
     return (
       <Panel>
@@ -363,17 +375,47 @@ export function Earnings({
     )
   }
 
+  const today = etDateKey(new Date().toISOString())
+  const reportedToday = earnings.reported.filter((e) => (e.report_date || "").startsWith(today))
+
+  const q = query.trim().toUpperCase()
+  const searching = q.length > 0
+  const filteredReported = searching
+    ? reportedToday.filter((e) => e.symbol.toUpperCase().includes(q))
+    : reportedToday
+  const filteredUpcoming = searching
+    ? earnings.upcoming.filter((e) => e.symbol.toUpperCase().includes(q))
+    : earnings.upcoming
+  const noMatches = searching && filteredReported.length === 0 && filteredUpcoming.length === 0
+
   return (
     <div className="space-y-3">
-      {earnings.reported.length > 0 && (
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by symbol…"
+          className="h-8 w-full rounded-md border border-border bg-card pl-8 pr-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 sm:w-64"
+        />
+      </div>
+
+      {noMatches && (
+        <Card>
+          <p className="text-sm text-muted-foreground">No matches for "{query.trim()}".</p>
+        </Card>
+      )}
+
+      {filteredReported.length > 0 && (
         <Panel
           title="Just reported"
           sub="capturable drift from the first post-report open — the uncapturable overnight gap is shown separately and excluded from the verdict"
           collapsible
-          defaultOpen={false}
-          count={earnings.reported.length}
+          defaultOpen={searching}
+          count={filteredReported.length}
         >
-          <CoverageSummary reported={earnings.reported} />
+          <CoverageSummary reported={filteredReported} />
           <div className="mb-2 flex items-center gap-2 border-b border-border pb-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
             <span className="w-16">Symbol</span>
             <span className="w-14">Cap</span>
@@ -383,7 +425,7 @@ export function Earnings({
             <span className="ml-auto">Drift · gap</span>
           </div>
           <div className="space-y-3">
-            {groupByDay(earnings.reported, (e) => e.report_date.slice(0, 10)).map((g) => (
+            {groupByDay(filteredReported, (e) => e.report_date.slice(0, 10)).map((g) => (
               <div key={g.day}>
                 <div className="mb-1 flex items-baseline justify-between">
                   <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
@@ -392,7 +434,7 @@ export function Earnings({
                   <span className="text-[11px] text-muted-foreground">{g.rows.length} names</span>
                 </div>
                 <div className="divide-y divide-border">
-                  <ReportedDayGroup g={g} />
+                  <ReportedDayGroup g={g} forceExpanded={searching} />
                 </div>
               </div>
             ))}
@@ -400,7 +442,7 @@ export function Earnings({
         </Panel>
       )}
 
-      {earnings.upcoming.length > 0 && (
+      {filteredUpcoming.length > 0 && (
         <Panel title="Reporting soon" sub="grouped by when to run the desk — biggest names first">
           <div className="mb-2 flex items-center gap-2 border-b border-border pb-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
             <span className="w-14">Symbol</span>
@@ -408,8 +450,8 @@ export function Earnings({
             <span className="ml-auto">Report</span>
           </div>
           <div className="space-y-3">
-            {groupByDay(earnings.upcoming, (e) => (e.run_at ?? "").slice(0, 10) || "—").map((g) => (
-              <RunGroup key={g.day} g={g} />
+            {groupByDay(filteredUpcoming, (e) => (e.run_at ?? "").slice(0, 10) || "—").map((g) => (
+              <RunGroup key={g.day} g={g} forceExpanded={searching} />
             ))}
           </div>
         </Panel>
