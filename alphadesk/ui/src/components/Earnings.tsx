@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react"
 import { ChevronDown, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { etDateKey, type EarningsRow } from "@/lib/api"
+import { type EarningsRow } from "@/lib/api"
 import { InfoTip } from "@/components/InfoTip"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
@@ -450,14 +450,11 @@ export function Earnings({
     )
   }
 
-  const today = etDateKey(new Date().toISOString())
-  const reportedToday = earnings.reported.filter((e) => (e.report_date || "").startsWith(today))
-
   const q = query.trim().toUpperCase()
   const searching = q.length > 0
   const filteredReported = searching
-    ? reportedToday.filter((e) => e.symbol.toUpperCase().includes(q))
-    : reportedToday
+    ? earnings.reported.filter((e) => e.symbol.toUpperCase().includes(q))
+    : earnings.reported
   const filteredUpcoming = searching
     ? earnings.upcoming.filter((e) => e.symbol.toUpperCase().includes(q))
     : earnings.upcoming
