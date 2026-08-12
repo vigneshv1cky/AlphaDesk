@@ -153,7 +153,10 @@ function assess(e: EarningsRow): { label: string; cls: string; tip: string } | n
   // SKIPPED / UNSEEN
   if (Math.abs(move) < BIG_MOVE)
     return { label: "fair pass", cls: "text-muted-foreground/60", tip: "small move — nothing forgone" }
-  const thin = (e.market_cap ?? Infinity) < THIN_CAP
+  // Prefer the real 20d-avg-$vol flag (same bar the trading pipeline gates
+  // entries on); fall back to the cap heuristic only when liquidity couldn't
+  // be measured at all.
+  const thin = e.low_liquidity ?? ((e.market_cap ?? Infinity) < THIN_CAP)
   return thin
     ? { label: "false miss", cls: "text-amber-600 dark:text-amber-400", tip: "big move but too illiquid to trade at size — uncatchable" }
     : { label: "true miss", cls: "font-semibold text-red-600 dark:text-red-400", tip: "big, tradeable move the desk didn't act on" }
@@ -450,11 +453,11 @@ export function Earnings({
     )
   }
 
-  // Below THIN_CAP is already treated elsewhere on this page as "too illiquid to
-  // trade at size" (see assess()) — don't even list those, since the desk was
-  // never going to act on them. Unknown market cap stays in (can't tell).
-  const tradeableReported = earnings.reported.filter((e) => (e.market_cap ?? THIN_CAP) >= THIN_CAP)
-  const tradeableUpcoming = earnings.upcoming.filter((e) => (e.market_cap ?? THIN_CAP) >= THIN_CAP)
+  // Same 20d-avg-$vol bar the trading pipeline actually gates entries on — don't
+  // even list a name the desk would refuse to trade regardless of how it moved.
+  // Unmeasurable (null) stays in — can't tell, so don't hide it.
+  const tradeableReported = earnings.reported.filter((e) => e.low_liquidity !== true)
+  const tradeableUpcoming = earnings.upcoming.filter((e) => e.low_liquidity !== true)
 
   const q = query.trim().toUpperCase()
   const searching = q.length > 0

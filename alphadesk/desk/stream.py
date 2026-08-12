@@ -138,6 +138,17 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
                              "reason": f"reaction cap: over {QUANT_SCORE_CANDIDATES} candidates this run, "
                                        "not among the biggest movers scored"})
 
+    # Two structurally different bets travel through this same pipeline: riding a
+    # reaction that ALREADY happened (category "EARNINGS") vs betting momentum
+    # continues into a print that HASN'T happened yet (category "PRE_EARNINGS" —
+    # earnings.drift_candidates' separate pre-earnings-momentum block). The second
+    # carries real earnings-surprise risk the first doesn't, so tag it distinctly
+    # rather than folding both into the same "MOMENTUM" edge.
+    candidate_edge = {
+        sym: ("PRE_EARNINGS" if arts and arts[0].get("category") == "PRE_EARNINGS" else "MOMENTUM")
+        for sym, arts in scored_candidates
+    }
+
     # One batched download for EVERY candidate's post-report move (gap/drift/total).
     all_items = [
         {"symbol": a.get("tickers", [sym])[0] if a.get("tickers") else sym,
@@ -335,10 +346,11 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
                     continue
 
         picks_count += 1
-        yield _ev("triage_pick", symbol=sym, edge="MOMENTUM",
+        edge = candidate_edge.get(sym, "MOMENTUM")
+        yield _ev("triage_pick", symbol=sym, edge=edge,
                   reason=f"Quant: {qscore['score']:.0f} {direction}")
 
-        horizon = pinned_horizon("MOMENTUM")
+        horizon = pinned_horizon(edge)
         last = pctx.get("last_price")
         trade = plan.atr_plan(sym, direction, horizon, last, pctx.get("atr_pct"))
         if not trade and last:
@@ -363,7 +375,7 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
 
         spy_ctx = await loop.run_in_executor(None, prices.get_context, "SPY")
         pick_id = store.record_pick({
-            "symbol": sym, "arm": "QUANT", "edge": "MOMENTUM",
+            "symbol": sym, "arm": "QUANT", "edge": edge,
             "source": "QUANT", "decision_id": f"q-{sym}",
             "trigger_src": "FIND_TRADES", "session": stamp_sess,
             "direction": direction, "horizon_days": horizon,
@@ -417,7 +429,7 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
 
         row = {
             "id": pick_id, "symbol": sym, "direction": direction,
-            "horizon_days": horizon, "edge": "MOMENTUM",
+            "horizon_days": horizon, "edge": edge,
             "conviction": conviction, "confidence": conviction,
             "verdict": "QUANT", "approved": True,
             "flipped": False,

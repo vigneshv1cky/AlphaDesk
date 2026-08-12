@@ -495,6 +495,55 @@ def moves_since_report(items: list[dict], ttl: int = 60) -> dict[str, Optional[d
     return out
 
 
+_liquidity_batch_cache: dict[str, Any] = {"ts": 0.0, "key": None, "data": {}}
+
+
+def liquidity_batch(symbols: list[str], ttl: int = 3600) -> dict[str, bool]:
+    """Same 20-day-avg-dollar-volume liquidity check as get_context()'s
+    low_liquidity flag (the one the live trading pipeline actually gates on),
+    but for many symbols in one batched download instead of one Ticker.history()
+    call per symbol — get_context() at that scale would mean one live fetch per
+    row on a page that can list 100+ names. Trading volume moves slowly day to
+    day, so this caches for an hour rather than get_context()'s 2-minute TTL.
+    Returns {symbol: low_liquidity}; a symbol absent from the result (unmeasurable)
+    should be treated as unknown, not liquid.
+    """
+    import pandas as pd
+
+    syms = sorted({s.upper() for s in symbols})
+    key = repr(syms)
+    now = time.time()
+    with _cache_lock:
+        c = _liquidity_batch_cache
+        if c["key"] == key and now - c["ts"] < ttl:
+            return c["data"]
+
+    out: dict[str, bool] = {}
+    if syms:
+        try:
+            import yfinance as yf
+            df = yf.download(syms, period="30d", interval="1d", group_by="ticker",
+                             progress=False, threads=True, auto_adjust=True)
+            for sym in syms:
+                try:
+                    sub = (df[sym] if isinstance(df.columns, pd.MultiIndex)
+                           and sym in df.columns.get_level_values(0) else df)
+                    closes = sub["Close"].astype(float)
+                    vols = sub["Volume"].astype(float)
+                    dollar_vol = (closes * vols).dropna().tail(20)
+                    if dollar_vol.empty:
+                        continue
+                    out[sym] = float(dollar_vol.mean()) < LOW_LIQUIDITY_DOLLAR_VOL
+                except Exception:
+                    continue
+        except Exception as exc:
+            log.debug("liquidity batch download failed: %s", exc)
+
+    with _cache_lock:
+        _liquidity_batch_cache.update(ts=now, key=key, data=out)
+    return out
+
+
 def fill_ohlc(items: list[dict]) -> dict[int, tuple]:
     """The (open, high, low) on each pick's fill day — enough to resolve a Model-A
     fill (market = open; limit = did price reach the level?). items: [{id, symbol,

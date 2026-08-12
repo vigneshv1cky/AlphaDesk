@@ -1,10 +1,27 @@
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
+import { InfoTip } from "@/components/InfoTip"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Separator } from "@/components/ui/separator"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { dirUp, dirWord } from "@/lib/plain"
 import { groupByDayKey, type LivePick, type SymbolTimeline, type TimelineEvent } from "@/lib/api"
+
+// A pre-earnings pick bets momentum carries into a REPORT THAT HASN'T HAPPENED
+// YET — real earnings-surprise risk a post-earnings-drift pick (the common
+// case, already knows the reaction) doesn't carry. Flag only the exception so
+// the common case stays unmarked.
+function EdgeTag({ edge }: { edge: string | null }) {
+  if (edge !== "PRE_EARNINGS") return null
+  return (
+    <InfoTip
+      tip="Pre-earnings momentum bet — placed before the report, not a reaction to one"
+      className="cursor-help"
+    >
+      <Badge variant="outline" className="ml-1 text-amber-600 dark:text-amber-400">pre-earnings</Badge>
+    </InfoTip>
+  )
+}
 
 // One market window = one trade (session-scoped model): enter at the session
 // open, exit at the session close, never carry into another market. Night is not
@@ -133,7 +150,7 @@ export default function MarketPage({
               const up = dirUp(p.direction)
               const pnl = pnlUsd(p)
               return (<TableRow key={p.id}>
-                <TableCell className="font-bold">{p.symbol}</TableCell>
+                <TableCell className="font-bold">{p.symbol}<EdgeTag edge={p.edge} /></TableCell>
                 <TableCell><Badge variant={up ? "default" : "destructive"} className="font-medium">{dirWord(p.direction)}</Badge></TableCell>
                 <TableCell className="text-right font-mono tabular-nums">${p.plan_entry.toFixed(2)}</TableCell>
                 <TableCell className="text-right font-mono tabular-nums">{p.current != null ? `$${p.current.toFixed(2)}` : "—"}</TableCell>
@@ -172,7 +189,7 @@ export default function MarketPage({
                   {g.items.map(e => {
                     const up = dirUp(e.direction)
                     return (<TableRow key={e.id}>
-                      <TableCell className="font-bold">{e.symbol}</TableCell>
+                      <TableCell className="font-bold">{e.symbol}<EdgeTag edge={e.edge} /></TableCell>
                       <TableCell><Badge variant={up ? "default" : "destructive"} className="font-medium">{dirWord(e.direction)}</Badge></TableCell>
                       <TableCell className="text-right text-xs font-mono text-muted-foreground">{fmtFill(e.entry_price, e.entry_ts)}</TableCell>
                       <TableCell className="text-right text-xs font-mono text-muted-foreground">{fmtFill(e.exit_price, e.exit_ts)}</TableCell>

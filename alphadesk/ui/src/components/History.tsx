@@ -2,10 +2,27 @@ import { groupByDayKey, type SymbolTimeline, type TimelineEvent, type Stats } fr
 import { dirUp, dirWord } from "@/lib/plain"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
+import { InfoTip } from "@/components/InfoTip"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Separator } from "@/components/ui/separator"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { TrendingUp, TrendingDown, Minus } from "lucide-react"
+
+// A pre-earnings pick bets momentum carries into a REPORT THAT HASN'T HAPPENED
+// YET — real earnings-surprise risk a post-earnings-drift pick (the common
+// case, already knows the reaction) doesn't carry. Flag only the exception so
+// the common case stays unmarked.
+function EdgeTag({ edge }: { edge: string | null }) {
+  if (edge !== "PRE_EARNINGS") return null
+  return (
+    <InfoTip
+      tip="Pre-earnings momentum bet — placed before the report, not a reaction to one"
+      className="cursor-help"
+    >
+      <Badge variant="outline" className="ml-1 text-amber-600 dark:text-amber-400">pre-earnings</Badge>
+    </InfoTip>
+  )
+}
 
 function StatCard({ label, value, tone }: { label: string; value: string; tone?: number | null }) {
   const Icon = tone == null ? Minus : tone > 0 ? TrendingUp : TrendingDown
@@ -72,7 +89,7 @@ export function History({ symbols, stats, loading }: { symbols: SymbolTimeline[]
                 const up = dirUp(e.direction)
                 const ret = e.exit_return_pct
                 return (<TableRow key={e.id}>
-                  <TableCell className="font-bold">{e.symbol}</TableCell>
+                  <TableCell className="font-bold">{e.symbol}<EdgeTag edge={e.edge} /></TableCell>
                   <TableCell><Badge variant={up ? "default" : "destructive"} className="font-medium">{dirWord(e.direction)}</Badge></TableCell>
                   <TableCell className="text-right text-xs font-mono text-muted-foreground">{fmtFill(e.entry_price, e.entry_ts)}</TableCell>
                   <TableCell className="text-right text-xs font-mono text-muted-foreground">{fmtFill(e.exit_price, e.exit_ts)}</TableCell>

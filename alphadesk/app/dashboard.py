@@ -282,6 +282,16 @@ def api_earnings():
             # regular session had traded at sighting, drift is NULL and the whole move
             # is extended-hours (capturable) → fall back to the total.
             e["move_drift_pct"] = r.get("reaction_drift") if r.get("reaction_drift") is not None else r["reaction_total"]
+
+    # Same liquidity bar the live trading pipeline actually gates entries on
+    # (20-day avg $ volume, not market cap — a thin float can hide behind a
+    # decent-looking company size) so the page never lists a name the desk
+    # would refuse to trade regardless of how it moved.
+    all_syms = [e["symbol"] for e in upcoming] + [e["symbol"] for e in reported]
+    liquidity = prices.liquidity_batch(all_syms)
+    for e in upcoming + reported:
+        e["low_liquidity"] = liquidity.get(e["symbol"].upper())
+
     return {"upcoming": upcoming, "reported": reported}
 
 

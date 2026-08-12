@@ -202,6 +202,7 @@ export interface EarningsRow {
   move_gap_pct?: number | null // the overnight/pre-market gap — repriced before you could act (uncapturable)
   move_drift_pct?: number | null // capturable drift from the first post-report open — what you could trade
   market_cap?: number | null // for ranking big names first within a run-day
+  low_liquidity?: boolean | null // same 20d avg $vol bar the trading pipeline gates entries on; null = unmeasurable
   run_at?: string | null // when to run the desk to catch the drift (9:30 ET, next session)
   public_at?: string | null // when the report becomes tradeable (BMO/DAY 4:00, AMC 16:00 ET)
   pre_report_close?: number | null // pre-armed close the drift reaction is measured from
