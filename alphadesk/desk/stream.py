@@ -291,6 +291,17 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
             yield _ev("gate", symbol=sym, reason="no trades in extended session")
             continue
 
+        # Liquidity gate: a thin order book can eat a market order alive (a $10
+        # order has walked a name ~20% in under two seconds before). Previously
+        # this only doubled the friction penalty at grading time — didn't stop
+        # the trade. Skip these outright instead.
+        if pctx.get("low_liquidity"):
+            from alphadesk.config import LOW_LIQUIDITY_DOLLAR_VOL
+            drop_reasons.append({"symbol": sym,
+                                 "reason": f"low liquidity: 20d avg $vol below ${LOW_LIQUIDITY_DOLLAR_VOL:,.0f}"})
+            yield _ev("gate", symbol=sym, reason="low liquidity — skipped")
+            continue
+
         # Shortability check: verify Alpaca has borrow before booking SHORT
         if direction == "SHORT":
             short_ok = await loop.run_in_executor(None, _shortable, sym)
