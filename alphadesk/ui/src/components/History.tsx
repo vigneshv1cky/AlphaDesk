@@ -20,6 +20,15 @@ function fmtTs(ts: string | null) {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " " + d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
 }
 
+function fmtFill(price: number | null, ts: string | null) {
+  return (
+    <div className="flex flex-col items-end">
+      <span>{price != null ? `$${price.toFixed(2)}` : "—"}</span>
+      <span className="text-[10px] text-muted-foreground">{fmtTs(ts)}</span>
+    </div>
+  )
+}
+
 type ExitedEvent = TimelineEvent & { symbol: string }
 
 export function History({ symbols, stats, loading }: { symbols: SymbolTimeline[]; stats: Stats | null; loading: boolean }) {
@@ -68,8 +77,8 @@ export function History({ symbols, stats, loading }: { symbols: SymbolTimeline[]
                 return (<TableRow key={e.id}>
                   <TableCell className="font-bold">{e.symbol}</TableCell>
                   <TableCell><Badge variant={up ? "default" : "destructive"} className="font-medium">{dirWord(e.direction)}</Badge></TableCell>
-                  <TableCell className="text-right text-xs font-mono text-muted-foreground">{fmtTs(e.entry_ts)}</TableCell>
-                  <TableCell className="text-right text-xs font-mono text-muted-foreground">{fmtTs(e.exit_ts)}</TableCell>
+                  <TableCell className="text-right text-xs font-mono text-muted-foreground">{fmtFill(e.entry_price, e.entry_ts)}</TableCell>
+                  <TableCell className="text-right text-xs font-mono text-muted-foreground">{fmtFill(e.exit_price, e.exit_ts)}</TableCell>
                   <TableCell className={`text-right font-mono tabular-nums font-semibold ${alp != null && alp > 0 ? "text-emerald-500" : alp != null && alp < 0 ? "text-red-500" : ""}`}>{alp != null ? `${alp >= 0 ? "+" : ""}${alp.toFixed(2)}%` : "—"}</TableCell>
                   <TableCell className={`text-right font-mono tabular-nums font-semibold ${ret != null && ret > 0 ? "text-emerald-500" : ret != null && ret < 0 ? "text-red-500" : ""}`}>{ret != null ? `${ret >= 0 ? "+" : ""}${ret.toFixed(2)}%` : "—"}</TableCell>
                 </TableRow>)
