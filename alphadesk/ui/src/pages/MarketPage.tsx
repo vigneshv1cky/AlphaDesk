@@ -77,16 +77,14 @@ export default function MarketPage({
     }
   }
 
-  const graded = closed.filter(e => e.alpha_net != null)
-  const wins = graded.filter(e => (e.alpha_net ?? 0) > 0).length
-  const winRate = graded.length ? Math.round((wins / graded.length) * 100) : null
-  const avgAlpha = graded.length ? graded.reduce((s, e) => s + (e.alpha_net ?? 0), 0) / graded.length : null
+  const wins = closed.filter(e => (e.exit_return_pct ?? 0) > 0).length
+  const winRate = closed.length ? Math.round((wins / closed.length) * 100) : null
   const totalPnl = closed.reduce((s, e) => s + (e.exit_return_pct ?? 0), 0)
 
   if (loading) return (
     <div className="space-y-3">
       <Skeleton className="h-8 w-64" />
-      <div className="grid grid-cols-4 gap-2">{[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-24 w-full rounded-xl" />)}</div>
+      <div className="grid grid-cols-3 gap-2">{[1, 2, 3].map(i => <Skeleton key={i} className="h-24 w-full rounded-xl" />)}</div>
       {[1, 2, 3].map(i => <Skeleton key={i} className="h-10 w-full" />)}
     </div>
   )
@@ -98,7 +96,7 @@ export default function MarketPage({
         <span className="text-xs text-muted-foreground">{meta.window} — session-scoped: enter at the open, exit at the close, never carry into another market.</span>
       </div>
 
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-3 gap-2">
         <Card><CardContent className="flex flex-col items-center gap-1 py-3">
           <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Open</div>
           <div className="font-mono text-lg font-bold tabular-nums">{live.length}</div>
@@ -107,12 +105,7 @@ export default function MarketPage({
         <Card><CardContent className="flex flex-col items-center gap-1 py-3">
           <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Win Rate</div>
           <div className={`font-mono text-lg font-bold tabular-nums ${winRate != null ? (winRate >= 50 ? "text-emerald-500" : "text-red-500") : "text-muted-foreground"}`}>{winRate != null ? `${winRate}%` : "—"}</div>
-          <div className="text-[10px] text-muted-foreground">{graded.length} graded</div>
-        </CardContent></Card>
-        <Card><CardContent className="flex flex-col items-center gap-1 py-3">
-          <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Avg Alpha</div>
-          <div className={`font-mono text-lg font-bold tabular-nums ${avgAlpha != null ? (avgAlpha >= 0 ? "text-emerald-500" : "text-red-500") : "text-muted-foreground"}`}>{avgAlpha != null ? `${avgAlpha >= 0 ? "+" : ""}${avgAlpha.toFixed(2)}%` : "—"}</div>
-          <div className="text-[10px] text-muted-foreground">vs SPY, net friction</div>
+          <div className="text-[10px] text-muted-foreground">{closed.length} closed</div>
         </CardContent></Card>
         <Card><CardContent className="flex flex-col items-center gap-1 py-3">
           <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Total P&L</div>
@@ -174,7 +167,7 @@ export default function MarketPage({
                 <Table><TableHeader><TableRow>
                   <TableHead>Symbol</TableHead><TableHead>Dir</TableHead>
                   <TableHead className="text-right">Entry</TableHead><TableHead className="text-right">Exit</TableHead>
-                  <TableHead className="text-right">Alpha</TableHead><TableHead className="text-right">P&L</TableHead>
+                  <TableHead className="text-right">P&L</TableHead>
                 </TableRow></TableHeader><TableBody>
                   {g.items.map(e => {
                     const up = dirUp(e.direction)
@@ -183,7 +176,6 @@ export default function MarketPage({
                       <TableCell><Badge variant={up ? "default" : "destructive"} className="font-medium">{dirWord(e.direction)}</Badge></TableCell>
                       <TableCell className="text-right text-xs font-mono text-muted-foreground">{fmtFill(e.entry_price, e.entry_ts)}</TableCell>
                       <TableCell className="text-right text-xs font-mono text-muted-foreground">{fmtFill(e.exit_price, e.exit_ts)}</TableCell>
-                      <TableCell className={`text-right font-mono tabular-nums font-semibold ${(e.alpha_net ?? 0) > 0 ? "text-emerald-500" : (e.alpha_net ?? 0) < 0 ? "text-red-500" : ""}`}>{e.alpha_net != null ? `${e.alpha_net >= 0 ? "+" : ""}${e.alpha_net.toFixed(2)}%` : "—"}</TableCell>
                       <TableCell className={`text-right font-mono tabular-nums font-semibold ${(e.exit_return_pct ?? 0) > 0 ? "text-emerald-500" : (e.exit_return_pct ?? 0) < 0 ? "text-red-500" : ""}`}>{e.exit_return_pct != null ? `${e.exit_return_pct >= 0 ? "+" : ""}${e.exit_return_pct.toFixed(2)}%` : "—"}</TableCell>
                     </TableRow>)
                   })}

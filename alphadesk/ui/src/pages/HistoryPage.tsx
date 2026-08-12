@@ -15,8 +15,7 @@ export default function HistoryPage({
       <div>
         <h1 className="text-lg font-bold tracking-tight">History</h1>
         <p className="text-xs text-muted-foreground">
-          Every exited pick, grouped by day. P&L is the realized return; Alpha is the
-          return vs SPY after friction.
+          Every exited pick, grouped by day. P&L is the realized return.
         </p>
       </div>
       <History symbols={symbols} stats={stats} loading={loading} />

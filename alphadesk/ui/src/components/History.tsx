@@ -44,15 +44,13 @@ export function History({ symbols, stats, loading }: { symbols: SymbolTimeline[]
   const graded = stats?.total?.graded ?? 0
   const gradedWins = stats?.total?.wins ?? 0
   const winRate = graded > 0 ? Math.round((gradedWins / graded) * 100) : null
-  const alpha = stats?.total?.avg_alpha_net
   // Compute P&L from displayed events, not stats API
   const totalPnl = exitedEvents.reduce((s, e) => s + (e.exit_return_pct ?? 0), 0)
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2">
         <StatCard label="Win Rate" value={winRate != null ? `${winRate}%` : "—"} tone={winRate != null ? (winRate >= 50 ? 1 : -1) : null} />
-        <StatCard label="Avg Alpha" value={alpha != null ? `${alpha >= 0 ? "+" : ""}${alpha.toFixed(2)}%` : "—"} tone={alpha} />
         <StatCard label="Total P&L" value={exitedEvents.length > 0 ? `${totalPnl >= 0 ? "+" : ""}${totalPnl.toFixed(2)}%` : "—"} tone={totalPnl} />
       </div>
       <Separator />
@@ -68,18 +66,16 @@ export function History({ symbols, stats, loading }: { symbols: SymbolTimeline[]
             <Table><TableHeader><TableRow>
               <TableHead>Symbol</TableHead><TableHead>Dir</TableHead>
               <TableHead className="text-right">Entry</TableHead><TableHead className="text-right">Exit</TableHead>
-              <TableHead className="text-right">Alpha</TableHead><TableHead className="text-right">P&L</TableHead>
+              <TableHead className="text-right">P&L</TableHead>
             </TableRow></TableHeader><TableBody>
               {g.items.map(e => {
                 const up = dirUp(e.direction)
                 const ret = e.exit_return_pct
-                const alp = e.alpha_net
                 return (<TableRow key={e.id}>
                   <TableCell className="font-bold">{e.symbol}</TableCell>
                   <TableCell><Badge variant={up ? "default" : "destructive"} className="font-medium">{dirWord(e.direction)}</Badge></TableCell>
                   <TableCell className="text-right text-xs font-mono text-muted-foreground">{fmtFill(e.entry_price, e.entry_ts)}</TableCell>
                   <TableCell className="text-right text-xs font-mono text-muted-foreground">{fmtFill(e.exit_price, e.exit_ts)}</TableCell>
-                  <TableCell className={`text-right font-mono tabular-nums font-semibold ${alp != null && alp > 0 ? "text-emerald-500" : alp != null && alp < 0 ? "text-red-500" : ""}`}>{alp != null ? `${alp >= 0 ? "+" : ""}${alp.toFixed(2)}%` : "—"}</TableCell>
                   <TableCell className={`text-right font-mono tabular-nums font-semibold ${ret != null && ret > 0 ? "text-emerald-500" : ret != null && ret < 0 ? "text-red-500" : ""}`}>{ret != null ? `${ret >= 0 ? "+" : ""}${ret.toFixed(2)}%` : "—"}</TableCell>
                 </TableRow>)
               })}
