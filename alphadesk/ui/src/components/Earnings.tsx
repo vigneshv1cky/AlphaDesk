@@ -483,9 +483,6 @@ export function Earnings({
         <Panel
           title="Just reported"
           sub="capturable drift from the first post-report open — the uncapturable overnight gap is shown separately and excluded from the verdict"
-          collapsible
-          defaultOpen={searching}
-          count={filteredReported.length}
         >
           <CoverageSummary reported={filteredReported} />
           <div className="mb-2 flex items-center gap-2 border-b border-border pb-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
