@@ -39,7 +39,6 @@ LIMIT_FILL_BUFFER_PCT = float(os.environ.get("LIMIT_FILL_BUFFER_PCT", "0.25"))
 LIMIT_FILL_MIN_CUSHION_FRAC = float(os.environ.get("LIMIT_FILL_MIN_CUSHION_FRAC", "0.4"))
 
 SYMBOL_REPICK_COOLDOWN_MIN = 15
-REPICK_COOLDOWN_HOURS = int(os.environ.get("REPICK_COOLDOWN_HOURS", "24"))
 WATCH_INTERVAL_S = int(os.environ.get("WATCH_INTERVAL_S", "60"))
 
 # ── Risk rails (paper-desk circuit breakers) ─────────────────────────────────

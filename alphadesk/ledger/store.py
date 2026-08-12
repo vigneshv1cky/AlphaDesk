@@ -734,17 +734,6 @@ def last_debate(symbol: str) -> dict | None:
     return dict(row) if row else None
 
 
-def symbols_debated_since(hours: int = 12) -> set:
-    """Symbols with a team debate in the last `hours` — skip re-debating them
-    (anti-double-dip: an earnings/news name lingers as a candidate for days)."""
-    with _connect() as conn:
-        rows = conn.execute(
-            "SELECT DISTINCT symbol FROM picks WHERE arm IN ('TEAM','QUANT')"
-            " AND ts >= datetime('now', ?)", (f"-{int(hours)} hours",),
-        ).fetchall()
-    return {r["symbol"].upper() for r in rows}
-
-
 def mark_taken(pick_ids: list[int]) -> None:
     """Flag the picks the Chief chose to TAKE — the open positions later runs re-check."""
     if not pick_ids:

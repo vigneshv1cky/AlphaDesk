@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 from alphadesk.config import (
     EARNINGS_DRIFT_DAYS,
     QUANT_PREFILTER_MIN_SCORE,
-    REPICK_COOLDOWN_HOURS,
     entry_fill_time,
     now_et,
     pinned_horizon,
@@ -89,16 +88,17 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
     log.info("Earnings drift: %d candidates with material reaction", len(candidates))
     yield _ev("status", msg=f"Earnings drift: {len(candidates)} candidates with material reaction")
 
-    # Anti-double-dip
+    # Anti-double-dip: skip symbols with an already-open position (one position
+    # per symbol at a time). No cooldown beyond that — the quant score is
+    # recomputed fresh each run, so the same symbol can trade again the same day
+    # once its prior position has closed.
     open_positions = await loop.run_in_executor(None, store.open_taken_picks)
     held = {p["symbol"].upper() for p in open_positions}
-    cooling = await loop.run_in_executor(None, store.symbols_debated_since, REPICK_COOLDOWN_HOURS)
     for s in list(candidates):
-        su = s.upper()
-        if su in held or su in cooling:
+        if s.upper() in held:
             candidates.pop(s, None)
-    log.info("After anti-double-dip: %d candidates remain (%d held, %d cooling)",
-             len(candidates), len(held), len(cooling))
+    log.info("After anti-double-dip: %d candidates remain (%d held)",
+             len(candidates), len(held))
 
     if not candidates:
         await loop.run_in_executor(None, store.add_run, "FIND_TRADES", [])
