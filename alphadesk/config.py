@@ -60,9 +60,14 @@ QUANT_PREFILTER_MIN_SCORE = float(os.environ.get("QUANT_PREFILTER_MIN_SCORE", "5
 QUANT_TIERED_EXITS = os.environ.get("QUANT_TIERED_EXITS", "1") not in ("0", "", "false", "False", "no")
 QUANT_CALIBRATE = os.environ.get("QUANT_CALIBRATE", "1") not in ("0", "", "false", "False", "no")
 # How many candidates each Find Trades run scores (by reaction magnitude). A run
-# must finish within the 5-min autorun cadence to catch intraday movers, so keep
-# this small — each scored name costs a yfinance price/options/fundamental fetch.
-QUANT_SCORE_CANDIDATES = int(os.environ.get("QUANT_SCORE_CANDIDATES", "40"))
+# must finish within the 5-min autorun cadence to catch intraday movers, so this
+# can't be unbounded — each scored name costs a yfinance price/options/fundamental
+# fetch. A typical morning clears 100-150 gate-passed reactions at once (a busy
+# earnings day easily exceeds even this), so 40 was crowding out a real chunk of
+# tradeable movers before they were ever scored; 80 covers a normal day much more
+# fully while still finishing inside the 5-min cadence at the existing 8-way
+# concurrency.
+QUANT_SCORE_CANDIDATES = int(os.environ.get("QUANT_SCORE_CANDIDATES", "80"))
 
 # ── Exit parameters (self-optimizing via calibrator) ─────────────────────────
 PLAN_TARGET_ATR = float(os.environ.get("PLAN_TARGET_ATR", "2.0"))        # target = entry ± ATR × this

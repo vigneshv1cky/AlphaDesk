@@ -123,9 +123,20 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
     from alphadesk.quant import calibrate as qc
     weights = qc.load_weights()
 
-    scored_candidates = sorted(candidates.items(), key=lambda kv: -abs(
+    drop_reasons: list[dict] = []
+
+    ranked_candidates = sorted(candidates.items(), key=lambda kv: -abs(
         next((a.get("reaction_pct", 0) for a in kv[1] if a.get("reaction_pct")), 0)),
-    )[:QUANT_SCORE_CANDIDATES]
+    )
+    scored_candidates = ranked_candidates[:QUANT_SCORE_CANDIDATES]
+    # A busy earnings morning can easily clear 100+ gate-passed reactions at once
+    # (100-150 is typical), well past this cap — everything past it never got a
+    # look this run. That used to vanish with no trace; log it like every other
+    # drop so a real, tradeable reaction doesn't silently disappear from coverage.
+    for sym, _arts in ranked_candidates[QUANT_SCORE_CANDIDATES:]:
+        drop_reasons.append({"symbol": sym,
+                             "reason": f"reaction cap: over {QUANT_SCORE_CANDIDATES} candidates this run, "
+                                       "not among the biggest movers scored"})
 
     # One batched download for EVERY candidate's post-report move (gap/drift/total).
     all_items = [
@@ -185,7 +196,6 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
 
     scored: list[tuple[str, float, str, dict]] = []
     scored_map: dict[str, dict] = {}
-    drop_reasons: list[dict] = []
     sem = asyncio.Semaphore(8)   # bound concurrent yfinance fetches
 
     async def _guarded(sym, arts):
