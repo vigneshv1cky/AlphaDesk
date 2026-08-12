@@ -114,6 +114,16 @@ def init_position(pick_id: int, entry_price: float, current_price: float,
         _atr_map[pick_id] = atr_pct
 
 
+def set_atr(pick_id: int, atr_pct: float | None):
+    """Set the ATR estimate used to size the trailing-stop offset, if not
+    already known. Unlike init_position, this doesn't touch trail/peak state —
+    safe to call every tick for positions that were never explicitly
+    initialized (e.g. the quant watch loop, which discovers live picks by
+    polling the ledger rather than an explicit open-position event)."""
+    if atr_pct is not None and atr_pct > 0 and pick_id not in _atr_map:
+        _atr_map[pick_id] = atr_pct
+
+
 def update_price(pick_id: int, price: float):
     """Feed a new price tick to the watcher."""
     if pick_id not in _pick_history:

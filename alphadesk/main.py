@@ -471,6 +471,17 @@ async def _serve() -> None:
                     entry = p["entry_price"]
                     if not entry:
                         continue
+                    # Back-derive the ATR% used to plan this trade from its target
+                    # distance (target = entry ± ATR% × PLAN_TARGET_ATR, no floor
+                    # clamp — unlike plan_stop, which plan.atr_plan can widen for
+                    # cheap/tight-ATR names) so the trailing stop scales with each
+                    # stock's real volatility instead of always using the flat
+                    # TRAIL_OFFSET_PCT fallback.
+                    target = p.get("plan_target")
+                    if target:
+                        from alphadesk.config import PLAN_TARGET_ATR
+                        atr_pct = abs(target - entry) / entry / PLAN_TARGET_ATR * 100
+                        qwatcher.set_atr(p["id"], atr_pct)
                     qwatcher.update_price(p["id"], cur)
                     result = qwatcher.check_exits(
                         p["id"], p["direction"], entry,
