@@ -287,40 +287,72 @@ function ReportedRow({ e }: { e: EarningsRow }) {
   )
 }
 
-// One run-day group in "Reporting soon" — shows the biggest 8, with the rest
-// expandable/collapsible via the "+N more / show less" toggle.
-function RunGroup({ g, forceExpanded }: { g: DayGroup; forceExpanded?: boolean }) {
+// One run-day group in "Reporting soon". The day header itself collapses the
+// whole block — with a dozen-plus run-days on the calendar, having every one
+// fully expanded meant scrolling past every earlier day just to reach a later
+// one. Only the nearest day is open by default; the rest are one click away.
+// Once a day is open, it still shows the biggest 8 first, with the rest via
+// the "+N more / show less" toggle.
+function RunGroup({
+  g,
+  defaultOpen = false,
+  forceExpanded,
+}: {
+  g: DayGroup
+  defaultOpen?: boolean
+  forceExpanded?: boolean
+}) {
+  const [open, setOpen] = useState(defaultOpen || !!forceExpanded)
   const [expanded, setExpanded] = useState(!!forceExpanded)
   useEffect(() => {
-    if (forceExpanded) setExpanded(true)
+    if (forceExpanded) {
+      setOpen(true)
+      setExpanded(true)
+    }
   }, [forceExpanded])
   const shown = expanded ? g.rows : g.rows.slice(0, 8)
   const more = g.rows.length - 8
   return (
     <div>
-      <div className="mb-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-        {g.day === "—" ? "Run time n/a" : `Run ${dayLabel(g.day)} · 9:30 ET`}
-      </div>
-      <div className="divide-y divide-border">
-        {shown.map((e) => (
-          <div key={e.symbol + e.report_date} className="flex items-center gap-2 py-1.5 text-sm">
-            <span className="w-14 font-semibold">{e.symbol}</span>
-            <span className="w-14 text-xs text-muted-foreground">{fmtCap(e.market_cap)}</span>
-            <span className="ml-auto text-xs text-muted-foreground">
-              {e.report_date.slice(5, 10)} {e.session}
-            </span>
+      <Button
+        variant="ghost"
+        onClick={() => setOpen((v) => !v)}
+        className="group -mx-1 flex h-auto w-full items-center gap-2 rounded-md px-1 py-1 text-left"
+      >
+        <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+          {g.day === "—" ? "Run time n/a" : `Run ${dayLabel(g.day)} · 9:30 ET`}
+        </span>
+        <span className="text-[11px] text-muted-foreground">{g.rows.length} names</span>
+        <ChevronDown
+          className={`ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground/50 transition-transform group-hover:text-foreground ${
+            open ? "" : "-rotate-90"
+          }`}
+        />
+      </Button>
+      {open && (
+        <>
+          <div className="divide-y divide-border">
+            {shown.map((e) => (
+              <div key={e.symbol + e.report_date} className="flex items-center gap-2 py-1.5 text-sm">
+                <span className="w-14 font-semibold">{e.symbol}</span>
+                <span className="w-14 text-xs text-muted-foreground">{fmtCap(e.market_cap)}</span>
+                <span className="ml-auto text-xs text-muted-foreground">
+                  {e.report_date.slice(5, 10)} {e.session}
+                </span>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      {more > 0 && (
-        <Button
-          variant="ghost"
-          size="xs"
-          onClick={() => setExpanded((v) => !v)}
-          className="mt-1 font-medium"
-        >
-          {expanded ? "− show less" : `+${more} more`}
-        </Button>
+          {more > 0 && (
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => setExpanded((v) => !v)}
+              className="mt-1 font-medium"
+            >
+              {expanded ? "− show less" : `+${more} more`}
+            </Button>
+          )}
+        </>
       )}
     </div>
   )
@@ -450,8 +482,8 @@ export function Earnings({
             <span className="ml-auto">Report</span>
           </div>
           <div className="space-y-3">
-            {groupByDay(filteredUpcoming, (e) => (e.run_at ?? "").slice(0, 10) || "—").map((g) => (
-              <RunGroup key={g.day} g={g} forceExpanded={searching} />
+            {groupByDay(filteredUpcoming, (e) => (e.run_at ?? "").slice(0, 10) || "—").map((g, i) => (
+              <RunGroup key={g.day} g={g} defaultOpen={i === 0} forceExpanded={searching} />
             ))}
           </div>
         </Panel>
