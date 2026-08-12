@@ -83,9 +83,13 @@ def route_pick(pick_id: int, symbol: str, direction: str, price: float,
 
 def _place_close(pick: dict, price: float) -> float | None:
     """Place the order that CLOSES a routed position on the broker (SELL a LONG,
-    buy-to-cover a SHORT), at the routed qty. Market in regular hours, extended-hours
-    limit at the current price otherwise. Polls briefly for a market fill; returns
-    the actual fill price, or None if not filled in time (the ledger then uses the
+    buy-to-cover a SHORT), at the broker's actual available qty (NOT the
+    broker_qty estimate stamped at entry — a notional buy fills at whatever
+    fractional share count $ actually buys, which never exactly matches the
+    pre-fill estimate, so selling the estimate gets rejected with "insufficient
+    qty available" every time). Market in regular hours, extended-hours limit at
+    the current price otherwise. Polls briefly for a market fill; returns the
+    actual fill price, or None if not filled in time (the ledger then uses the
     planned exit price and the DAY limit may still fill later). Best-effort."""
     import time
 
@@ -96,11 +100,15 @@ def _place_close(pick: dict, price: float) -> float | None:
     from alphadesk.config import session as market_session
 
     try:
-        qty = float(pick.get("broker_qty") or 0)
+        client = _trading_client()
+        try:
+            position = client.get_open_position(pick["symbol"])
+            qty = float(getattr(position, "qty_available", None) or position.qty)
+        except Exception:
+            return None   # no open broker position left to close
         if qty <= 0:
             return None
         side = OrderSide.SELL if pick["direction"] == "LONG" else OrderSide.BUY
-        client = _trading_client()
         if market_session() == "OPEN":
             req = MarketOrderRequest(symbol=pick["symbol"], qty=qty, side=side,
                                      time_in_force=TimeInForce.DAY)
