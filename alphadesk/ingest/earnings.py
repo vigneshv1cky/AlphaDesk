@@ -189,6 +189,24 @@ def arm_upcoming_reports(days_ahead: int = 2) -> int:
     return n
 
 
+def arm_liquidity(days_back: int = 4, days_fwd: int = 14) -> int:
+    """Batch-compute and persist the same 20d-avg-$vol liquidity bar the trading
+    pipeline gates entries on, for every symbol currently in the Earnings page's
+    window. Runs off the earnings loop — a live per-request fetch for several
+    hundred names took over two minutes and made the page itself unusable; this
+    keeps that cost entirely off the request path. Best-effort."""
+    from alphadesk.ingest import prices
+    rows = store.earnings_window(days_back=days_back, days_fwd=days_fwd)
+    syms = sorted({r["symbol"] for r in rows})
+    if not syms:
+        return 0
+    liq = prices.liquidity_batch(syms)
+    n = store.update_earnings_liquidity(liq) if liq else 0
+    if n:
+        log.info("Armed liquidity for %d/%d earnings-window symbols", len(liq), len(syms))
+    return n
+
+
 def drift_candidates(days: int) -> dict[str, list[dict]]:
     """Recently-reported names → synthetic [EARNINGS] candidate articles, keyed by
     symbol. A CANDIDATE SOURCE, parallel to news.poll: it lets post-earnings drift

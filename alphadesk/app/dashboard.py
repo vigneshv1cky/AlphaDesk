@@ -217,7 +217,6 @@ def api_earnings():
     """Be-ready view: who reports next (with the time to RUN the desk to catch the
     drift) and who just reported."""
     from alphadesk.config import now_et
-    from alphadesk.ingest import prices
     from alphadesk.ingest.earnings import reported_public, run_at
 
     # Time-aware split: a report is "just reported" once it's PUBLIC (BMO/DAY at the
@@ -285,12 +284,14 @@ def api_earnings():
 
     # Same liquidity bar the live trading pipeline actually gates entries on
     # (20-day avg $ volume, not market cap — a thin float can hide behind a
-    # decent-looking company size) so the page never lists a name the desk
-    # would refuse to trade regardless of how it moved.
-    all_syms = [e["symbol"] for e in upcoming] + [e["symbol"] for e in reported]
-    liquidity = prices.liquidity_batch(all_syms)
+    # decent-looking company size), pre-computed off the earnings loop
+    # (earnings.arm_liquidity) and already present on each row from
+    # earnings_window() above. A live batch fetch for the whole window here
+    # instead took over two minutes and made the page itself unusable — this
+    # keeps that cost entirely off the request path.
     for e in upcoming + reported:
-        e["low_liquidity"] = liquidity.get(e["symbol"].upper())
+        v = e.get("low_liquidity")
+        e["low_liquidity"] = bool(v) if v is not None else None
 
     return {"upcoming": upcoming, "reported": reported}
 

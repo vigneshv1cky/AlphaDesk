@@ -255,6 +255,10 @@ def init() -> None:
                 conn.execute(f"ALTER TABLE earnings ADD COLUMN {col} REAL")
             except sqlite3.OperationalError:
                 pass  # already migrated
+        try:
+            conn.execute("ALTER TABLE earnings ADD COLUMN low_liquidity INTEGER")
+        except sqlite3.OperationalError:
+            pass  # already migrated
         for col, decl in (("plan_entry", "REAL"), ("plan_target", "REAL"),
                           ("plan_stop", "REAL"), ("plan_note", "TEXT"),
                           ("source", "TEXT"), ("decision_id", "TEXT"),
@@ -1135,6 +1139,21 @@ def update_earnings_arm(symbol: str, report_date: str,
             (pre_close, implied, symbol.upper(), report_date))
 
 
+def update_earnings_liquidity(low_liquidity: dict[str, bool]) -> int:
+    """Persist the same 20d-avg-$vol liquidity bar the trading pipeline gates
+    entries on, batch-computed off the earnings loop (prices.liquidity_batch),
+    so the Earnings page reads a stored flag instead of live-fetching per
+    request. Liquidity is a symbol property, not report-date-specific — sets
+    it on every calendar row for that symbol."""
+    if not low_liquidity:
+        return 0
+    with _lock, _connect() as conn:
+        cur = conn.executemany(
+            "UPDATE earnings SET low_liquidity=? WHERE symbol=?",
+            [(int(v), sym.upper()) for sym, v in low_liquidity.items()])
+        return cur.rowcount or 0
+
+
 def purge_legacy_earnings() -> int:
     """Drop stale rows keyed by the OLD full-timestamp report_date (e.g.
     '2026-07-22T16:00:00-04:00'). The market-wide calendar now stores date-only
@@ -1216,7 +1235,7 @@ def earnings_window(days_back: int = 4, days_fwd: int = 14) -> list[dict]:
     with _connect() as conn:
         rows = conn.execute(
             "SELECT symbol, report_date, session, eps_estimate, eps_actual, surprise_pct,"
-            " market_cap, pre_report_close, implied_move_pct FROM earnings"
+            " market_cap, pre_report_close, implied_move_pct, low_liquidity FROM earnings"
             " WHERE report_date >= ? AND report_date <= ?"
             " ORDER BY report_date", (_et_date(-int(days_back)), _et_date(int(days_fwd))),
         ).fetchall()
