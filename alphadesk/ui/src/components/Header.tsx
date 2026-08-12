@@ -26,7 +26,6 @@ export function Header({ liveOpenCount }: { liveOpenCount?: number }) {
   const t = stats?.total
   const graded = t?.graded ?? 0
   const winRate = graded > 0 && t?.wins != null ? Math.round((t.wins / graded) * 100) : null
-  const alpha = t?.avg_alpha_net
   const picks = t?.picks ?? 0
 
   return (
@@ -36,8 +35,6 @@ export function Header({ liveOpenCount }: { liveOpenCount?: number }) {
       <Stat label="Graded" value={String(graded)} tip="Picks whose 1-day horizon elapsed" />
       <Separator orientation="vertical" className="mx-2 h-8" />
       <Stat label="Win Rate" value={winRate != null ? `${winRate}%` : "—"} tone={winRate != null ? (winRate >= 50 ? 1 : -1) : null} />
-      <Separator orientation="vertical" className="mx-2 h-8" />
-      <Stat label="Avg α" value={alpha != null ? `${alpha >= 0 ? "+" : ""}${alpha.toFixed(2)}%` : "—"} tone={alpha} />
       <Separator orientation="vertical" className="mx-2 h-8" />
       <Stat label="Total" value={String(picks)} tip="All picks ever booked" />
     </div>
