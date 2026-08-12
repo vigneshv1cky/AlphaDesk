@@ -42,10 +42,10 @@ SYMBOL_REPICK_COOLDOWN_MIN = 15
 WATCH_INTERVAL_S = int(os.environ.get("WATCH_INTERVAL_S", "60"))
 
 # ── Risk rails (paper-desk circuit breakers) ─────────────────────────────────
-MAX_OPEN_POSITIONS = int(os.environ.get("MAX_OPEN_POSITIONS", "20"))
+MAX_OPEN_POSITIONS = int(os.environ.get("MAX_OPEN_POSITIONS", "0"))
 DAILY_LOSS_STOP_PCT = float(os.environ.get("DAILY_LOSS_STOP_PCT", "10"))
 # stop opening new positions after realized (equal-weight) losses pass this today
-CONCENTRATION_MAX_PER_CLUSTER = int(os.environ.get("CONCENTRATION_MAX_PER_CLUSTER", "2"))
+CONCENTRATION_MAX_PER_CLUSTER = int(os.environ.get("CONCENTRATION_MAX_PER_CLUSTER", "0"))
 # thin sessions size down (conviction multiplier applied to new picks)
 SESSION_SIZE_MULT = {"OPEN": 1.0, "PRE": 0.5, "AFTER": 0.5}
 
