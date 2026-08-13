@@ -124,6 +124,14 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
     weights = qc.load_weights()
 
     drop_reasons: list[dict] = []
+    # Reasons for candidates that made the scored top-N but still failed a gate
+    # (no live trade, illiquid, not shortable, concentration cap) — kept separate
+    # from drop_reasons because record_skips() only persists the first `cap` rows
+    # it's given, and drop_reasons is dominated by routine bulk noise (reaction-cap,
+    # pre-filter, not-in-top-N can easily be hundreds of rows on a busy morning).
+    # Without this split, that noise fills the cap before any gate reason for the
+    # candidates that actually mattered ever gets recorded.
+    gate_reasons: list[dict] = []
 
     ranked_candidates = sorted(candidates.items(), key=lambda kv: -abs(
         next((a.get("reaction_pct", 0) for a in kv[1] if a.get("reaction_pct")), 0)),
@@ -308,7 +316,7 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
             return
         pctx = await loop.run_in_executor(None, prices.get_context, sym) or {}
         if cur_sess in ("PRE", "AFTER") and not pctx.get("last_trade_ts"):
-            drop_reasons.append({"symbol": sym, "reason": "no trades in extended session"})
+            gate_reasons.append({"symbol": sym, "reason": "no trades in extended session"})
             yield _ev("gate", symbol=sym, reason="no trades in extended session")
             continue
 
@@ -318,7 +326,7 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
         # the trade. Skip these outright instead.
         if pctx.get("low_liquidity"):
             from alphadesk.config import LOW_LIQUIDITY_DOLLAR_VOL
-            drop_reasons.append({"symbol": sym,
+            gate_reasons.append({"symbol": sym,
                                  "reason": f"low liquidity: 20d avg $vol below ${LOW_LIQUIDITY_DOLLAR_VOL:,.0f}"})
             yield _ev("gate", symbol=sym, reason="low liquidity — skipped")
             continue
@@ -327,7 +335,7 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
         if direction == "SHORT":
             short_ok = await loop.run_in_executor(None, _shortable, sym)
             if not short_ok:
-                drop_reasons.append({"symbol": sym, "reason": "SHORT not shortable at broker"})
+                gate_reasons.append({"symbol": sym, "reason": "SHORT not shortable at broker"})
                 yield _ev("gate", symbol=sym,
                           reason="SHORT skipped — not shortable at broker")
                 continue
@@ -340,7 +348,7 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
             if sector:
                 cluster = f"{sector}|{direction}"
                 if store.cluster_take_count(cluster) >= CONCENTRATION_MAX_PER_CLUSTER:
-                    drop_reasons.append({"symbol": sym,
+                    gate_reasons.append({"symbol": sym,
                                          "reason": f"concentration cap: {cluster} already at {CONCENTRATION_MAX_PER_CLUSTER}"})
                     yield _ev("gate", symbol=sym, reason=f"concentration cap reached ({sector} {direction})")
                     continue
@@ -447,10 +455,15 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
     _pending_run_picks = []
     # Coverage ledger: candidates seen → picked vs why-not (also recorded as skips
     # so the grader forward-scores the drops, and the UI shows a real reason).
+    # gate_reasons first: those are the near-misses (scored top-N, failed a real
+    # gate) — the interesting ones. drop_reasons (reaction-cap/pre-filter/not-in-
+    # top-N) is routine bulk noise that can run into the hundreds on a busy
+    # morning, so it goes last and is what record_skips' cap eats into first.
+    all_reasons = gate_reasons + drop_reasons
     store.funnel_add(ingested=len(candidates), candidates=len(scored_candidates),
-                     picked=picks_count, skipped=len(drop_reasons),
-                     skip_reasons=drop_reasons)
-    if drop_reasons:
-        store.record_skips(drop_reasons)
+                     picked=picks_count, skipped=len(all_reasons),
+                     skip_reasons=all_reasons)
+    if all_reasons:
+        store.record_skips(all_reasons)
     yield _ev("status", msg=f"Run complete — {picks_count} quant pick(s)")
     yield _ev("done", board=board)
