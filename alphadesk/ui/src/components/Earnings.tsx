@@ -503,8 +503,8 @@ export function Earnings({
             <span className="ml-auto">Drift · gap</span>
           </div>
           <div className="space-y-3">
-            {groupByDay(filteredReported, (e) => e.report_date.slice(0, 10)).map((g, i) => (
-              <ReportedDayBlock key={g.day} g={g} defaultOpen={i === 0} forceExpanded={searching} />
+            {groupByDay(filteredReported, (e) => e.report_date.slice(0, 10)).map((g) => (
+              <ReportedDayBlock key={g.day} g={g} forceExpanded={searching} />
             ))}
           </div>
         </Panel>
@@ -518,8 +518,8 @@ export function Earnings({
             <span className="ml-auto">Report</span>
           </div>
           <div className="space-y-3">
-            {groupByDay(filteredUpcoming, (e) => (e.run_at ?? "").slice(0, 10) || "—").map((g, i) => (
-              <RunGroup key={g.day} g={g} defaultOpen={i === 0} forceExpanded={searching} />
+            {groupByDay(filteredUpcoming, (e) => (e.run_at ?? "").slice(0, 10) || "—").map((g) => (
+              <RunGroup key={g.day} g={g} forceExpanded={searching} />
             ))}
           </div>
         </Panel>
