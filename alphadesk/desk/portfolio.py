@@ -41,61 +41,46 @@ def _trading_client():
     return _client
 
 
-def _fractional_qty(price: float) -> float:
-    """$10 fractional sizing — every trade buys/sells exactly TRADE_NOTIONAL_USD of
-    the name (fractional shares), so the paper fills match the $10/trade the
-    dashboard already assumes."""
-    from alphadesk.config import TRADE_NOTIONAL_USD
-    return round(TRADE_NOTIONAL_USD / price, 4) if price > 0 else 0.0
-
-
-def _short_qty(price: float) -> int:
-    """Whole-share sizing for opening a SHORT. Alpaca doesn't support fractional
-    or notional sizing for short sales (only buy-to-open / sell-to-close are
-    notional-eligible) — a notional SELL-to-open is rejected by the API. This
-    approximates the same ~TRADE_NOTIONAL_USD target, rounded to the nearest
-    whole share (minimum 1), so short position size is less precise than long
-    (inherent to the broker's constraint, not a choice)."""
-    from alphadesk.config import TRADE_NOTIONAL_USD
-    return max(1, round(TRADE_NOTIONAL_USD / price)) if price > 0 else 1
-
-
 def route_pick(pick_id: int, symbol: str, direction: str, price: float,
                conviction: float, session: str) -> bool | None:
     """Place the order on Alpaca paper and stamp broker_order_id/status/qty.
 
-    $10 fractional notional per trade (TRADE_NOTIONAL_USD) for LONG (fractional
-    market order); whole-share qty for SHORT (see _short_qty — Alpaca doesn't
-    support notional/fractional sizing for opening a short, a notional SELL is
-    rejected by the API). Entries are OPEN-only (see desk/stream.py's session
-    gate), so this only ever places a regular-hours market order — no
-    extended-hours limit path. Returns True if routed, or False on an actual
-    failure (bad price, API error — the caller should NOT take the pick).
-    Never raises."""
+    Whole-share qty=1 for BOTH directions — notional (fractional-dollar) sizing
+    is rejected by Alpaca for any non-fractionable asset (regardless of
+    direction: LONG or SHORT) and for opening a SHORT specifically (notional
+    is buy-to-open/sell-to-close only, never sell-to-open). Non-fractionable
+    names skew heavily toward exactly the illiquid micro/small-caps this
+    system targets, so a notional LONG order was silently failing and
+    re-proposing the same candidate every run (2026-08-13: XHLD, DFSC, FGI,
+    HCWC, YXT — instant "not taken: broker route failed", repeated every
+    autorun cycle it still scored). The ledger's own scoring (alpha_net,
+    ret_horizon, exit_return_pct, DAILY_LOSS_STOP_PCT) is entirely in
+    percentage-return terms and the dashboard's displayed $ P&L is a
+    synthetic $10-per-trade calculation from that percentage (see
+    LivePositions.tsx) — neither depends on the real broker share count, so
+    this doesn't affect research correctness, only actual paper-account
+    dollar exposure per name (which now varies by price instead of being
+    pinned to ~$10 — acceptable for a research/paper system, not real money).
+    Entries are OPEN-only (see desk/stream.py's session gate), so this only
+    ever places a regular-hours market order — no extended-hours limit path.
+    Returns True if routed, or False on an actual failure (bad price, API
+    error — the caller should NOT take the pick). Never raises."""
     try:
         from alpaca.trading.enums import OrderSide, TimeInForce
         from alpaca.trading.requests import MarketOrderRequest
 
-        from alphadesk.config import TRADE_NOTIONAL_USD
         from alphadesk.ledger import store
 
         if not price or price <= 0:
             return False
         side = OrderSide.BUY if direction == "LONG" else OrderSide.SELL
         client = _trading_client()
-        if direction == "LONG":
-            req = MarketOrderRequest(symbol=symbol, notional=round(TRADE_NOTIONAL_USD, 2),
-                                     side=side, time_in_force=TimeInForce.DAY)
-            qty = _fractional_qty(price)
-        else:
-            qty = _short_qty(price)
-            req = MarketOrderRequest(symbol=symbol, qty=qty, side=side,
-                                     time_in_force=TimeInForce.DAY)
+        req = MarketOrderRequest(symbol=symbol, qty=1, side=side,
+                                 time_in_force=TimeInForce.DAY)
         order = client.submit_order(req)
         order_id = str(getattr(order, "id", ""))
-        store.set_broker_order(pick_id, order_id, getattr(order, "status", ""), qty)
-        log.info("Routed #%d %s %s $%.2f (%s sh) → order %s", pick_id, symbol,
-                 direction, TRADE_NOTIONAL_USD, qty, order_id)
+        store.set_broker_order(pick_id, order_id, getattr(order, "status", ""), 1)
+        log.info("Routed #%d %s %s 1 sh → order %s", pick_id, symbol, direction, order_id)
         return True
     except Exception as exc:
         log.warning("route_pick %d %s failed: %s", pick_id, symbol, exc)
