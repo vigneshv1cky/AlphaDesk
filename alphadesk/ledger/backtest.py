@@ -247,8 +247,15 @@ def backtest_drift(days: int = 30, horizon: int = 1, max_symbols: int = 500) -> 
             rd = pd.Timestamp(r["report_date"]).normalize()
             sess = r.get("session")
 
-            # baseline + entry day (BMO/DAY: prior close → report-day open;
-            # AMC: report-day close → next trading day open)
+            # baseline + entry day (BMO: prior close → report-day open;
+            # AMC: report-day close → next trading day open; DAY: report-day's
+            # OWN open → next trading day open — an intraday report has no
+            # clean pre-reaction baseline in daily bars, mirroring the live
+            # model in ingest/prices.py's moves_since_report(), which measures
+            # a DAY report from the report day's own open, not the prior
+            # close. Baselining DAY like BMO measured the ordinary overnight
+            # gap that happened BEFORE the report was even released, not a
+            # reaction to it.)
             prior = [d for d in dlist if d < rd]
             if sess == "AMC":
                 later = [d for d in dlist if d > rd]
@@ -256,6 +263,12 @@ def backtest_drift(days: int = 30, horizon: int = 1, max_symbols: int = 500) -> 
                     continue
                 entry_day = later[0]
                 baseline = _bar(df, rd, "Close")
+            elif sess == "DAY":
+                later = [d for d in dlist if d > rd]
+                if not later or rd not in dlist:
+                    continue
+                entry_day = later[0]
+                baseline = _bar(df, rd, "Open")
             else:
                 if not prior:
                     continue
@@ -348,6 +361,8 @@ def backtest_selection(days: int = 60, horizon: int = 1, max_symbols: int = 1500
             rd = pd.Timestamp(r["report_date"]).normalize()
             sess = r.get("session")
 
+            # See backtest_drift's baseline comment: DAY gets the report day's
+            # own open, not the prior close, to match the live model.
             prior = [d for d in dlist if d < rd]
             if sess == "AMC":
                 later = [d for d in dlist if d > rd]
@@ -355,6 +370,12 @@ def backtest_selection(days: int = 60, horizon: int = 1, max_symbols: int = 1500
                     continue
                 entry_day = later[0]
                 baseline = _bar(df, rd, "Close")
+            elif sess == "DAY":
+                later = [d for d in dlist if d > rd]
+                if not later or rd not in dlist:
+                    continue
+                entry_day = later[0]
+                baseline = _bar(df, rd, "Open")
             else:
                 if not prior:
                     continue

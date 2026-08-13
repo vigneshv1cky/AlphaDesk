@@ -380,7 +380,8 @@ async def _serve() -> None:
                     continue
                 positions = await loop.run_in_executor(None, qstore.live_picks)
                 monitorable = [p for p in positions
-                               if p.get("taken") and p.get("entry_price")
+                               if p.get("taken")
+                               and (p.get("entry_price") or p.get("broker_fill_price"))
                                and p.get("plan_target") and p.get("plan_stop")]
                 if not monitorable:
                     await asyncio.sleep(watch_interval)
@@ -411,7 +412,7 @@ async def _serve() -> None:
                     cur = live_prices.get(p["symbol"].upper())
                     if not cur:
                         continue
-                    entry = p["entry_price"]
+                    entry = p.get("entry_price") or p.get("broker_fill_price")
                     if not entry:
                         continue
                     # Back-derive the ATR% used to plan this trade from its target

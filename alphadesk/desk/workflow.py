@@ -47,9 +47,16 @@ async def research_run(candidates: dict[str, list[dict]], trigger_src: str = "ST
         _seed_cooldowns_from_ledger()
     now = time.monotonic()
 
-    # ENTRY buffer: no new positions in the last ENTRY_BUFFER_MIN of a session.
-    from alphadesk.config import entry_allowed
-    if not entry_allowed():
+    # Entries are OPEN-only (matches desk/stream.py's live pipeline gate). Without
+    # this, a CLOSED-time run stamped its pick "PRE" with entry_price left None
+    # for "the next 4:00 fill" — but entry_fill_time() only actually queues a
+    # fill for a pick stamped literally "CLOSED", not "PRE", so that pick's fill
+    # moment was already in the past by the time OPEN started and it was
+    # immediately marked "not taken: never filled in its session" — a dead pick
+    # from the moment it was booked, any time `python -m alphadesk.main desk`
+    # was run outside OPEN hours.
+    from alphadesk.config import entry_allowed, session as sess_fn
+    if sess_fn() != "OPEN" or not entry_allowed():
         return []
 
     eligible = {s: a for s, a in candidates.items() if _repick_at.get(s, 0.0) <= now}
@@ -84,20 +91,16 @@ async def research_run(candidates: dict[str, list[dict]], trigger_src: str = "ST
         if not last:
             continue
 
-        from alphadesk.config import pinned_horizon, session as sess_fn
+        from alphadesk.config import pinned_horizon
         horizon = pinned_horizon("MOMENTUM")
         trade = plan.atr_plan(sym, direction, horizon, last, pctx.get("atr_pct"))
 
         spy_ctx = await loop.run_in_executor(None, prices.get_context, "SPY")
-        sess = sess_fn()
-        # Night (CLOSED) is not tradeable — a pick decided then enters at the next
-        # 4:00 PRE open, so stamp it PRE (lives on the Pre-Market page, exits at the
-        # PRE close). entry_price stays None (queued for the 4:00 fill).
-        stamp_sess = "PRE" if sess == "CLOSED" else sess
+        # sess_fn() is guaranteed "OPEN" here — checked at the top of this run.
         pick_id = store.record_pick({
             "symbol": sym, "arm": "QUANT", "edge": "MOMENTUM",
             "source": "BATCH", "decision_id": f"b-{sym}-{uuid.uuid4().hex[:8]}",
-            "trigger_src": trigger_src, "session": stamp_sess,
+            "trigger_src": trigger_src, "session": "OPEN",
             "direction": direction, "horizon_days": horizon,
             "score": result["score"], "adjusted_score": result["score"],
             "confidence": 50, "verdict": "QUANT", "approved": 1,
@@ -107,7 +110,7 @@ async def research_run(candidates: dict[str, list[dict]], trigger_src: str = "ST
             "briefs": [], "model_tags": {"mode": "quant"},
             "low_liquidity": int(bool(pctx.get("low_liquidity"))),
             "skeptic_moved_score": 0.0, "arbiter_overrode": 0,
-            "entry_price": last if sess != "CLOSED" else None,
+            "entry_price": last,
             "spy_price": (spy_ctx or {}).get("last_price"),
             "plan_entry": (trade or {}).get("entry"),
             "plan_target": (trade or {}).get("target"),

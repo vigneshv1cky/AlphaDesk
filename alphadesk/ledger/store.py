@@ -386,7 +386,7 @@ def get_graded_exits(days: int = 30) -> list[dict]:
             "SELECT id, symbol, direction, alpha_net, exit_ts, exit_reason, exit_price,"
             " plan_target, plan_stop, plan_entry"
             " FROM picks WHERE graded_at IS NOT NULL AND exit_ts IS NOT NULL"
-            " AND graded_at >= datetime('now', ?)"
+            " AND datetime(graded_at) >= datetime('now', ?)"
             " ORDER BY graded_at DESC LIMIT 200", (f"-{int(days)} days",),
         ).fetchall()
     return [_decode(dict(r)) for r in rows]
@@ -483,7 +483,7 @@ def symbol_traces(symbol: str, days: int = 21) -> list[dict]:
         rows = conn.execute(
             "SELECT id, ts, arm, edge, direction, horizon_days, score, adjusted_score,"
             " confidence, verdict, approved, triage_reason, thesis, debate, alpha_net"
-            " FROM picks WHERE symbol = ? AND ts >= datetime('now', ?) ORDER BY id DESC",
+            " FROM picks WHERE symbol = ? AND datetime(ts) >= datetime('now', ?) ORDER BY id DESC",
             (symbol.upper(), f"-{int(days)} days"),
         ).fetchall()
     return [dict(r) for r in rows]
@@ -496,7 +496,7 @@ def symbol_skips(symbol: str, days: int = 21, scan: int = 500) -> list[dict]:
     out: list[dict] = []
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT window_ts, skip_reasons FROM funnel WHERE window_ts >= datetime('now', ?)"
+            "SELECT window_ts, skip_reasons FROM funnel WHERE datetime(window_ts) >= datetime('now', ?)"
             " ORDER BY id DESC LIMIT ?",
             (f"-{int(days)} days", scan),
         ).fetchall()
@@ -517,9 +517,25 @@ def symbol_history(symbol: str, limit: int = 5) -> list[dict]:
         rows = conn.execute(
             "SELECT ts, direction, horizon_days, confidence, alpha_net FROM picks"
             " WHERE symbol = ? AND alpha_net IS NOT NULL ORDER BY id DESC LIMIT ?",
-            (symbol, limit),
+            (symbol.upper(), limit),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def graded_signal_history(limit: int = 500) -> list[dict]:
+    """Recent graded picks across ALL symbols, decoded (debate included), for
+    signal-level hit-rate analysis (api_quant_stats). symbol_history() looks
+    similar but is symbol-scoped (exact WHERE symbol=?, no debate column) — it
+    doesn't have an "all symbols" mode, and calling it with a "*" wildcard
+    silently matched zero rows rather than raising, since SQL doesn't glob a
+    plain '=' comparison."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT direction, alpha_net, debate FROM picks"
+            " WHERE alpha_net IS NOT NULL ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [_decode(dict(r)) for r in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -614,21 +630,21 @@ def source_scorecard(days: int = 30) -> list[dict]:
     with _connect() as conn:
         vol = {r["source"]: dict(r) for r in conn.execute(
             "SELECT source, sum(articles) AS articles, sum(candidates) AS candidates"
-            " FROM ingest_stats WHERE ts >= datetime('now', ?) GROUP BY source", (since,))}
+            " FROM ingest_stats WHERE datetime(ts) >= datetime('now', ?) GROUP BY source", (since,))}
         # ingestion tokens: tagged directly on the call
         ing_tok = {r["source"]: r["tok"] for r in conn.execute(
             "SELECT source, sum(input_tok + output_tok) AS tok FROM token_usage"
-            " WHERE source IS NOT NULL AND ts >= datetime('now', ?) GROUP BY source", (since,))}
+            " WHERE source IS NOT NULL AND datetime(ts) >= datetime('now', ?) GROUP BY source", (since,))}
         # debate tokens: attributed via the pick's decision_id → its source
         deb_tok = {r["source"]: r["tok"] for r in conn.execute(
             "SELECT p.source AS source, sum(t.input_tok + t.output_tok) AS tok"
             " FROM token_usage t JOIN picks p ON t.decision_id = p.decision_id"
-            " WHERE p.source IS NOT NULL AND t.ts >= datetime('now', ?) GROUP BY p.source", (since,))}
+            " WHERE p.source IS NOT NULL AND datetime(t.ts) >= datetime('now', ?) GROUP BY p.source", (since,))}
         val = {r["source"]: dict(r) for r in conn.execute(
             "SELECT source, count(*) AS picks, sum(taken) AS taken,"
             " sum(CASE WHEN alpha_net IS NOT NULL THEN 1 ELSE 0 END) AS graded,"
             " round(avg(alpha_net), 2) AS avg_alpha FROM picks"
-            " WHERE arm='TEAM' AND source IS NOT NULL AND ts >= datetime('now', ?)"
+            " WHERE arm='TEAM' AND source IS NOT NULL AND datetime(ts) >= datetime('now', ?)"
             " GROUP BY source", (since,))}
 
     sources = set(vol) | set(ing_tok) | set(deb_tok) | set(val)
@@ -656,7 +672,7 @@ def token_summary(days: int = 1) -> list[dict]:
         rows = conn.execute(
             "SELECT role, model, count(*) AS calls, sum(input_tok) AS input_tok,"
             " sum(output_tok) AS output_tok FROM token_usage"
-            f" WHERE ts >= datetime('now', '-{int(days)} day') GROUP BY role, model"
+            f" WHERE datetime(ts) >= datetime('now', '-{int(days)} day') GROUP BY role, model"
             " ORDER BY output_tok DESC"
         ).fetchall()
     return [dict(r) for r in rows]
@@ -684,7 +700,7 @@ def get_relationships(from_sym: str, days: int = 7) -> list[dict]:
     with _connect() as conn:
         rows = conn.execute(
             "SELECT to_sym, direction, chain, max(ts) AS ts FROM relationships"
-            " WHERE from_sym = ? AND ts >= datetime('now', ?)"
+            " WHERE from_sym = ? AND datetime(ts) >= datetime('now', ?)"
             " GROUP BY to_sym, direction ORDER BY ts DESC",
             (from_sym.upper(), f"-{int(days)} days"),
         ).fetchall()
@@ -834,7 +850,7 @@ def recent_team_picks(days: int = 30) -> list[dict]:
             " entry_price, broker_fill_price, spy_price, alpha_net, alpha_adj, beta, ret_horizon,"
             " graded_at, exit_ts, exit_reason,"
             " exit_price, exit_return_pct, exit_alpha, mfe_pct, mae_pct, taken"
-            " FROM picks WHERE arm IN ('TEAM','QUANT') AND ts >= datetime('now', ?)"
+            " FROM picks WHERE arm IN ('TEAM','QUANT') AND datetime(ts) >= datetime('now', ?)"
             " ORDER BY symbol, id", (f"-{int(days)} days",),
         ).fetchall()
     return [dict(r) for r in rows]
@@ -849,7 +865,7 @@ def picks_for_path(days: int = 20) -> list[dict]:
             "SELECT id, ts, symbol, direction, horizon_days, session, entry_price, exit_price,"
             " low_liquidity, exit_ts, plan_entry, order_type, mfe_pct FROM picks"
             " WHERE arm IN ('TEAM','QUANT') AND plan_entry IS NOT NULL"
-            "   AND ts >= datetime('now', ?)"
+            "   AND datetime(ts) >= datetime('now', ?)"
             "   AND (mfe_pct IS NULL OR (graded_at IS NULL AND exit_ts IS NULL))",
             (f"-{int(days)} days",),
         ).fetchall()
@@ -996,10 +1012,18 @@ def cached_daily(symbols: list[str], start: str, end: str) -> dict[str, list[dic
 
 
 def save_cached_daily(rows: list[dict]) -> int:
-    """Insert/replace daily OHLC rows into the local cache. Returns rows saved."""
+    """Insert/replace daily OHLC rows into the local cache. Returns rows saved.
+
+    Skips a row with ANY of open/high/low/close missing — INSERT OR REPLACE
+    overwrites the WHOLE row, so a partial row (e.g. a transient yfinance
+    hiccup where Close came back but Open/High/Low didn't) would silently
+    null out a previously-good cached row for that date with no self-
+    correction (nothing re-fills it later)."""
     data = [(r["symbol"].upper(), r["date"], r.get("open"), r.get("high"), r.get("low"),
              r.get("close"), r.get("volume"))
-            for r in rows if r.get("symbol") and r.get("date")]
+            for r in rows if r.get("symbol") and r.get("date")
+            and r.get("open") is not None and r.get("high") is not None
+            and r.get("low") is not None and r.get("close") is not None]
     if not data:
         return 0
     with _lock, _connect() as conn:
@@ -1212,12 +1236,12 @@ def earnings_engagement(symbols: list[str], days_back: int = 6) -> dict[str, dic
     with _connect() as conn:
         picks = conn.execute(
             f"SELECT symbol, id, direction, taken, alpha_net, verdict, thesis, debate, ts"
-            f" FROM picks WHERE arm IN ('TEAM','QUANT') AND symbol IN ({ph}) AND ts >= datetime('now', ?)"
+            f" FROM picks WHERE arm IN ('TEAM','QUANT') AND symbol IN ({ph}) AND datetime(ts) >= datetime('now', ?)"
             " ORDER BY ts DESC", (*syms, f"-{int(days_back)} days"),
         ).fetchall()
         skips = conn.execute(
             f"SELECT symbol, reason, ts FROM skips WHERE symbol IN ({ph})"
-            " AND ts >= datetime('now', ?) ORDER BY ts DESC",
+            " AND datetime(ts) >= datetime('now', ?) ORDER BY ts DESC",
             (*syms, f"-{int(days_back)} days"),
         ).fetchall()
     out: dict[str, dict] = {}
@@ -1365,7 +1389,7 @@ def performance_rows(days: int = 30) -> list[dict]:
             " plan_entry, plan_target, plan_stop, entry_price, exit_price,"
             " score, adjusted_score, thesis, debate"
             " FROM picks WHERE exit_ts IS NOT NULL AND exit_return_pct IS NOT NULL"
-            "   AND ts >= datetime('now', ?) ORDER BY exit_ts",
+            "   AND datetime(ts) >= datetime('now', ?) ORDER BY exit_ts",
             (f"-{int(days)} days",)).fetchall()
     return [_decode(dict(r)) for r in rows]
 

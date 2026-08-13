@@ -10,6 +10,7 @@ Plus one movers() call per scout window — a fact ranking, not a filter.
 """
 
 import logging
+import math
 import threading
 import time
 from typing import Any, Optional
@@ -89,6 +90,14 @@ def get_context(symbol: str) -> Optional[dict]:
         vols = df["Volume"].astype(float)
         daily_last = float(closes.iloc[-1])
         daily_prev = float(closes.iloc[-2])
+        # yfinance can hand back a NaN Close (a halted stock, a data-feed gap
+        # right around an earnings print — exactly this engine's population).
+        # bool(nan) is True in Python, so downstream `if x else ...` guards do
+        # NOT catch it — it silently passes through as a "valid" price unless
+        # caught here. No live/daily price to anchor on means no reliable
+        # context at all, so bail the same way the len(df) < 5 check above does.
+        if not (math.isfinite(daily_last) and math.isfinite(daily_prev)):
+            return None
         latest_is_today = df.index[-1].date() == now_et().date() and len(closes) > 1
         # Prefer a REAL-TIME last trade over yfinance's latest daily close (which
         # is stale/pre-gap the morning after earnings). When live is available,
@@ -96,13 +105,17 @@ def get_context(symbol: str) -> Optional[dict]:
         # so change_today is the true move, not 0%. No live price → old behaviour.
         rt = _live_last_trade(sym)
         rt_price, rt_ts = (rt[0], rt[1]) if rt else (None, None)
-        if rt_price:
+        if rt_price and math.isfinite(rt_price):
             last = rt_price
             prev = daily_prev if latest_is_today else daily_last
         else:
             last = daily_last
             prev = daily_prev
         avg_dollar_vol = float((closes * vols).tail(20).mean())
+        if not math.isfinite(avg_dollar_vol):
+            avg_dollar_vol = 0.0   # unmeasurable — treat as illiquid (fail closed
+                                   # on the low_liquidity gate below), not as "0
+                                   # is fine, let it through" via a stray NaN.
         # Relative volume: the last COMPLETED session's volume vs its own recent
         # norm — a confirmation/participation fact (is the news being acted on, or
         # ignored?). We skip an in-progress bar: intraday, yfinance's latest daily
@@ -115,7 +128,9 @@ def get_context(symbol: str) -> Optional[dict]:
             ref = n - 2   # current bar is live/partial — use the last closed session
         base_vols = vols.iloc[max(0, ref - 20):ref]
         base_vol = float(base_vols.mean()) if len(base_vols) else 0.0
-        rvol = round(float(vols.iloc[ref]) / base_vol, 2) if base_vol else None
+        ref_vol = float(vols.iloc[ref])
+        rvol = (round(ref_vol / base_vol, 2)
+                if base_vol and math.isfinite(base_vol) and math.isfinite(ref_vol) else None)
         # ATR (14-day): the stock's typical daily range as % of price. Used by
         # quant signals to judge whether a move is routine or extraordinary, and
         # by the watcher for volatility-scaled stop distances.
@@ -129,17 +144,26 @@ def get_context(symbol: str) -> Optional[dict]:
             tr3 = (lo - prev_c).abs()
             true_range = tr1.combine(tr2, max).combine(tr3, max)
             atr_val = float(true_range.tail(14).mean())
-            atr_pct = round(atr_val / last * 100, 2) if atr_val and last else None
+            # atr_val and last alone don't catch NaN — bool(nan) is True in Python.
+            atr_pct = (round(atr_val / last * 100, 2)
+                       if atr_val and last and math.isfinite(atr_val) else None)
         except Exception:
             pass
+
+        def _pct_change(ref_idx: int) -> float:
+            if len(closes) <= abs(ref_idx):
+                return 0.0
+            ref_close = float(closes.iloc[ref_idx])
+            if not (math.isfinite(ref_close) and ref_close):
+                return 0.0
+            return round((last - ref_close) / ref_close * 100, 2)
+
         ctx = {
             "symbol": sym,
             "last_price": round(last, 4),
             "change_today_pct": round((last - prev) / prev * 100, 2) if prev else 0.0,
-            "change_5d_pct": round((last - float(closes.iloc[-6])) / float(closes.iloc[-6]) * 100, 2)
-            if len(closes) > 6 else 0.0,
-            "change_20d_pct": round((last - float(closes.iloc[-21])) / float(closes.iloc[-21]) * 100, 2)
-            if len(closes) > 21 else 0.0,
+            "change_5d_pct": _pct_change(-6),
+            "change_20d_pct": _pct_change(-21),
             "high_90d": round(float(closes.max()), 2),
             "low_90d": round(float(closes.min()), 2),
             "avg_dollar_vol": round(avg_dollar_vol),
@@ -229,8 +253,6 @@ def get_options_context(symbol: str) -> Optional[dict]:
       • expected_move_{1,5,10}d_pct — ATM IV projected over standard trading-day
         windows (sqrt-time), so the desk can match it to the pick's horizon.
     """
-    import math
-
     sym = symbol.upper()
     with _cache_lock:
         hit = _opt_cache.get(sym)

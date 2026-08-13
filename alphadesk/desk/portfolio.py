@@ -19,6 +19,16 @@ log = logging.getLogger("alphadesk.portfolio")
 _client = None
 _client_lock = threading.Lock()
 
+# _position_watch_loop (60s) and _quantity_watch_loop (5s) in main.py both poll
+# independently and can both decide to close the same pick within their
+# respective windows. store.record_exit is idempotent at the ledger level, but
+# _place_close (below) submits a broker order BEFORE that guard is ever
+# checked — an unguarded race where both loops could each submit a closing
+# order for the same broker position. This lock+set makes close_and_exit
+# itself idempotent, not just the ledger write.
+_closing_lock = threading.Lock()
+_closing_ids: set[int] = set()
+
 
 def _trading_client():
     global _client
@@ -39,15 +49,29 @@ def _fractional_qty(price: float) -> float:
     return round(TRADE_NOTIONAL_USD / price, 4) if price > 0 else 0.0
 
 
+def _short_qty(price: float) -> int:
+    """Whole-share sizing for opening a SHORT. Alpaca doesn't support fractional
+    or notional sizing for short sales (only buy-to-open / sell-to-close are
+    notional-eligible) — a notional SELL-to-open is rejected by the API. This
+    approximates the same ~TRADE_NOTIONAL_USD target, rounded to the nearest
+    whole share (minimum 1), so short position size is less precise than long
+    (inherent to the broker's constraint, not a choice)."""
+    from alphadesk.config import TRADE_NOTIONAL_USD
+    return max(1, round(TRADE_NOTIONAL_USD / price)) if price > 0 else 1
+
+
 def route_pick(pick_id: int, symbol: str, direction: str, price: float,
                conviction: float, session: str) -> bool | None:
     """Place the order on Alpaca paper and stamp broker_order_id/status/qty.
 
-    $10 fractional notional per trade (TRADE_NOTIONAL_USD), fractional market
-    order. Entries are OPEN-only (see desk/stream.py's session gate), so this
-    only ever places a regular-hours market order — no extended-hours limit
-    path. Returns True if routed, or False on an actual failure (bad price,
-    API error — the caller should NOT take the pick). Never raises."""
+    $10 fractional notional per trade (TRADE_NOTIONAL_USD) for LONG (fractional
+    market order); whole-share qty for SHORT (see _short_qty — Alpaca doesn't
+    support notional/fractional sizing for opening a short, a notional SELL is
+    rejected by the API). Entries are OPEN-only (see desk/stream.py's session
+    gate), so this only ever places a regular-hours market order — no
+    extended-hours limit path. Returns True if routed, or False on an actual
+    failure (bad price, API error — the caller should NOT take the pick).
+    Never raises."""
     try:
         from alpaca.trading.enums import OrderSide, TimeInForce
         from alpaca.trading.requests import MarketOrderRequest
@@ -59,14 +83,19 @@ def route_pick(pick_id: int, symbol: str, direction: str, price: float,
             return False
         side = OrderSide.BUY if direction == "LONG" else OrderSide.SELL
         client = _trading_client()
-        req = MarketOrderRequest(symbol=symbol, notional=round(TRADE_NOTIONAL_USD, 2),
-                                 side=side, time_in_force=TimeInForce.DAY)
+        if direction == "LONG":
+            req = MarketOrderRequest(symbol=symbol, notional=round(TRADE_NOTIONAL_USD, 2),
+                                     side=side, time_in_force=TimeInForce.DAY)
+            qty = _fractional_qty(price)
+        else:
+            qty = _short_qty(price)
+            req = MarketOrderRequest(symbol=symbol, qty=qty, side=side,
+                                     time_in_force=TimeInForce.DAY)
         order = client.submit_order(req)
         order_id = str(getattr(order, "id", ""))
-        store.set_broker_order(pick_id, order_id, getattr(order, "status", ""),
-                               _fractional_qty(price))
-        log.info("Routed #%d %s %s $%.2f (%.4f sh) → order %s", pick_id, symbol,
-                 direction, TRADE_NOTIONAL_USD, _fractional_qty(price), order_id)
+        store.set_broker_order(pick_id, order_id, getattr(order, "status", ""), qty)
+        log.info("Routed #%d %s %s $%.2f (%s sh) → order %s", pick_id, symbol,
+                 direction, TRADE_NOTIONAL_USD, qty, order_id)
         return True
     except Exception as exc:
         log.warning("route_pick %d %s failed: %s", pick_id, symbol, exc)
@@ -80,15 +109,20 @@ def _place_close(pick: dict, price: float) -> float | None:
     fractional share count $ actually buys, which never exactly matches the
     pre-fill estimate, so selling the estimate gets rejected with "insufficient
     qty available" every time). Market in regular hours, extended-hours limit at
-    the current price otherwise. Polls briefly for a market fill; returns the
-    actual fill price, or None if not filled in time (the ledger then uses the
-    planned exit price and the DAY limit may still fill later). Best-effort."""
+    the current price otherwise — UNLIKE route_pick (entries), closing is not
+    gated on PM_EXTENDED_HOURS: entries can wait for the next open, but a
+    position we already hold needs to close regardless of session, or it's
+    orphaned at the broker while the caller (close_and_exit) marks the ledger
+    exited anyway (2026-08-13 incident: this used to return None outside OPEN
+    with extended hours off, and the ledger still recorded the exit). Polls
+    briefly for a market fill; returns the actual fill price, or None if not
+    filled in time (the ledger then uses the planned exit price and the DAY
+    limit may still fill later). Best-effort."""
     import time
 
     from alpaca.trading.enums import OrderSide, TimeInForce
     from alpaca.trading.requests import LimitOrderRequest, MarketOrderRequest
 
-    from alphadesk.config import PM_EXTENDED_HOURS
     from alphadesk.config import session as market_session
 
     try:
@@ -104,12 +138,10 @@ def _place_close(pick: dict, price: float) -> float | None:
         if market_session() == "OPEN":
             req = MarketOrderRequest(symbol=pick["symbol"], qty=qty, side=side,
                                      time_in_force=TimeInForce.DAY)
-        elif PM_EXTENDED_HOURS:
+        else:
             req = LimitOrderRequest(symbol=pick["symbol"], qty=qty, side=side,
                                     limit_price=round(price, 2),
                                     time_in_force=TimeInForce.DAY, extended_hours=True)
-        else:
-            return None
         order = client.submit_order(req)
         order_id = str(getattr(order, "id", ""))
         log.info("Close order %s for #%d %s qty=%s → %s", order_id, pick["id"],
@@ -132,23 +164,35 @@ def _place_close(pick: dict, price: float) -> float | None:
 def close_and_exit(pick: dict, reason: str, exit_px: float, spy_now: float | None) -> bool:
     """CLOSE a routed position on the broker (real paper fill at the actual price),
     then record the exit in the ledger with that fill. For non-routed (Model-A)
-    picks this is just a normal ledger exit. Idempotent (record_exit guards it)."""
-    from alphadesk.config import PAPER_TRADING
-    from alphadesk.desk.plan import realized_exit
-    from alphadesk.ledger import store
+    picks this is just a normal ledger exit. Idempotent (record_exit guards it,
+    AND this function guards itself against the two position watchers racing to
+    close the same pick concurrently — see _closing_ids)."""
+    pick_id = pick["id"]
+    with _closing_lock:
+        if pick_id in _closing_ids:
+            log.info("close_and_exit #%d %s — already closing, skipping", pick_id, pick["symbol"])
+            return False
+        _closing_ids.add(pick_id)
+    try:
+        from alphadesk.config import PAPER_TRADING
+        from alphadesk.desk.plan import realized_exit
+        from alphadesk.ledger import store
 
-    if PAPER_TRADING and pick.get("broker_order_id"):
-        filled = _place_close(pick, exit_px)
-        exit_px = filled if filled else exit_px
-    # broker_fill_price is the price actually paid — prefer it over entry_price
-    # (a pre-fill decision-time quote that can differ sharply from the real fill
-    # on a thin/low-liquidity name) so realized P&L reflects the real trade.
-    entry = (pick.get("broker_fill_price") or pick.get("entry_price")
-             or pick.get("plan_entry"))
-    perf = realized_exit(pick["direction"], entry, exit_px,
-                         pick.get("spy_price"), spy_now,
-                         bool(pick.get("low_liquidity")))
-    return store.record_exit(pick["id"], reason, **perf)
+        if PAPER_TRADING and pick.get("broker_order_id"):
+            filled = _place_close(pick, exit_px)
+            exit_px = filled if filled else exit_px
+        # broker_fill_price is the price actually paid — prefer it over entry_price
+        # (a pre-fill decision-time quote that can differ sharply from the real fill
+        # on a thin/low-liquidity name) so realized P&L reflects the real trade.
+        entry = (pick.get("broker_fill_price") or pick.get("entry_price")
+                 or pick.get("plan_entry"))
+        perf = realized_exit(pick["direction"], entry, exit_px,
+                             pick.get("spy_price"), spy_now,
+                             bool(pick.get("low_liquidity")))
+        return store.record_exit(pick_id, reason, **perf)
+    finally:
+        with _closing_lock:
+            _closing_ids.discard(pick_id)
 
 
 def reconcile_all() -> int:

@@ -104,7 +104,16 @@ async def start_stream(symbols: list[str] | None = None):
                 log.warning("Alpaca stream disconnected: %s — reconnecting in 5s", exc)
                 await asyncio.sleep(5)
 
-    return asyncio.create_task(_run())
+    task = asyncio.create_task(_run())
+    # asyncio only holds a WEAK reference to a bare Task — with nothing else
+    # keeping it alive (the caller in main.py awaits start_stream() but never
+    # captures the returned task), it's eligible for silent garbage collection
+    # mid-run per asyncio's documented behavior. _tasks was declared for
+    # exactly this and never actually used. A GC'd stream dies with no
+    # exception, no log, and no reconnect — prices just freeze.
+    _tasks.append(task)
+    task.add_done_callback(lambda t: _tasks.remove(t) if t in _tasks else None)
+    return task
 
 
 async def stop_stream():
@@ -127,6 +136,11 @@ def register(symbol: str):
     if _ws_client and _connected.is_set():
         try:
             _ws_client.subscribe_trades(_on_trade, sym)
+            _ws_client.subscribe_quotes(_on_quote, sym)   # else get_spread() stays
+                                                            # None forever for this
+                                                            # symbol — only the
+                                                            # initial start_stream()
+                                                            # list gets quotes
         except Exception:
             pass
 

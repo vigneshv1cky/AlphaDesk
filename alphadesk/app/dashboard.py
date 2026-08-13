@@ -94,7 +94,13 @@ def api_performance(days: int = 30):
     alpha_cum = 0.0
     for r in rows:
         cum += r.get("exit_return_pct") or 0
-        alpha_cum += r.get("exit_alpha") or r.get("alpha_net") or 0
+        # `or` treats a legitimate 0.0 exit_alpha (exactly matched SPY) as falsy
+        # and wrongly falls through to alpha_net (a different value) — explicit
+        # None checks instead, matching the frontend's own `t.exit_alpha ??
+        # t.alpha_net` (PerformancePage.tsx), which was already correct.
+        ea = r.get("exit_alpha")
+        an = r.get("alpha_net")
+        alpha_cum += ea if ea is not None else (an if an is not None else 0)
         curve.append({"ts": r["exit_ts"], "symbol": r["symbol"],
                       "cum": round(cum, 3), "alpha": round(alpha_cum, 3)})
 
@@ -177,7 +183,7 @@ def api_quant_stats():
     from alphadesk.quant import calibrate as qc
     weights = qc.load_weights()
     picks = store.live_picks() or []  # reuse live_picks for open positions
-    graded = store.symbol_history("*") or []
+    graded = store.graded_signal_history() or []
 
     # Signal-level hit rates from graded picks
     signal_hits: dict[str, dict] = {}
@@ -589,6 +595,13 @@ async def api_find_trades(request: Request, hours: float = 24.0, max_picks: int 
     import json as _json
     from fastapi.responses import StreamingResponse
     from alphadesk.desk.stream import stream_find_trades
+
+    # Runaway guard: this endpoint is unauthenticated (see module docstring) and
+    # books real picks (and, with PAPER_TRADING on, routes real broker orders)
+    # — _within_daily_cap() was defined for exactly this but was never actually
+    # called, so the cap it describes didn't exist in practice.
+    if not _within_daily_cap():
+        raise HTTPException(status_code=429, detail="Find Trades daily run cap reached")
 
     hours = max(1.0, min(float(hours), 168.0))
     max_picks = max(1, min(int(max_picks), 12))
