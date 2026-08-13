@@ -294,8 +294,8 @@ function ReportedRow({ e }: { e: EarningsRow }) {
 // whole block — with a dozen-plus run-days on the calendar, having every one
 // fully expanded meant scrolling past every earlier day just to reach a later
 // one. Only the nearest day is open by default; the rest are one click away.
-// Once a day is open, it still shows the biggest 8 first, with the rest via
-// the "+N more / show less" toggle.
+// Once a day is open, it shows every name in it — "show less" at the bottom
+// re-collapses the day without scrolling back up to the header.
 function RunGroup({
   g,
   defaultOpen = false,
@@ -306,15 +306,9 @@ function RunGroup({
   forceExpanded?: boolean
 }) {
   const [open, setOpen] = useState(defaultOpen || !!forceExpanded)
-  const [expanded, setExpanded] = useState(!!forceExpanded)
   useEffect(() => {
-    if (forceExpanded) {
-      setOpen(true)
-      setExpanded(true)
-    }
+    if (forceExpanded) setOpen(true)
   }, [forceExpanded])
-  const shown = expanded ? g.rows : g.rows.slice(0, 8)
-  const more = g.rows.length - 8
   return (
     <div>
       <Button
@@ -335,7 +329,7 @@ function RunGroup({
       {open && (
         <>
           <div className="divide-y divide-border">
-            {shown.map((e) => (
+            {g.rows.map((e) => (
               <div key={e.symbol + e.report_date} className="flex items-center gap-2 py-1.5 text-sm">
                 <span className="w-14 font-semibold">{e.symbol}</span>
                 <span className="w-14 text-xs text-muted-foreground">{fmtCap(e.market_cap)}</span>
@@ -345,49 +339,25 @@ function RunGroup({
               </div>
             ))}
           </div>
-          {more > 0 && (
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={() => setExpanded((v) => !v)}
-              className="mt-1 font-medium"
-            >
-              {expanded ? "− show less" : `+${more} more`}
-            </Button>
-          )}
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={() => setOpen(false)}
+            className="mt-1 font-medium"
+          >
+            − show less
+          </Button>
         </>
       )}
     </div>
   )
 }
 
-function ReportedDayGroup({ g, forceExpanded }: { g: DayGroup; forceExpanded?: boolean }) {
-  const [showAll, setShowAll] = useState(!!forceExpanded)
-  useEffect(() => {
-    if (forceExpanded) setShowAll(true)
-  }, [forceExpanded])
-  const shown = showAll ? g.rows : g.rows.slice(0, 50)
-  const more = g.rows.length - 50
-  return (
-    <>
-      {shown.map((e) => (
-        <ReportedRow key={e.symbol + e.report_date} e={e} />
-      ))}
-      {more > 0 && (
-        <div className="py-2 text-center">
-          <Button variant="ghost" size="sm" onClick={() => setShowAll(!showAll)} className="text-xs">
-            {showAll ? "Show less" : `Show all (${more} more)`}
-          </Button>
-        </div>
-      )}
-    </>
-  )
-}
-
 // One reported day-block — same collapsible-day-header treatment as RunGroup
 // in "Reporting soon". "Just reported" is almost always a single day in
 // practice, but this keeps the interaction consistent and ready if that
-// window ever widens. Only the nearest day is open by default.
+// window ever widens. Once open, shows every name — "show less" at the
+// bottom re-collapses the day without scrolling back up to the header.
 function ReportedDayBlock({
   g,
   defaultOpen = false,
@@ -419,9 +389,18 @@ function ReportedDayBlock({
         />
       </Button>
       {open && (
-        <div className="divide-y divide-border">
-          <ReportedDayGroup g={g} forceExpanded={forceExpanded} />
-        </div>
+        <>
+          <div className="divide-y divide-border">
+            {g.rows.map((e) => (
+              <ReportedRow key={e.symbol + e.report_date} e={e} />
+            ))}
+          </div>
+          <div className="py-2 text-center">
+            <Button variant="ghost" size="sm" onClick={() => setOpen(false)} className="text-xs">
+              − show less
+            </Button>
+          </div>
+        </>
       )}
     </div>
   )
