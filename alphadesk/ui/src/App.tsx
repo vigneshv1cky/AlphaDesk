@@ -20,9 +20,7 @@ const PerformancePage = lazy(() => import("@/pages/PerformancePage"))
 const TITLES: Record<string, string> = {
   "/live": "Live Positions · AlphaDesk",
   "/history": "History · AlphaDesk",
-  "/pre": "Pre-Market · AlphaDesk",
   "/open": "Open Market · AlphaDesk",
-  "/after": "After Hours · AlphaDesk",
   "/earnings": "Earnings · AlphaDesk",
   "/system": "System Health · AlphaDesk",
   "/performance": "Performance · AlphaDesk",
@@ -110,9 +108,7 @@ function Shell() {
               <Route path="/" element={<Navigate to="/live" replace />} />
               <Route path="/live" element={<LivePage rows={liveRows} market={market} loading={!liveLoaded} />} />
               <Route path="/history" element={<HistoryPage symbols={symbols} stats={stats} loading={!historyLoaded} />} />
-              <Route path="/pre" element={<MarketPage session="PRE" liveRows={liveRows} symbols={symbols} loading={!historyLoaded} />} />
               <Route path="/open" element={<MarketPage session="OPEN" liveRows={liveRows} symbols={symbols} loading={!historyLoaded} />} />
-              <Route path="/after" element={<MarketPage session="AFTER" liveRows={liveRows} symbols={symbols} loading={!historyLoaded} />} />
               <Route path="/earnings" element={<EarningsPage earnings={earnings} />} />
               <Route path="/system" element={<SystemPage />} />
               <Route path="/performance" element={<PerformancePage />} />

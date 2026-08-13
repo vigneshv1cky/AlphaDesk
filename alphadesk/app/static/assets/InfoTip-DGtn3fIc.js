@@ -1,0 +1,1 @@
+import{u as e}from"./badge-BTFROv66.js";import{a as t,o as n,s as r}from"./index-8a_fTk86.js";var i=e();function a({tip:e,children:a,className:o}){return(0,i.jsxs)(t,{children:[(0,i.jsx)(r,{render:(0,i.jsx)(`span`,{className:o}),children:a}),(0,i.jsx)(n,{children:e})]})}export{a as t};

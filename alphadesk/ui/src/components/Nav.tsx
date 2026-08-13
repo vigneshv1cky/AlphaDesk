@@ -3,9 +3,7 @@ import { NavLink } from "react-router-dom"
 const LINKS = [
   { to: "/live", label: "Live" },
   { to: "/history", label: "History" },
-  { to: "/pre", label: "Pre-Market" },
   { to: "/open", label: "Open" },
-  { to: "/after", label: "After" },
   { to: "/earnings", label: "Earnings" },
   { to: "/performance", label: "Performance" },
   { to: "/system", label: "Health" },
