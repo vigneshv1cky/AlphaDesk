@@ -763,15 +763,20 @@ def mark_taken(pick_ids: list[int]) -> None:
 
 
 def open_taken_picks() -> list[dict]:
-    """TAKE picks still within their horizon, not exited, not yet graded — the
-    open positions a fresh run should re-evaluate ('are you still in this trade?')."""
+    """TAKEN picks still within their horizon, not exited — the open positions a
+    fresh run should re-evaluate ('are you still in this trade?') and check
+    against for anti-double-dip. exit_ts alone determines "still open", not
+    graded_at too — see live_picks()'s docstring for why requiring both let a
+    still-open, never-exited position (the forward grader raced ahead of its
+    actual close) become invisible here too, meaning a second position in the
+    same symbol could get booked while the first was still genuinely open."""
     with _connect() as conn:
         rows = conn.execute(
             "SELECT id, ts, symbol, direction, horizon_days, adjusted_score, confidence,"
             " edge, thesis, session, entry_price, spy_price, plan_entry, plan_target, plan_stop,"
             " triage_reason, low_liquidity, mfe_pct, broker_order_id, broker_status,"
             " hedge_of, arm FROM picks"
-            " WHERE taken=1 AND exit_ts IS NULL AND graded_at IS NULL"
+            " WHERE taken=1 AND exit_ts IS NULL"
             "   AND datetime(ts, '+' || (horizon_days + 3) || ' days') >= datetime('now')"
             " ORDER BY id DESC",
         ).fetchall()
@@ -866,7 +871,7 @@ def picks_for_path(days: int = 20) -> list[dict]:
             " low_liquidity, exit_ts, plan_entry, order_type, mfe_pct FROM picks"
             " WHERE arm IN ('TEAM','QUANT') AND plan_entry IS NOT NULL"
             "   AND datetime(ts) >= datetime('now', ?)"
-            "   AND (mfe_pct IS NULL OR (graded_at IS NULL AND exit_ts IS NULL))",
+            "   AND (mfe_pct IS NULL OR exit_ts IS NULL)",
             (f"-{int(days)} days",),
         ).fetchall()
     return [dict(r) for r in rows]
@@ -874,9 +879,21 @@ def picks_for_path(days: int = 20) -> list[dict]:
 
 def live_picks() -> list[dict]:
     """Open TAKEN picks carrying a trade plan, still inside their horizon window
-    (not graded, not exited) — the set to track live against the current price.
-    taken=0 picks (counterfactuals the Head passed on or the concentration cap held
-    back) are excluded — they are not real positions and can't be live-monitored."""
+    (not exited) — the set to track live against the current price. taken=0 picks
+    (counterfactuals the Head passed on or the concentration cap held back) are
+    excluded — they are not real positions and can't be live-monitored.
+
+    exit_ts IS NULL alone determines "still open" — NOT graded_at too. The forward
+    grader (due_for_grading) grades ANY pick with graded_at IS NULL once its
+    horizon elapses, regardless of exit state, because it's meant to score
+    positions that for whatever reason never got a proper exit. But if that races
+    ahead of a session-scoped position's actual close (e.g. the session-close
+    sweep missed it for a cycle — a thin/illiquid name with no quote that
+    moment), excluding graded_at-set rows here made it invisible to every exit
+    mechanism forever: not exited, not monitorable, a permanent ledger ghost
+    (2026-08-05 incident: 21 AFTER positions stuck this way for 8 days). Once
+    actually exited, record_exit's COALESCE(alpha_net, ...) preserves whatever
+    the forward grader already computed rather than overwriting it."""
     with _connect() as conn:
         rows = conn.execute(
             "SELECT id, ts, symbol, direction, horizon_days, session, edge, verdict,"
@@ -887,7 +904,7 @@ def live_picks() -> list[dict]:
             " FROM picks"
              " WHERE arm IN ('TEAM','QUANT','HEDGE') AND plan_entry IS NOT NULL"
             "   AND taken = 1"
-            "   AND graded_at IS NULL AND exit_ts IS NULL"
+            "   AND exit_ts IS NULL"
             "   AND datetime(ts, '+' || (horizon_days + 2) || ' days') >= datetime('now')"
             " ORDER BY approved DESC, id DESC",
         ).fetchall()
@@ -947,11 +964,14 @@ def record_exit(pick_id: int, reason: str, exit_price: float | None = None,
 
 
 def open_position_count() -> int:
-    """Live open TAKEN positions (not exited, not graded, within window)."""
+    """Live open TAKEN positions (not exited, within window) — feeds the
+    MAX_OPEN_POSITIONS risk rail. exit_ts alone, not graded_at too — see
+    live_picks()'s docstring; a graded-but-unexited ghost position must still
+    count against the cap, real exposure doesn't stop existing just because a
+    horizon-based grade got computed on it."""
     with _connect() as conn:
         return int(conn.execute(
             "SELECT count(*) FROM picks WHERE taken=1 AND exit_ts IS NULL"
-            " AND graded_at IS NULL"
             " AND datetime(ts, '+' || (horizon_days + 2) || ' days') >= datetime('now')"
         ).fetchone()[0])
 
