@@ -1257,13 +1257,28 @@ def earnings_window(days_back: int = 4, days_fwd: int = 14) -> list[dict]:
 
 
 def upcoming_earnings(days: int = 7) -> list[dict]:
-    """Companies REPORTING in the next `days` — the 'be ready' watch."""
+    """Companies REPORTING in the next `days` — the 'be ready' watch.
+
+    Excludes a symbol that has ANOTHER row (any report_date) with eps_actual
+    already filled in from the last few days. (symbol, report_date) is the
+    upsert key (see upsert_earnings) — if Nasdaq corrects or re-pulls a
+    report date, the old row doesn't get replaced, it just sits there
+    alongside the new one. A symbol that already reported can still have a
+    stale sibling row with eps_actual NULL, which would otherwise read as
+    'reporting soon' and feed the PRE_EARNINGS momentum path for a print
+    that's already happened (2026-08-13: INFQ, reported 08-12, still picked
+    up here off a stale 08-13 row)."""
     with _connect() as conn:
         rows = conn.execute(
             "SELECT symbol, report_date, session, eps_estimate, market_cap,"
-            " pre_report_close, implied_move_pct, low_liquidity FROM earnings"
+            " pre_report_close, implied_move_pct, low_liquidity FROM earnings e1"
             " WHERE eps_actual IS NULL AND report_date >= ?"
-            "   AND report_date <= ? ORDER BY report_date", (_et_date(0), _et_date(int(days))),
+            "   AND report_date <= ?"
+            "   AND NOT EXISTS ("
+            "     SELECT 1 FROM earnings e2 WHERE e2.symbol = e1.symbol"
+            "       AND e2.eps_actual IS NOT NULL AND e2.report_date >= ?)"
+            " ORDER BY report_date",
+            (_et_date(0), _et_date(int(days)), _et_date(-3)),
         ).fetchall()
     return [dict(r) for r in rows]
 
