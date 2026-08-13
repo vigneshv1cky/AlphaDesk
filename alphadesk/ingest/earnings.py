@@ -267,6 +267,7 @@ def drift_candidates(days: int) -> dict[str, list[dict]]:
                 "published_at": p["report_date"],
                 "category": "PRE_EARNINGS", "tickers": [esym],
                 "reaction_pct": round(chg, 2),
+                "low_liquidity": bool(p.get("low_liquidity")),   # pre-armed by arm_liquidity()
                 "mentions": [{"symbol": esym, "sentiment": sent,
                               "label": "positive" if sent > 0 else "negative",
                               "category": "PRE_EARNINGS"}],
@@ -332,6 +333,7 @@ def drift_candidates(days: int) -> dict[str, list[dict]]:
             "reaction_pct": round(total, 2),   # the raw reaction size — the scout-window rank signal
             "implied_move_pct": e.get("implied_move_pct"),   # pre-armed, exact baseline (1d options move)
             "pre_report_close": e.get("pre_report_close"),   # pre-armed close the reaction is measured from
+            "low_liquidity": bool(e.get("low_liquidity")),   # pre-armed by arm_liquidity()
             "mentions": [{"symbol": esym, "sentiment": sent,
                           "label": ("positive" if sent > 0 else "negative" if sent < 0 else "neutral"),
                           "category": "EARNINGS"}],

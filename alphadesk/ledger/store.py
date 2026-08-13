@@ -1187,7 +1187,7 @@ def recently_reported(days: int = 3) -> list[dict]:
     with _connect() as conn:
         rows = conn.execute(
             "SELECT symbol, report_date, session, eps_estimate, eps_actual, surprise_pct,"
-            " market_cap, pre_report_close, implied_move_pct"
+            " market_cap, pre_report_close, implied_move_pct, low_liquidity"
             " FROM earnings WHERE report_date >= ? AND report_date <= ?"
             # PRIORITY into the scout's capped window: freshest day first, then BIGGEST
             # by market cap. On a heavy day (~200 reporters) the scout only sees the top
@@ -1261,7 +1261,7 @@ def upcoming_earnings(days: int = 7) -> list[dict]:
     with _connect() as conn:
         rows = conn.execute(
             "SELECT symbol, report_date, session, eps_estimate, market_cap,"
-            " pre_report_close, implied_move_pct FROM earnings"
+            " pre_report_close, implied_move_pct, low_liquidity FROM earnings"
             " WHERE eps_actual IS NULL AND report_date >= ?"
             "   AND report_date <= ? ORDER BY report_date", (_et_date(0), _et_date(int(days))),
         ).fetchall()

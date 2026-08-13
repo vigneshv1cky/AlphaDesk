@@ -88,6 +88,14 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
     log.info("Earnings drift: %d candidates with material reaction", len(candidates))
     yield _ev("status", msg=f"Earnings drift: {len(candidates)} candidates with material reaction")
 
+    # Reasons for candidates dropped before ever reaching the board. gate_reasons
+    # holds the informative near-misses (failed a real gate); drop_reasons holds
+    # routine bulk noise (reaction-cap, pre-filter, not-in-top-N) that can run into
+    # the hundreds on a busy morning. record_skips() only persists the first `cap`
+    # rows it's given, so gate_reasons goes first — see the final record_skips call.
+    drop_reasons: list[dict] = []
+    gate_reasons: list[dict] = []
+
     # Anti-double-dip: skip symbols with an already-open position (one position
     # per symbol at a time). No cooldown beyond that — the quant score is
     # recomputed fresh each run, so the same symbol can trade again the same day
@@ -99,6 +107,22 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
             candidates.pop(s, None)
     log.info("After anti-double-dip: %d candidates remain (%d held)",
              len(candidates), len(held))
+
+    # Liquidity pre-filter: don't spend a scoring fetch or a top-N slot on a name
+    # already known illiquid. earnings.arm_liquidity() pre-computes this every 6h
+    # from the same 20d-avg-$vol bar the final booking gate enforces (see the
+    # low_liquidity check below), so this is a free lookup on data already on the
+    # candidate, not a live fetch. Without this, illiquid names can occupy every
+    # top-N slot for an entire session with no backfill (2026-08-13 PRE blackout:
+    # 6 illiquid SHORTs held all 6 slots, every run, for 5 hours straight).
+    # low_liquidity is None (not yet armed) for a name that hasn't gone through the
+    # 6h arm loop — fail-open there rather than dropping on missing data.
+    illiquid = [sym for sym, arts in candidates.items() if arts and arts[0].get("low_liquidity")]
+    for sym in illiquid:
+        candidates.pop(sym, None)
+        gate_reasons.append({"symbol": sym, "reason": "low liquidity — pre-filtered before scoring"})
+    if illiquid:
+        log.info("Liquidity pre-filter: dropped %d illiquid candidate(s) before scoring", len(illiquid))
 
     if not candidates:
         await loop.run_in_executor(None, store.add_run, "FIND_TRADES", [])
@@ -122,16 +146,6 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
     from alphadesk.quant import signals as qs
     from alphadesk.quant import calibrate as qc
     weights = qc.load_weights()
-
-    drop_reasons: list[dict] = []
-    # Reasons for candidates that made the scored top-N but still failed a gate
-    # (no live trade, illiquid, not shortable, concentration cap) — kept separate
-    # from drop_reasons because record_skips() only persists the first `cap` rows
-    # it's given, and drop_reasons is dominated by routine bulk noise (reaction-cap,
-    # pre-filter, not-in-top-N can easily be hundreds of rows on a busy morning).
-    # Without this split, that noise fills the cap before any gate reason for the
-    # candidates that actually mattered ever gets recorded.
-    gate_reasons: list[dict] = []
 
     ranked_candidates = sorted(candidates.items(), key=lambda kv: -abs(
         next((a.get("reaction_pct", 0) for a in kv[1] if a.get("reaction_pct")), 0)),
