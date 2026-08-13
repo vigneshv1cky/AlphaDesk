@@ -91,6 +91,13 @@ AUTORUN_INTERVAL_MINUTES = float(os.environ.get("AUTORUN_INTERVAL_MINUTES", "15"
 AUTORUN_START_ET = os.environ.get("AUTORUN_START_ET", "09:35").strip()
 AUTORUN_END_ET = os.environ.get("AUTORUN_END_ET", "16:00").strip()
 
+# New positions only during the OPEN session (9:30-16:00 ET) — PRE/AFTER book too
+# few fills (thin extended-hours liquidity, no Alpaca IEX trade prints for most
+# names) and PRE's live alpha is the weakest of the three sessions on both raw
+# and beta-adjusted alpha (see 2026-08-13 session review). Existing PRE/AFTER
+# positions still exit normally; this only blocks NEW entries.
+TRADE_OPEN_ONLY = os.environ.get("TRADE_OPEN_ONLY", "1") not in ("0", "", "false", "False", "no")
+
 # ── Paper trading (opt-in) ──────────────────────────────────────────────────
 PAPER_TRADING = os.environ.get("PAPER_TRADING", "0") not in ("0", "", "false", "False", "no")
 TRADE_NOTIONAL_USD = float(os.environ.get("TRADE_NOTIONAL_USD", "10"))   # $10 fractional per trade

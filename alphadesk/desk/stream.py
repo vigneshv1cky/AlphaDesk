@@ -79,6 +79,13 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
             log.info("Previous run rolled back %d in-progress pick(s)", rolled)
     _pending_run_picks = []
 
+    from alphadesk.config import TRADE_OPEN_ONLY
+    if TRADE_OPEN_ONLY and session() != "OPEN":
+        await loop.run_in_executor(None, store.add_run, "FIND_TRADES", [])
+        yield _ev("status", msg="OPEN-only mode: no new positions outside the regular session.")
+        yield _ev("done", board=[])
+        return
+
     yield _ev("status", msg="Reading the earnings calendar…")
     since = datetime.now(timezone.utc).timestamp() - hours * 3600
     since_dt = datetime.fromtimestamp(since, tz=timezone.utc)
