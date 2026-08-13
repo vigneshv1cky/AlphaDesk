@@ -131,6 +131,16 @@ function EngBadge({ state }: { state?: string }) {
 const BIG_MOVE = 6 // % drift that counts as a real move (matches the skip-miss line)
 const THIN_CAP = 100_000_000 // below ~$100M cap: effectively untradeable at size
 
+// Prefer the real 20d-avg-$vol flag (same bar the trading pipeline gates entries
+// on); fall back to the cap heuristic when liquidity couldn't be measured at
+// all. That fallback matters: the most obscure penny stocks are both the ones
+// most likely to fail a volume lookup AND the ones most likely to actually be
+// illiquid, so "unmeasurable" should lean toward treating it as thin, not
+// toward showing it as if it were confirmed liquid.
+function isLowLiquidity(e: EarningsRow): boolean {
+  return e.low_liquidity ?? ((e.market_cap ?? Infinity) < THIN_CAP)
+}
+
 // Classify a reporter's outcome vs what the desk did. A big drift the desk didn't
 // act on is only a TRUE miss if it was tradeable; in a thin/illiquid name it's a
 // FALSE miss (a pump you couldn't have captured — the HIHO case). For names the
@@ -153,10 +163,7 @@ function assess(e: EarningsRow): { label: string; cls: string; tip: string } | n
   // SKIPPED / UNSEEN
   if (Math.abs(move) < BIG_MOVE)
     return { label: "fair pass", cls: "text-muted-foreground/60", tip: "small move — nothing forgone" }
-  // Prefer the real 20d-avg-$vol flag (same bar the trading pipeline gates
-  // entries on); fall back to the cap heuristic only when liquidity couldn't
-  // be measured at all.
-  const thin = e.low_liquidity ?? ((e.market_cap ?? Infinity) < THIN_CAP)
+  const thin = isLowLiquidity(e)
   return thin
     ? { label: "false miss", cls: "text-amber-600 dark:text-amber-400", tip: "big move but too illiquid to trade at size — uncatchable" }
     : { label: "true miss", cls: "font-semibold text-red-600 dark:text-red-400", tip: "big, tradeable move the desk didn't act on" }
@@ -434,9 +441,8 @@ export function Earnings({
 
   // Same 20d-avg-$vol bar the trading pipeline actually gates entries on — don't
   // even list a name the desk would refuse to trade regardless of how it moved.
-  // Unmeasurable (null) stays in — can't tell, so don't hide it.
-  const tradeableReported = earnings.reported.filter((e) => e.low_liquidity !== true)
-  const tradeableUpcoming = earnings.upcoming.filter((e) => e.low_liquidity !== true)
+  const tradeableReported = earnings.reported.filter((e) => !isLowLiquidity(e))
+  const tradeableUpcoming = earnings.upcoming.filter((e) => !isLowLiquidity(e))
 
   const q = query.trim().toUpperCase()
   const searching = q.length > 0

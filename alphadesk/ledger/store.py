@@ -1111,8 +1111,18 @@ def save_enrichment(items: list[dict]) -> None:
 
 
 def upsert_earnings(rows: list[dict]) -> None:
-    """Insert/replace earnings-calendar rows. Each: {symbol, report_date, session,
-    eps_estimate, eps_actual, surprise_pct, market_cap}."""
+    """Insert/update earnings-calendar rows. Each: {symbol, report_date, session,
+    eps_estimate, eps_actual, surprise_pct, market_cap}.
+
+    Explicit UPSERT (not a bare INSERT relying on the table's ON CONFLICT REPLACE)
+    so a recurring calendar refresh only touches the calendar-sourced columns —
+    pre_report_close/implied_move_pct/low_liquidity are separately pre-armed off
+    their own background passes and are comparatively expensive to recompute
+    (low_liquidity alone is a batched yfinance download over every symbol in the
+    window). A bare REPLACE silently wiped all three back to NULL on every
+    refresh_calendar() call, so a live per-request read (or the next request
+    right after any restart) saw stale/blank data despite the arming job having
+    already run — that data loss is what this UPSERT prevents."""
     data = [(r["symbol"].upper(), r["report_date"], r.get("session"),
              r.get("eps_estimate"), r.get("eps_actual"), r.get("surprise_pct"),
              r.get("market_cap"), _now())
@@ -1122,7 +1132,11 @@ def upsert_earnings(rows: list[dict]) -> None:
     with _lock, _connect() as conn:
         conn.executemany(
             "INSERT INTO earnings (symbol, report_date, session, eps_estimate,"
-            " eps_actual, surprise_pct, market_cap, fetched_at) VALUES (?,?,?,?,?,?,?,?)", data)
+            " eps_actual, surprise_pct, market_cap, fetched_at) VALUES (?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(symbol, report_date) DO UPDATE SET"
+            " session=excluded.session, eps_estimate=excluded.eps_estimate,"
+            " eps_actual=excluded.eps_actual, surprise_pct=excluded.surprise_pct,"
+            " market_cap=excluded.market_cap, fetched_at=excluded.fetched_at", data)
 
 
 def update_earnings_arm(symbol: str, report_date: str,
