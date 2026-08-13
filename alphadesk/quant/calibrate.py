@@ -8,6 +8,7 @@ Two modes:
 
 import json
 import logging
+import math
 import os
 from pathlib import Path
 
@@ -32,20 +33,31 @@ BATCH_LOOKBACK = 200
 
 
 def _normalize(weights: dict[str, float]) -> dict[str, float]:
-    """Ensure weights sum to 1.0 by absolute value (direction-preserving)."""
+    """Ensure weights sum to 1.0 by absolute value (direction-preserving).
+    Falls back to defaults on a non-positive OR non-finite total. The old
+    `total <= 0` check alone let a NaN total slip through — any comparison
+    with NaN is False, so `nan <= 0` is False too — and divided every weight
+    by NaN, permanently corrupting the persisted weights file (2026-08-13
+    incident: a NaN pnl_pct into online_update poisoned all six weights)."""
     total = sum(abs(w) for w in weights.values())
-    if total <= 0:
+    if not (total > 0 and math.isfinite(total)):
         return dict(DEFAULT_WEIGHTS)
     return {k: v / total for k, v in weights.items()}
 
 
 def load_weights() -> dict[str, float]:
-    """Load persisted weights, or return defaults."""
+    """Load persisted weights, or return defaults. Rejects a corrupted file
+    (missing key, non-numeric, or non-finite value) rather than feeding NaN/inf
+    into every candidate scored this run — belt-and-suspenders alongside the
+    write-side guards in online_update/_normalize."""
     try:
         if WEIGHTS_PATH.exists():
             data = json.loads(WEIGHTS_PATH.read_text())
-            if isinstance(data, dict) and "earnings_drift" in data:
+            if (isinstance(data, dict) and "earnings_drift" in data
+                    and all(isinstance(v, (int, float)) and math.isfinite(v)
+                            for v in data.values())):
                 return data
+            log.warning("quant_weights.json invalid or non-finite — using defaults")
     except Exception:
         pass
     return dict(DEFAULT_WEIGHTS)
@@ -63,6 +75,12 @@ def online_update(weights: dict[str, float], signal_values: dict[str, float],
     actual_direction: 'LONG' or 'SHORT' — the realised outcome.
     pnl_pct: the realised P&L (determines update magnitude).
     """
+    if not math.isfinite(pnl_pct):
+        # A NaN/inf outcome teaches nothing and, left unguarded, poisons every
+        # weight it touches (see _normalize's docstring for the 2026-08-13
+        # incident this caused). Skip the update rather than learn from garbage.
+        log.warning("online_update: skipping non-finite pnl_pct=%r", pnl_pct)
+        return weights
     impact = min(abs(pnl_pct), 100.0) / 100.0
     impact = max(impact, 0.1)
 
@@ -85,8 +103,6 @@ def batch_calibrate(trades: list[dict]) -> dict[str, float]:
     """Re-calibrate weights from the last N closed trades.
     Each trade must have: {direction, pnl_pct, signals: {name: value}}.
     """
-    import math
-
     if len(trades) < BATCH_MIN_TRADES:
         return load_weights()
 

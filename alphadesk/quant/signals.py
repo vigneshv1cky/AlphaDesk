@@ -8,6 +8,7 @@ Each signal returns -100 (strong SHORT) to +100 (strong LONG).
 """
 
 import logging
+import math
 from typing import Optional
 
 log = logging.getLogger("alphadesk.quant.signals")
@@ -309,6 +310,15 @@ def compute_composite(ctx: dict, weights: dict[str, float] | None = None,
         if val != 0.0 and weight != 0.0:
             weighted_sum += val * weight
             active_weight += abs(weight)
+
+    if not math.isfinite(weighted_sum):
+        # A NaN/inf weight or context value should never produce an unscorable
+        # candidate — treat it as neutral rather than propagating NaN into a
+        # round-to-int downstream (2026-08-13: a corrupted weights file did
+        # exactly this and crashed autorun). See quant/calibrate.py's guards
+        # for where this is meant to be prevented in the first place.
+        log.warning("compute_composite: non-finite weighted_sum (weights=%r) — treating as neutral", w)
+        weighted_sum = 0.0
 
     direction_side = "LONG" if weighted_sum > 0 else "SHORT"
     abs_composite = abs(weighted_sum)
