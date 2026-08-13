@@ -76,11 +76,14 @@ async def _serve() -> None:
     async def _position_watch_loop():
         """Watch open picks between runs — the price-based exit (pure code):
         walk intraday minute bars, close at the first target/stop touched.
-        OPEN hours: bar-based + Model-A fills; PRE/AFTER: spot-price for
-        extended-hours fills; CLOSED: skip monitoring."""
+        OPEN hours: bar-based + Model-A fills; CLOSED: skip monitoring. Entries
+        are OPEN-only (see desk/stream.py), so there's no extended-hours fill
+        path here anymore — any position still open in PRE/AFTER (from before
+        that gate, or the tail end of an OPEN position still winding down) is
+        covered by the quant tiered-exit watcher (_quantity_watch_loop, which
+        monitors any session but CLOSED) and the session-close sweep below."""
         from alphadesk.config import (
             WATCH_INTERVAL_S,
-            entry_allowed,
             entry_fill_time,
             now_et,
         )
@@ -186,12 +189,10 @@ async def _serve() -> None:
                                         "%.1f%% from current price %.2f — possibly thin "
                                         "extended-hours fill",
                                         p["id"], p["symbol"], fill_px, div, cur)
-                    # Session-scoped model: fills happen in the session they're
-                    # booked for — OPEN/PRE/AFTER picks fill live at decision; night
-                    # (CLOSED) picks fill at the next PRE open (4:00, in the PRE
-                    # branch). Anything still unfilled once its fill moment has
-                    # passed was never filled in its session → NOT TAKEN (no
-                    # carry-over into another market).
+                    # Entries are OPEN-only (see desk/stream.py's session gate), so
+                    # every live pick here fills at decision time. Anything still
+                    # unfilled once its fill moment has passed (e.g. a limit never
+                    # reached) was never filled → NOT TAKEN.
                     now = now_et()
                     not_taken_ids: set[int] = set()
                     stale = [p for p in open_pos if p.get("entry_price") is None
@@ -263,65 +264,6 @@ async def _serve() -> None:
                             # no LLM escalation on price action (a spent move closes at
                             # its target; a wrong one at its stop; anything in between
                             # keeps working to the levels or the horizon).
-
-
-                elif sess in ("PRE", "AFTER"):
-                    # ── EXTENDED-HOURS monitoring: spot-price only for filled
-                    # positions (no intraday bars exist in extended hours). ──
-                    open_pos = await loop.run_in_executor(None, store.live_picks)
-                    if sess == "PRE":
-                        # Night (CLOSED) picks enter once the session is live: stamp the
-                        # live price — but only inside the session's ALLOWED entry window
-                        # (past the START buffer, before the END entry buffer), so they
-                        # skip the volatile open like any new entry. No extended trade →
-                        # stays pending; the OPEN branch marks it not-taken if it never
-                        # fills in the window.
-                        now = now_et()
-                        queued = [p for p in open_pos if p.get("entry_price") is None
-                                  and not p.get("broker_order_id")
-                                  and entry_allowed()
-                                  and (ft := entry_fill_time(p["ts"], p.get("session"))) and ft <= now]
-                        if queued:
-                            q = await loop.run_in_executor(
-                                None, prices.latest_prices,
-                                [p["symbol"] for p in queued])
-                            for p in queued:
-                                px = q.get(p["symbol"].upper())
-                                if px:
-                                    await loop.run_in_executor(
-                                        None, lambda i=p["id"], x=px: store.set_entry_price(i, x))
-                                    log.info("Filled queued night pick #%d %s @ %.2f (PRE open)",
-                                             p["id"], p["symbol"], px)
-                    # Only monitor positions that already HAVE a fill (broker fill from
-                    # extended-hours limit orders or already-stamped entry_price) — unfilled
-                    # closed-market picks have nothing to monitor until the open.
-                    ext_filled = [p for p in open_pos
-                                  if p.get("taken")
-                                  and (p.get("entry_price") is not None
-                                       or p.get("broker_fill_price") is not None)
-                                  and p.get("plan_target") and p.get("plan_stop")]
-                    if ext_filled:
-                        quotes = await loop.run_in_executor(
-                            None, prices.latest_prices,
-                            [p["symbol"] for p in ext_filled] + ["SPY"])
-                        spy_now = quotes.get("SPY")
-                        for p in ext_filled:
-                            cur = quotes.get(p["symbol"].upper())
-                            if cur is None:
-                                continue
-                            entry = (p.get("entry_price") or p.get("broker_fill_price")
-                                     or p.get("plan_entry"))
-                            hit = level_crossed(p["direction"], cur,
-                                                p["plan_target"], p["plan_stop"])
-                            if hit:
-                                label = "target hit" if hit == "target" else "stopped out"
-                                exit_px = p["plan_target"] if hit == "target" else p["plan_stop"]
-                                reason = f"{label} @ {exit_px} (ext-hours spot {hit})"
-                                await loop.run_in_executor(
-                                    None, lambda pk=p, r=reason, px=exit_px, sn=spy_now:
-                                    portfolio.close_and_exit(pk, r, px, sn))
-                                log.info("Auto-exit #%d %s %s — %s (broker close sent) [ext-hours]",
-                                         p["id"], p["symbol"], p["direction"], reason)
 
             except Exception as exc:
                 log.error("position watch error: %s", exc)

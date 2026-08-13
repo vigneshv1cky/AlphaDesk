@@ -43,35 +43,24 @@ def route_pick(pick_id: int, symbol: str, direction: str, price: float,
                conviction: float, session: str) -> bool | None:
     """Place the order on Alpaca paper and stamp broker_order_id/status/qty.
 
-    $10 fractional notional per trade (TRADE_NOTIONAL_USD). OPEN → fractional
-    market order; PRE/AFTER → extended-hours fractional limit at the decision price
-    (only when PM_EXTENDED_HOURS=1; otherwise closed-market picks wait for the
-    9:30 open under Model A). Returns True if routed, None if intentionally
-    skipped by design (PRE/AFTER with extended hours off — the caller should
-    still take the pick as Model A, just without a broker leg), or False on an
-    actual failure (bad price, API error — the caller should NOT take the pick).
-    Never raises."""
+    $10 fractional notional per trade (TRADE_NOTIONAL_USD), fractional market
+    order. Entries are OPEN-only (see desk/stream.py's session gate), so this
+    only ever places a regular-hours market order — no extended-hours limit
+    path. Returns True if routed, or False on an actual failure (bad price,
+    API error — the caller should NOT take the pick). Never raises."""
     try:
         from alpaca.trading.enums import OrderSide, TimeInForce
-        from alpaca.trading.requests import LimitOrderRequest, MarketOrderRequest
+        from alpaca.trading.requests import MarketOrderRequest
 
-        from alphadesk.config import PM_EXTENDED_HOURS, TRADE_NOTIONAL_USD
+        from alphadesk.config import TRADE_NOTIONAL_USD
         from alphadesk.ledger import store
 
         if not price or price <= 0:
             return False
         side = OrderSide.BUY if direction == "LONG" else OrderSide.SELL
         client = _trading_client()
-        if session == "OPEN":
-            req = MarketOrderRequest(symbol=symbol, notional=round(TRADE_NOTIONAL_USD, 2),
-                                     side=side, time_in_force=TimeInForce.DAY)
-        elif PM_EXTENDED_HOURS:
-            req = LimitOrderRequest(symbol=symbol, qty=_fractional_qty(price), side=side,
-                                    limit_price=round(price, 2),
-                                    time_in_force=TimeInForce.DAY,
-                                    extended_hours=True)
-        else:
-            return None   # closed-market pick waits for the open (Model A) — not a failure
+        req = MarketOrderRequest(symbol=symbol, notional=round(TRADE_NOTIONAL_USD, 2),
+                                 side=side, time_in_force=TimeInForce.DAY)
         order = client.submit_order(req)
         order_id = str(getattr(order, "id", ""))
         store.set_broker_order(pick_id, order_id, getattr(order, "status", ""),

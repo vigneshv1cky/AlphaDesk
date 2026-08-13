@@ -79,10 +79,12 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
             log.info("Previous run rolled back %d in-progress pick(s)", rolled)
     _pending_run_picks = []
 
-    from alphadesk.config import TRADE_OPEN_ONLY
-    if TRADE_OPEN_ONLY and session() != "OPEN":
+    # Entries are OPEN-only: PRE/AFTER book too few fills (thin extended-hours
+    # liquidity, missing Alpaca IEX trade prints for most names) and PRE's live
+    # alpha was the weakest of the three sessions (2026-08-13 session review).
+    if session() != "OPEN":
         await loop.run_in_executor(None, store.add_run, "FIND_TRADES", [])
-        yield _ev("status", msg="OPEN-only mode: no new positions outside the regular session.")
+        yield _ev("status", msg="OPEN-only: no new positions outside the regular session.")
         yield _ev("done", board=[])
         return
 
@@ -291,7 +293,6 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
         CONCENTRATION_MAX_PER_CLUSTER,
         DAILY_LOSS_STOP_PCT,
         MAX_OPEN_POSITIONS,
-        SESSION_SIZE_MULT,
     )
     if MAX_OPEN_POSITIONS > 0 and store.open_position_count() >= MAX_OPEN_POSITIONS:
         for sym, *_ in top:
@@ -322,12 +323,9 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
         yield _ev("done", board=[])
         return
 
-    # Liquidity gate + shortability check
-    # Night (CLOSED, 20:00–4:00) is not tradeable: the market is closed, so a pick
-    # decided then enters at the next 4:00 PRE open. Stamp it PRE so it lives on the
-    # Pre-Market page (and its session-close exit is the PRE close, not a phantom
-    # night window).
-    stamp_sess = "PRE" if cur_sess == "CLOSED" else cur_sess
+    # Liquidity gate + shortability check. cur_sess is guaranteed "OPEN" here (see
+    # the session gate above), so stamp_sess is always "OPEN" too.
+    stamp_sess = cur_sess
     board = []
     picks_count = 0
     max_score = max(abs(s[1]) for s in top) if top else 1
@@ -336,10 +334,6 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
         if await _gone():
             return
         pctx = await loop.run_in_executor(None, prices.get_context, sym) or {}
-        if cur_sess in ("PRE", "AFTER") and not pctx.get("last_trade_ts"):
-            gate_reasons.append({"symbol": sym, "reason": "no trades in extended session"})
-            yield _ev("gate", symbol=sym, reason="no trades in extended session")
-            continue
 
         # Liquidity gate: a thin order book can eat a market order alive (a $10
         # order has walked a name ~20% in under two seconds before). Previously
@@ -396,10 +390,9 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
                          "stop": round(last * (1 + atr/100 * PLAN_STOP_ATR), 4),
                          "note": f"Quant: {direction} {sym}", "order": "market"}
 
-        # Kelly-style sizing: scale conviction by signal strength vs max in run,
-        # then size DOWN in thin sessions (PRE/AFTER) where fills are worse.
+        # Kelly-style sizing: scale conviction by signal strength vs max in run.
         sizing = min(abs(qscore["score"]) / max(max_score, 1), 1.0)
-        conviction = round((25 + sizing * 75) * SESSION_SIZE_MULT.get(cur_sess, 1.0))
+        conviction = round(25 + sizing * 75)
         conviction = max(0, min(conviction, 100))
 
         spy_ctx = await loop.run_in_executor(None, prices.get_context, "SPY")
@@ -422,7 +415,7 @@ async def _stream_find_trades_inner(hours: float = 48.0, max_picks: int = 6,
             "low_liquidity": int(bool(pctx.get("low_liquidity"))),
             "skeptic_moved_score": 0.0,
             "arbiter_overrode": 0,
-            "entry_price": last if cur_sess != "CLOSED" and pctx.get("last_trade_ts") else None,
+            "entry_price": last if pctx.get("last_trade_ts") else None,
             "spy_price": (spy_ctx or {}).get("last_price"),
             "plan_entry": (trade or {}).get("entry"),
             "plan_target": (trade or {}).get("target"),

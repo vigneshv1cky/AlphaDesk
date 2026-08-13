@@ -46,8 +46,6 @@ MAX_OPEN_POSITIONS = int(os.environ.get("MAX_OPEN_POSITIONS", "0"))
 DAILY_LOSS_STOP_PCT = float(os.environ.get("DAILY_LOSS_STOP_PCT", "10"))
 # stop opening new positions after realized (equal-weight) losses pass this today
 CONCENTRATION_MAX_PER_CLUSTER = int(os.environ.get("CONCENTRATION_MAX_PER_CLUSTER", "0"))
-# thin sessions size down (conviction multiplier applied to new picks)
-SESSION_SIZE_MULT = {"OPEN": 1.0, "PRE": 0.5, "AFTER": 0.5}
 
 # ── Earnings ────────────────────────────────────────────────────────────────
 EARNINGS_DRIFT_DAYS = 3
@@ -90,13 +88,6 @@ LEAN_EARNINGS_SKIP_NEWS = int(os.environ.get("LEAN_EARNINGS_SKIP_NEWS", "5"))
 AUTORUN_INTERVAL_MINUTES = float(os.environ.get("AUTORUN_INTERVAL_MINUTES", "15"))
 AUTORUN_START_ET = os.environ.get("AUTORUN_START_ET", "09:35").strip()
 AUTORUN_END_ET = os.environ.get("AUTORUN_END_ET", "16:00").strip()
-
-# New positions only during the OPEN session (9:30-16:00 ET) — PRE/AFTER book too
-# few fills (thin extended-hours liquidity, no Alpaca IEX trade prints for most
-# names) and PRE's live alpha is the weakest of the three sessions on both raw
-# and beta-adjusted alpha (see 2026-08-13 session review). Existing PRE/AFTER
-# positions still exit normally; this only blocks NEW entries.
-TRADE_OPEN_ONLY = os.environ.get("TRADE_OPEN_ONLY", "1") not in ("0", "", "false", "False", "no")
 
 # ── Paper trading (opt-in) ──────────────────────────────────────────────────
 PAPER_TRADING = os.environ.get("PAPER_TRADING", "0") not in ("0", "", "false", "False", "no")
