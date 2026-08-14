@@ -89,22 +89,19 @@ def run_at(report_iso: str, session: str | None) -> str | None:
     return datetime(run_day.year, run_day.month, run_day.day, 9, 30, tzinfo=ET).isoformat()
 
 
-def reported_public(report_iso: str, session: str | None) -> datetime | None:
-    """The ET moment a report becomes PUBLIC — the boundary between 'reporting
-    soon' and 'just reported'. Only a CONFIRMED pre-market (BMO) tag gets the
-    early 4:00 ET boundary. Everything else — confirmed AMC, or unclassified
-    (Nasdaq supplies no BMO/AMC tag for the large majority of reporters, even
-    close to the report date — confirmed empirically, not a parsing gap) —
-    gets the conservative 16:00 ET boundary. An unclassified report could
-    actually be BMO, AMC, or genuinely intraday; since we don't know, we wait
-    for the LATEST plausible release moment rather than risk treating a
-    not-yet-reported stock as already reported."""
+def reported_public(report_iso: str) -> datetime | None:
+    """The moment a report counts as PUBLIC — the boundary between 'reporting
+    soon' and 'just reported'. Nasdaq's BMO/AMC session tag is unreliable for
+    the large majority of reporters (confirmed empirically: ~95% come back
+    unclassified even close to the report date — a real data-coverage gap,
+    not a parsing bug), so this no longer tries to pinpoint intraday timing
+    at all. A report counts as public from midnight ET of its calendar date
+    onward — just the date, no BMO/AMC/session distinction."""
     try:
         d = datetime.fromisoformat(report_iso[:10])   # date-only key
     except (ValueError, TypeError):
         return None
-    hour, minute = (4, 0) if session == "BMO" else (16, 0)
-    return datetime(d.year, d.month, d.day, hour, minute, tzinfo=ET)
+    return datetime(d.year, d.month, d.day, 0, 0, tzinfo=ET)
 
 
 def _fetch_calendar_date(date_str: str) -> list[dict]:
@@ -255,7 +252,7 @@ def drift_candidates() -> dict[str, list[dict]]:
     # their BMO/DAY 9:30 or AMC 16:00 boundary) — no lower bound, so this
     # picks up right where the pre-earnings window leaves off (age 0) ──
     reporters = [e for e in store.recently_reported(EARNINGS_POST_MAX_DAYS)
-                 if (rp := reported_public(e["report_date"], e.get("session"))) and rp <= now]
+                 if (rp := reported_public(e["report_date"])) and rp <= now]
     for e in reporters:
         esym = e["symbol"]
         report_day = datetime.strptime(e["report_date"][:10], "%Y-%m-%d").date()
