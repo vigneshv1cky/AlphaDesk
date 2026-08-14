@@ -15,7 +15,12 @@ import threading
 import time
 from typing import Any, Optional
 
-from alphadesk.config import LOW_LIQUIDITY_DOLLAR_VOL, now_et
+from alphadesk.config import (
+    LOW_LIQUIDITY_DOLLAR_VOL,
+    MA_CONVERGENCE_LOOKBACK_DAYS,
+    MA_CROSS_LOOKBACK_DAYS,
+    now_et,
+)
 
 log = logging.getLogger("alphadesk.prices")
 
@@ -83,7 +88,11 @@ def get_context(symbol: str) -> Optional[dict]:
             return hit[1]
     try:
         import yfinance as yf
-        df = yf.Ticker(sym).history(period="90d", interval="1d")
+        # 180d: SMA-50 needs 50 valid closes for one point, and tracking the
+        # SMA20/50 gap as a SERIES over MA_CROSS_LOOKBACK_DAYS on top of that
+        # needs ~70 trading days minimum (~101 calendar days) — 180d leaves
+        # comfortable margin for holidays/gaps.
+        df = yf.Ticker(sym).history(period="180d", interval="1d")
         if df is None or len(df) < 5:
             return None
         closes = df["Close"].astype(float)
@@ -150,6 +159,58 @@ def get_context(symbol: str) -> Optional[dict]:
         except Exception:
             pass
 
+        # SMA-20/50, RSI-9, and MA-gap/cross tracking — the technical-setup
+        # entry engine (desk/watcher.py) judges a stock's own trend, not a
+        # reaction magnitude. None-safe on insufficient history, same
+        # try/except-per-indicator style as ATR above (a bad indicator
+        # shouldn't fail the whole context dict).
+        sma_20 = sma_50 = None
+        ma_gap_pct = ma_gap_pct_3d_ago = None
+        days_since_ma_cross: int | None = None
+        try:
+            if len(closes) >= 50:
+                sma_20_series = closes.rolling(20).mean()
+                sma_50_series = closes.rolling(50).mean()
+                gap_series = ((sma_20_series - sma_50_series) / sma_50_series * 100).dropna()
+                if len(gap_series):
+                    sma_20 = round(float(sma_20_series.iloc[-1]), 4)
+                    sma_50 = round(float(sma_50_series.iloc[-1]), 4)
+                    ma_gap_pct = round(float(gap_series.iloc[-1]), 3)
+                    if len(gap_series) > MA_CONVERGENCE_LOOKBACK_DAYS:
+                        ma_gap_pct_3d_ago = round(
+                            float(gap_series.iloc[-1 - MA_CONVERGENCE_LOOKBACK_DAYS]), 3)
+                    # Days since the gap's sign last flipped, searched within a
+                    # lookback window: walk backward from today counting
+                    # consecutive days sharing today's sign. If the whole
+                    # window shares one sign, the flip is older than what
+                    # counts as "recent" — None, not 0 or the window length.
+                    sign_list = [1 if v > 0 else (-1 if v < 0 else 0)
+                                 for v in gap_series.tail(MA_CROSS_LOOKBACK_DAYS + 1)]
+                    cur_sign = sign_list[-1]
+                    if cur_sign != 0:
+                        run = 0
+                        for s in reversed(sign_list):
+                            if s == cur_sign:
+                                run += 1
+                            else:
+                                break
+                        days_since_ma_cross = (run - 1) if run < len(sign_list) else None
+        except Exception:
+            pass
+
+        rsi_9: float | None = None
+        try:
+            delta = closes.diff()
+            gain = delta.clip(lower=0)
+            loss = -delta.clip(upper=0)
+            avg_gain = gain.ewm(alpha=1 / 9, min_periods=9, adjust=False).mean()
+            avg_loss = loss.ewm(alpha=1 / 9, min_periods=9, adjust=False).mean()
+            ag, al = float(avg_gain.iloc[-1]), float(avg_loss.iloc[-1])
+            if math.isfinite(ag) and math.isfinite(al):
+                rsi_9 = 100.0 if al == 0 else round(100 - 100 / (1 + ag / al), 2)
+        except Exception:
+            pass
+
         def _pct_change(ref_idx: int) -> float:
             if len(closes) <= abs(ref_idx):
                 return 0.0
@@ -164,13 +225,23 @@ def get_context(symbol: str) -> Optional[dict]:
             "change_today_pct": round((last - prev) / prev * 100, 2) if prev else 0.0,
             "change_5d_pct": _pct_change(-6),
             "change_20d_pct": _pct_change(-21),
-            "high_90d": round(float(closes.max()), 2),
-            "low_90d": round(float(closes.min()), 2),
+            # Bounded to the trailing ~90 CALENDAR days (~63 trading days at
+            # a 5/7 ratio) independent of the wider 180d fetch above — before
+            # this bound, widening the fetch would have silently turned these
+            # into 180d figures while keeping the "_90d" name.
+            "high_90d": round(float(closes.tail(63).max()), 2),
+            "low_90d": round(float(closes.tail(63).min()), 2),
             "avg_dollar_vol": round(avg_dollar_vol),
             "rvol": rvol,          # latest-session volume ÷ its 20-session norm
             "low_liquidity": avg_dollar_vol < LOW_LIQUIDITY_DOLLAR_VOL,
             "closes_10d": [round(float(c), 2) for c in closes.tail(10)],
             "atr_pct": atr_pct,
+            "sma_20": sma_20,
+            "sma_50": sma_50,
+            "rsi_9": rsi_9,
+            "ma_gap_pct": ma_gap_pct,
+            "ma_gap_pct_3d_ago": ma_gap_pct_3d_ago,
+            "days_since_ma_cross": days_since_ma_cross,
             "last_trade_ts": rt_ts,  # None if no real-time Alpaca trade (stale yfinance only)
         }
         with _cache_lock:

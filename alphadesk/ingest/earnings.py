@@ -26,7 +26,13 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
 
-from alphadesk.config import ET, MATERIAL_REACTION_PCT, in_universe, now_et
+from alphadesk.config import (
+    ET,
+    EARNINGS_POST_MAX_DAYS,
+    EARNINGS_PRE_WINDOW_DAYS,
+    in_universe,
+    now_et,
+)
 from alphadesk.ledger import store
 
 log = logging.getLogger("alphadesk.earnings")
@@ -207,135 +213,65 @@ def arm_liquidity(days_back: int = 4, days_fwd: int = 14) -> int:
     return n
 
 
-def drift_candidates(days: int) -> dict[str, list[dict]]:
-    """Recently-reported names → synthetic [EARNINGS] candidate articles, keyed by
-    symbol. A CANDIDATE SOURCE, parallel to news.poll: it lets post-earnings drift
-    flow through the SAME scout → team pipeline as news. The calendar fetch already
-    ran (refresh_calendar, on the 6h loop); this just reads the rows the run needs
-    and shapes them as candidates — the caller merges them into the pool.
+def drift_candidates() -> dict[str, list[dict]]:
+    """Earnings-adjacent names → synthetic candidate articles, keyed by symbol.
+    A CANDIDATE SOURCE: it lets the earnings calendar flow through the same
+    candidate-pool shape the entry watcher consumes. The calendar fetch
+    already ran (refresh_calendar, on the 6h loop); this just reads the rows
+    the run needs and shapes them as candidates.
+
+    One continuous window, unfiltered by reaction/momentum (facts only —
+    desk/watcher.py's technical-setup engine is where the judgment lives):
+    from EARNINGS_PRE_WINDOW_DAYS before the report through
+    EARNINGS_POST_MAX_DAYS after it (-3 to +5 days around the report date,
+    by default) — sourced as two pools (upcoming vs. already-reported are
+    different queries) but no gap between them.
     """
-    # Only reports already PUBLIC (past their BMO/DAY 9:30 or AMC 16:00 boundary) —
-    # a not-yet-public reporter has no tradeable drift yet. Time-aware, NOT gated on
-    # Nasdaq's lagged eps_actual (which made every same-day reporter invisible all
-    # day — the OTLY +30% miss). The freshest names now reach the scout the moment
-    # they can be traded, regardless of when the surprise number lands.
     now = now_et()
-    reporters = [e for e in store.recently_reported(days)
-                 if (rp := reported_public(e["report_date"], e.get("session"))) and rp <= now]
-    # How much each name has ALREADY moved since its report went public — the realized
-    # reaction (total, extended-hours aware) split into the uncapturable gap and the
-    # capturable drift. total IS the direction signal: the drift edge bets the observed
-    # REACTION, not the result (a beat that sells off is not a long). Best-effort.
-    from alphadesk.config import session as market_session
-    from alphadesk.ingest import prices
-    moved = prices.moves_since_report(
-        [{"symbol": e["symbol"], "report_date": e["report_date"],
-          "session": e.get("session")} for e in reporters])
-    # The shadow A/B enters like a real pick: if the market is OPEN at sighting, the
-    # fill is the LIVE price now; else the next 9:30 open (resolved by the grader).
-    # (Recording the market session + live price here is what makes the A/B's entry
-    # clock identical to a booked pick's — see grade_reactions.)
-    mkt = market_session()
-    live_now = (prices.latest_prices([e["symbol"] for e in reporters])
-                if mkt == "OPEN" and reporters else {})
     out: dict[str, list[dict]] = {}
 
-    # ── Pre-earnings drift candidates: stocks reporting soon with visible momentum ──
-    pre_candidates = store.upcoming_earnings(days=3)
-    if pre_candidates:
-        pre_syms = [p["symbol"] for p in pre_candidates]
-        pre_px = prices.latest_prices(pre_syms) if mkt == "OPEN" and pre_syms else {}
-        for p in pre_candidates:
-            esym = p["symbol"]
-            ctx = prices.get_context(esym)
-            if not ctx:
-                continue
-            chg = ctx.get("change_5d_pct") or 0.0
-            rvol = ctx.get("rvol") or 0.0
-            if abs(chg) < 2.0 or rvol < 1.2:
-                continue
-            pre_dir = "LONG" if chg > 0 else "SHORT"
-            sent = round(max(-1.0, min(1.0, chg / 5.0)), 3)
-            out[esym] = [{
-                "id": f"pre-earnings-{esym}-{p['report_date']}",
-                "title": (f"[PRE-EARNINGS] {esym} reports {p['report_date']} {p.get('session', '')}: "
-                          f"5d move {chg:+.1f}%, rvol {rvol:.1f}x — positioning ahead of print"),
-                "summary": (f"Pre-earnings momentum: {esym} moving {chg:+.1f}% over 5d on "
-                            f"{rvol:.1f}x volume ahead of {p['report_date']} report. "
-                            f"Direction: {pre_dir}."),
-                "source": "PreEarnings", "url": "",
-                "published_at": p["report_date"],
-                "category": "PRE_EARNINGS", "tickers": [esym],
-                "reaction_pct": round(chg, 2),
-                "low_liquidity": bool(p.get("low_liquidity")),   # pre-armed by arm_liquidity()
-                "mentions": [{"symbol": esym, "sentiment": sent,
-                              "label": "positive" if sent > 0 else "negative",
-                              "category": "PRE_EARNINGS"}],
-                "relations": [],
-            }]
-    # ── End pre-earnings ──
+    # ── Pre-earnings: reports within the next EARNINGS_PRE_WINDOW_DAYS ──────
+    pre_candidates = store.upcoming_earnings(days=EARNINGS_PRE_WINDOW_DAYS)
+    for p in pre_candidates:
+        esym = p["symbol"]
+        out[esym] = [{
+            "id": f"pre-earnings-{esym}-{p['report_date']}",
+            "title": f"[PRE-EARNINGS] {esym} reports {p['report_date']} {p.get('session', '')}",
+            "summary": f"{esym} reports {p['report_date']} — watching for a technical setup ahead of the print.",
+            "source": "PreEarnings", "url": "",
+            "published_at": p["report_date"],
+            "category": "PRE_EARNINGS", "tickers": [esym],
+            "low_liquidity": bool(p.get("low_liquidity")),   # pre-armed by arm_liquidity()
+            "mentions": [{"symbol": esym, "sentiment": 0.0, "label": "neutral",
+                          "category": "PRE_EARNINGS"}],
+            "relations": [],
+        }]
 
+    # ── Post-earnings: up to EARNINGS_POST_MAX_DAYS ago, already PUBLIC (past
+    # their BMO/DAY 9:30 or AMC 16:00 boundary) — no lower bound, so this
+    # picks up right where the pre-earnings window leaves off (age 0) ──
+    reporters = [e for e in store.recently_reported(EARNINGS_POST_MAX_DAYS)
+                 if (rp := reported_public(e["report_date"], e.get("session"))) and rp <= now]
     for e in reporters:
         esym = e["symbol"]
-        surp = e.get("surprise_pct")
-        mv = moved.get(esym)   # {"total","gap","drift"} or None
-        total = mv["total"] if mv else None   # full reaction so far (extended-hours aware)
-        # Shadow A/B: log EVERY measurable reporter (gate-passed AND gate-dropped) so the
-        # grader can forward-score both arms and reveal whether the gate cuts winners.
-        # First sighting wins (ON CONFLICT IGNORE); no LLM cost. Recorded BEFORE the gate.
-        if total is not None:
-            from alphadesk.config import REACTION_AB_HORIZON_DAYS
-            store.record_reaction({
-                "symbol": esym, "report_date": e["report_date"][:10],
-                "session": e.get("session"),
-                "mkt_session": mkt,
-                "direction": "LONG" if total >= 0 else "SHORT",
-                "horizon_days": REACTION_AB_HORIZON_DAYS,
-                "reaction_total": round(total, 3),
-                "reaction_drift": round(mv["drift"], 3) if (mv and mv.get("drift") is not None) else None,
-                "gate_passed": int(abs(total) >= MATERIAL_REACTION_PCT),
-                "entry_price": live_now.get(esym.upper()),
-            })
-        # GATE: the drift edge rides a VISIBLE reaction. No material move since the
-        # report = no reaction to continue — a pre-print / no-reaction earnings binary is
-        # a coin flip, not drift, so don't emit a directional candidate. total is
-        # extended-hours aware, so a pre-market reaction still counts as visible.
-        if total is None or abs(total) < MATERIAL_REACTION_PCT:
+        report_day = datetime.strptime(e["report_date"][:10], "%Y-%m-%d").date()
+        age_days = (now.date() - report_day).days
+        if age_days > EARNINGS_POST_MAX_DAYS:
             continue
-        gap, drift = (mv["gap"], mv["drift"]) if mv else (None, None)   # may be None pre-session
+        surp = e.get("surprise_pct")
         if surp is not None:
             verdict = "beat" if surp > 0 else ("miss" if surp < 0 else "in-line")
             eps_txt = f"EPS {e.get('eps_actual')} vs est {e.get('eps_estimate')} — {verdict} {surp}%"
         else:
-            verdict = "reaction pending"
-            eps_txt = f"EPS est {e.get('eps_estimate')} — actual not yet released (drift from reaction)"
-        # The observed REACTION (total) is the direction; the capturable drift from the
-        # open and the uncapturable gap are shown as context. Pre-regular-session the
-        # reaction is entirely extended-hours (no gap/drift split yet).
-        if drift is not None and gap is not None:
-            mv_txt = (f"; {total:+.1f}% reaction — {drift:+.1f}% drift from open "
-                      f"({gap:+.1f}% gap excluded)")
-            mv_note = (f" Since the report: {total:+.1f}% total reaction — {gap:+.1f}% gap "
-                       f"(uncapturable) then {drift:+.1f}% drift from the open (the tradeable leg).")
-        else:
-            mv_txt = f"; {total:+.1f}% reaction so far (extended-hours, no regular session yet)"
-            mv_note = (f" Since the report: {total:+.1f}% reaction, still in extended hours — no "
-                       "regular session has traded yet, so the reaction itself is the signal.")
-        # Direction/sentiment from the observed reaction (total), not the raw surprise sign.
-        sent = round(max(-1.0, min(1.0, total / 5.0)), 3)
+            eps_txt = f"EPS est {e.get('eps_estimate')}"
         out[esym] = [{
             "id": f"earnings-{esym}-{e['report_date'][:10]}",
-            "title": f"[EARNINGS] {esym} reported {e['report_date'][:10]} {e.get('session') or ''}: "
-                     f"{eps_txt}{mv_txt}",
-            "summary": f"Post-earnings-drift setup: {esym} — {verdict}.{mv_note}",
+            "title": f"[EARNINGS] {esym} reported {e['report_date'][:10]} {e.get('session') or ''} ({age_days}d ago): {eps_txt}",
+            "summary": f"{esym} reported {age_days} days ago — watching for a settled technical setup.",
             "source": "EarningsCalendar", "url": "", "published_at": e["report_date"],
             "category": "EARNINGS", "tickers": [esym],
-            "reaction_pct": round(total, 2),   # the raw reaction size — the scout-window rank signal
-            "implied_move_pct": e.get("implied_move_pct"),   # pre-armed, exact baseline (1d options move)
-            "pre_report_close": e.get("pre_report_close"),   # pre-armed close the reaction is measured from
             "low_liquidity": bool(e.get("low_liquidity")),   # pre-armed by arm_liquidity()
-            "mentions": [{"symbol": esym, "sentiment": sent,
-                          "label": ("positive" if sent > 0 else "negative" if sent < 0 else "neutral"),
+            "mentions": [{"symbol": esym, "sentiment": 0.0, "label": "neutral",
                           "category": "EARNINGS"}],
             "relations": [],
         }]

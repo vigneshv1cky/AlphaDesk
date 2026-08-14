@@ -10,6 +10,12 @@ Exit tiers (priority order):
   4. Spike reversal — unusual volatility spike that reverses (blow-off top /
      capitulation bottom)
   5. Stale exit — no significant movement hours after entry
+  7. MA reconvergence — the SMA20/50 gap that justified entry (desk/watcher.py's
+     technical-setup engine) is closing back up; checked after hard
+     target/stop (never skip a realized fill for a soft signal) but before
+     trailing/give-back/spike (a "thesis invalidated" signal is more decisive
+     than those heuristics). Fails open — missing data or a non-technical-
+     setup position just means this tier never fires.
 """
 
 import logging
@@ -25,6 +31,7 @@ EXIT_STOP = 3
 EXIT_SPIKE = 4
 EXIT_STALE = 5
 EXIT_CLOSE = 6
+EXIT_MA_CONVERGE = 7
 
 EXIT_LABELS = {
     EXIT_TP: "take-profit",
@@ -33,6 +40,7 @@ EXIT_LABELS = {
     EXIT_SPIKE: "spike-reversal",
     EXIT_STALE: "stale-expiry",
     EXIT_CLOSE: "session-close",
+    EXIT_MA_CONVERGE: "ma-reconverge",
 }
 
 # ── Configurable thresholds (env-overridable, self-optimizing) ────────────────
@@ -138,9 +146,15 @@ def update_price(pick_id: int, price: float):
 
 
 def check_exits(pick_id: int, direction: str, entry: float,
-                target: float, stop: float, current: float) -> Optional[dict]:
+                target: float, stop: float, current: float,
+                ma_converging: bool = False) -> Optional[dict]:
     """Check all exit tiers for a position. Returns the FIRST exit triggered,
     or None if no exit condition is met.
+
+    ma_converging: True if the SMA20/50 gap that justified a technical-setup
+    entry (desk/watcher.py) is closing back up — the trend is fading, exit
+    regardless of P&L. Fails open by default (False) so positions entered
+    some other way, or with missing indicator data, are unaffected.
 
     Returns {level, price, reason} or None.
     """
@@ -158,6 +172,13 @@ def check_exits(pick_id: int, direction: str, entry: float,
     if hit_stop:
         return {"level": "stop", "price": round(stop, 4),
                 "reason": "stop-loss hit", "tier": EXIT_STOP}
+
+    # Tier 7: MA reconvergence — checked after hard target/stop (never skip a
+    # realized fill for a soft signal) but before trailing/give-back/spike (a
+    # "thesis invalidated" signal is more decisive than those heuristics).
+    if ma_converging:
+        return {"level": "ma-reconverge", "price": round(ptr, 4),
+                "reason": "MA reconverging — trend invalidated", "tier": EXIT_MA_CONVERGE}
 
     # Tier 2: trailing stop (only if activated by profit)
     peak = _trail_peaks.get(pick_id, entry)

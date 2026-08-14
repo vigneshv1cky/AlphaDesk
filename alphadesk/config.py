@@ -48,9 +48,33 @@ DAILY_LOSS_STOP_PCT = float(os.environ.get("DAILY_LOSS_STOP_PCT", "10"))
 CONCENTRATION_MAX_PER_CLUSTER = int(os.environ.get("CONCENTRATION_MAX_PER_CLUSTER", "0"))
 
 # ── Earnings ────────────────────────────────────────────────────────────────
-EARNINGS_DRIFT_DAYS = 3
+# Candidate window for the live technical-setup entry engine (desk/watcher.py):
+# one continuous window from EARNINGS_PRE_WINDOW_DAYS before the report
+# through EARNINGS_POST_MAX_DAYS after it (i.e. -3 to +5 days around the
+# report date) — no gap, no exclusion window.
+EARNINGS_PRE_WINDOW_DAYS = int(os.environ.get("EARNINGS_PRE_WINDOW_DAYS", "3"))
+EARNINGS_POST_MAX_DAYS = int(os.environ.get("EARNINGS_POST_MAX_DAYS", "5"))
+# MATERIAL_REACTION_PCT no longer gates live candidate sourcing (the entry
+# engine judges technical setup, not reaction magnitude) — still used by the
+# offline `abtest`/`backtest` research tools to test the old reaction-gate
+# hypothesis against history.
 MATERIAL_REACTION_PCT = float(os.environ.get("MATERIAL_REACTION_PCT", "1.5"))
 REACTION_AB_HORIZON_DAYS = int(os.environ.get("REACTION_AB_HORIZON_DAYS", "3"))
+
+# ── MA convergence/divergence entry engine (desk/watcher.py) ─────────────────
+# Indicator periods themselves (SMA-20/50, RSI-9) are hardcoded at the
+# computation site in ingest/prices.py, matching the existing ATR-14
+# precedent — identity of the indicator, not a tunable. These are strategy
+# behavior, tunable independently of the indicator math.
+MA_CROSS_LOOKBACK_DAYS = int(os.environ.get("MA_CROSS_LOOKBACK_DAYS", "20"))       # trading days searched for a sign flip
+MA_CROSS_FRESH_DAYS = int(os.environ.get("MA_CROSS_FRESH_DAYS", "3"))             # cross must be within this many days to be "recent"
+MA_CONVERGENCE_LOOKBACK_DAYS = int(os.environ.get("MA_CONVERGENCE_LOOKBACK_DAYS", "3"))  # days-back reference for widening/narrowing check
+MA_ENTRY_MIN_RVOL = float(os.environ.get("MA_ENTRY_MIN_RVOL", "1.2"))
+RSI_LONG_MIN = float(os.environ.get("RSI_LONG_MIN", "50"))
+RSI_LONG_MAX = float(os.environ.get("RSI_LONG_MAX", "70"))
+RSI_SHORT_MIN = float(os.environ.get("RSI_SHORT_MIN", "30"))
+RSI_SHORT_MAX = float(os.environ.get("RSI_SHORT_MAX", "50"))
+MAX_REENTRIES_PER_SYMBOL_PER_DAY = int(os.environ.get("MAX_REENTRIES_PER_SYMBOL_PER_DAY", "2"))
 
 # ── Quant ────────────────────────────────────────────────────────────────────
 QUANT_STREAM_ENABLED = os.environ.get("QUANT_STREAM_ENABLED", "1") not in ("0", "", "false", "False", "no")

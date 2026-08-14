@@ -385,9 +385,17 @@ async def _serve() -> None:
                         atr_pct = abs(target - entry) / entry / PLAN_TARGET_ATR * 100
                         qwatcher.set_atr(p["id"], atr_pct)
                     qwatcher.update_price(p["id"], cur)
+                    # MA-reconvergence exit: reuses get_context()'s 120s TTL
+                    # cache (already paid for by the entry watcher), so
+                    # calling it every 5s here is a cache hit ~24/25 times —
+                    # no new load class introduced.
+                    from alphadesk.desk.watcher import ma_trend_status
+                    from alphadesk.ingest import prices as _prices
+                    pctx = await loop.run_in_executor(None, _prices.get_context, p["symbol"])
+                    ma_converging = ma_trend_status(pctx or {})["converging"]
                     result = qwatcher.check_exits(
                         p["id"], p["direction"], entry,
-                        p["plan_target"], p["plan_stop"], cur)
+                        p["plan_target"], p["plan_stop"], cur, ma_converging)
                     if result:
                         spy_now = live_prices.get("SPY")
                         reason = f"quant-{result['reason']}"
@@ -461,10 +469,9 @@ def main() -> None:
     elif args.cmd == "desk":
         from alphadesk.desk.workflow import research_run
         from alphadesk.ingest.earnings import drift_candidates
-        from alphadesk.config import EARNINGS_DRIFT_DAYS
         async def _adhoc() -> None:
             candidates = await asyncio.get_running_loop().run_in_executor(
-                None, drift_candidates, EARNINGS_DRIFT_DAYS)
+                None, drift_candidates)
             print(f"{len(candidates)} earnings drift candidates")
             if candidates:
                 ids = await research_run(candidates, trigger_src="DEEP_RUN")

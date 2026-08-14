@@ -1,23 +1,26 @@
 """Entry watcher — continuous per-candidate evaluation. Zero LLM.
 
-Replaces the batch scanner (desk/stream.py, removed 2026-08-13): instead of
-scoring a capped pool every 5-15 min and picking the top N, every earnings
-candidate is watched continuously and evaluated independently against the
-same score threshold, whenever it's next due for a fresh look. No batch, no
-reaction-magnitude cap, no ranking against other candidates — post-earnings
-drift is an absolute per-stock judgment ("did THIS reaction clear the bar?"),
-not a relative one ("is this the best of today's batch?"). Comparison-based
-selection only earns its keep when something scarce forces a choice; with
-position size fixed (qty=1) and capital assumed unbounded for this phase,
-nothing does.
+Every earnings-adjacent candidate is watched continuously and judged purely
+on its own moving-average setup — no comparison against other candidates,
+no composite score, no reaction magnitude. This replaced a reaction-gated
+composite-score engine (2026-08-14): "did THIS stock's own trend just start"
+instead of "is this the best of today's batch" or "did this reaction clear a
+threshold."
+
+The strategy (MA convergence/divergence, see _entry_signal):
+  • ENTRY: SMA-20/50 crossed recently (a fresh trend just started), confirmed
+    by RSI-9 momentum and relative volume, and NOT already re-converging
+    (which would signal an imminent reversal).
+  • REENTRY: after an exit, if price later extends further from the MA in
+    the same direction (the trend continued past where we got out), a fresh
+    entry is allowed without waiting for a brand new cross — capped at
+    MAX_REENTRIES_PER_SYMBOL_PER_DAY total bookings per symbol+direction.
+  • EXIT: the existing tiered exits (quant/watcher.py) are unchanged, plus a
+    new MA-reconvergence trigger wired in from main.py's quant watch loop.
 
 Capital-size coordination (MAX_OPEN_POSITIONS / CONCENTRATION_MAX_PER_CLUSTER)
-stays wired in exactly as before and is NOT redesigned here — both are
-currently 0 (disabled) on the live system. A real cross-candidate execution
-gate is a deliberately deferred "Layer 2" concern, not part of this change.
-MAX_ENTRIES_PER_DAY below is a different thing: not a capital control, just a
-runaway backstop (an uncapped continuous watcher can in principle book far
-more per day than the old top-6-per-cycle scanner ever could).
+stays wired in exactly as before — both are currently 0 (disabled) on the
+live system. MAX_ENTRIES_PER_DAY is a runaway backstop, not a capital control.
 """
 
 import asyncio
@@ -26,15 +29,21 @@ import logging
 from alphadesk.config import (
     CONCENTRATION_MAX_PER_CLUSTER,
     DAILY_LOSS_STOP_PCT,
-    EARNINGS_DRIFT_DAYS,
     LOW_LIQUIDITY_DOLLAR_VOL,
+    MA_CONVERGENCE_LOOKBACK_DAYS,
+    MA_CROSS_FRESH_DAYS,
+    MA_ENTRY_MIN_RVOL,
     MAX_ENTRIES_PER_DAY,
     MAX_OPEN_POSITIONS,
+    MAX_REENTRIES_PER_SYMBOL_PER_DAY,
     PAPER_TRADING,
     PLAN_STOP_ATR,
     PLAN_TARGET_ATR,
-    QUANT_PREFILTER_MIN_SCORE,
     QUANT_SCORE_FULL_CONVICTION,
+    RSI_LONG_MAX,
+    RSI_LONG_MIN,
+    RSI_SHORT_MAX,
+    RSI_SHORT_MIN,
     now_et,
     pinned_horizon,
     session,
@@ -49,6 +58,15 @@ _shortable_cache: dict[str, bool] = {}
 _watched: dict[str, list[dict]] = {}
 _booked_today_count = 0
 _booked_today_date = None
+# (symbol, direction) → |ma_gap_pct| at the moment of the last exit — a later
+# tick may reenter the same symbol+direction once price has moved further
+# from the MA than this, without needing a fresh cross. Written by
+# desk/portfolio.py's close_and_exit() (the single choke-point every exit
+# path funnels through), consumed by _entry_signal() below.
+_reentry_state: dict[tuple[str, str], float] = {}
+# (symbol, direction) → total bookings today (initial + reentries) — enforces
+# MAX_REENTRIES_PER_SYMBOL_PER_DAY independent of the global MAX_ENTRIES_PER_DAY.
+_bookings_today: dict[tuple[str, str], int] = {}
 
 
 def _shortable(symbol: str) -> bool:
@@ -82,6 +100,18 @@ def clear_pool() -> None:
     _watched = {}
     _booked_today_count = 0
     _booked_today_date = None
+    _reentry_state.clear()
+    _bookings_today.clear()
+
+
+def record_exit_distance(symbol: str, direction: str, distance_pct: float) -> None:
+    """Called by desk/portfolio.py's close_and_exit() — the single choke-point
+    every exit path (quant watcher, bar-touch watcher, session-close sweep)
+    funnels through — to remember how far price had moved from the MA at the
+    moment of exit. A later tick may reenter the same symbol+direction once
+    price has moved further from the MA than this, without waiting for a
+    fresh cross (see _entry_signal)."""
+    _reentry_state[(symbol.upper(), direction)] = abs(distance_pct)
 
 
 def refresh_pool() -> None:
@@ -97,7 +127,7 @@ def refresh_pool() -> None:
     liquidity signal (score_candidate handles it being None), not worth the
     live-stream slot; scoring otherwise runs entirely off REST/cached prices."""
     global _watched
-    candidates = earnings.drift_candidates(EARNINGS_DRIFT_DAYS)
+    candidates = earnings.drift_candidates()
 
     # Anti-double-dip: don't watch a symbol that already has an open position.
     held = {p["symbol"].upper() for p in store.open_taken_picks()}
@@ -122,57 +152,97 @@ def refresh_pool() -> None:
                  len(_watched), len(new_syms), len(dropped), len(illiquid))
 
 
-async def score_candidate(sym: str, arts: list[dict], moves: dict, weights: dict) -> dict:
-    """Fetch context and score one candidate. Returns compute_composite()'s
-    result dict, with the fetched price context stashed under "_pctx" so a
-    winning candidate's booking step doesn't have to re-fetch it."""
+def ma_trend_status(pctx: dict) -> dict:
+    """The same 'converging' definition _entry_signal uses to block new
+    entries, exposed for the exit side (main.py's _quantity_watch_loop) to
+    reuse verbatim — one definition, two call sites. Fails OPEN
+    (converging=False) on missing data, unlike the entry side's fail-closed —
+    forcing an exit off absent data would strip a position of its actual
+    safety net for no reason; quant/watcher.py's other five exit tiers remain
+    the backstop regardless."""
+    gap = pctx.get("ma_gap_pct")
+    gap_prior = pctx.get("ma_gap_pct_3d_ago")
+    if gap is None or gap_prior is None:
+        return {"converging": False}
+    return {"converging": abs(gap) < abs(gap_prior)}
+
+
+def _entry_signal(sym: str, pctx: dict) -> tuple[dict | None, str | None]:
+    """Rule-based MA-convergence/divergence entry gate — each candidate judged
+    purely on its own technical setup, no comparison against other candidates,
+    no composite score to tune against a batch. Returns (setup, None) on a
+    pass, (None, reason) on a drop. Never raises.
+
+    Entries fail CLOSED on missing MA/RSI data — better no signal than one we
+    can't confirm isn't about to reverse. (The exit-side MA-reconvergence
+    check in quant/watcher.py reuses this same "converging" definition but
+    fails OPEN on missing data instead — see main.py's _quantity_watch_loop.)
+    """
+    gap = pctx.get("ma_gap_pct")
+    gap_prior = pctx.get("ma_gap_pct_3d_ago")
+    rsi = pctx.get("rsi_9")
+    rvol = pctx.get("rvol")
+    days_since_cross = pctx.get("days_since_ma_cross")
+
+    if gap is None or gap_prior is None or rsi is None:
+        return None, "insufficient MA/RSI data"
+
+    direction = "LONG" if gap > 0 else "SHORT" if gap < 0 else None
+    if direction is None:
+        return None, "no MA divergence"
+
+    if abs(gap) < abs(gap_prior):
+        return None, "MA converging — blocked, imminent reversal risk"
+
+    if direction == "LONG":
+        if not (RSI_LONG_MIN <= rsi <= RSI_LONG_MAX):
+            return None, f"RSI {rsi:.0f} not confirming LONG ({RSI_LONG_MIN:g}-{RSI_LONG_MAX:g})"
+    else:
+        if not (RSI_SHORT_MIN <= rsi <= RSI_SHORT_MAX):
+            return None, f"RSI {rsi:.0f} not confirming SHORT ({RSI_SHORT_MIN:g}-{RSI_SHORT_MAX:g})"
+
+    if rvol is None or rvol < MA_ENTRY_MIN_RVOL:
+        return None, f"rvol {rvol} below {MA_ENTRY_MIN_RVOL:g}x"
+
+    fresh_cross = days_since_cross is not None and days_since_cross <= MA_CROSS_FRESH_DAYS
+    key = (sym.upper(), direction)
+    reentry_bar = _reentry_state.get(key)
+    # Reentry (pyramiding onto an already-established trend) does NOT need a
+    # fresh cross, but does still need every other confirmation above.
+    is_reentry = not fresh_cross and reentry_bar is not None and abs(gap) > reentry_bar
+    if not (fresh_cross or is_reentry):
+        return None, "no fresh cross, no qualifying reentry"
+
+    if _bookings_today.get(key, 0) >= MAX_REENTRIES_PER_SYMBOL_PER_DAY:
+        return None, f"per-symbol daily entry cap reached ({MAX_REENTRIES_PER_SYMBOL_PER_DAY})"
+
+    # Informational magnitude only — NOT used to gate or rank candidates
+    # against each other (the boolean chain above already decided pass/fail
+    # independently per symbol). Reused for _book()'s conviction-sizing math,
+    # which has zero effect on actual paper exposure (qty=1 always).
+    score = round(min(100.0, abs(gap) * 3.0 + abs(rsi - 50) * 0.5
+                       + max(0.0, (rvol or 0) - 1) * 5.0), 1)
+    setup = {
+        "direction": direction, "score": score,
+        "entry_mode": "reentry" if is_reentry else "fresh_cross",
+        "signals": {"ma_gap_pct": gap, "ma_gap_pct_3d_ago": gap_prior,
+                    "days_since_ma_cross": days_since_cross, "rsi_9": rsi, "rvol": rvol},
+    }
+    return setup, None
+
+
+async def score_candidate(sym: str, arts: list[dict]) -> tuple[dict | None, str | None]:
+    """Fetch price context and evaluate the technical setup for one candidate.
+    Returns (setup, None) on a pass, (None, reason) on a drop."""
     loop = asyncio.get_running_loop()
     pctx = await loop.run_in_executor(None, prices.get_context, sym) or {}
-    move = moves.get(sym) or {}   # may be None for unmeasurable names
-    # Implied move: prefer the PRE-ARMED options context (stored when the
-    # reporter was armed ahead of release — instant, exact baseline); fall back
-    # to a live fetch if never armed.
-    implied_move = next((a.get("implied_move_pct") for a in arts
-                         if a.get("implied_move_pct")), None)
-    if implied_move is None:
-        try:
-            opt = await loop.run_in_executor(None, prices.get_options_context, sym)
-            if opt:
-                implied_move = opt.get("expected_move_1d_pct") or opt.get("expected_move_to_expiry_pct")
-        except Exception:
-            pass
-    fund = await loop.run_in_executor(None, prices.get_fundamentals, sym) or {}
-    sector_chg = await loop.run_in_executor(None, prices.sector_change_pct, fund.get("sector"))
-    spread_pct = None
-    try:
-        from alphadesk.quant import stream as qstream
-        sp = qstream.get_spread(sym)
-        if sp and sp[0] > 0:
-            spread_pct = round((sp[1] - sp[0]) / sp[0] * 100, 2)
-    except Exception:
-        pass
-    rctx = {
-        "reaction_pct": move.get("total") if move else None,
-        "drift_pct": move.get("drift") if move else None,
-        "gap_pct": move.get("gap") if move else None,
-        "implied_move_pct": implied_move,
-        "change_today": pctx.get("change_today_pct"),
-        "change_5d": pctx.get("change_5d_pct"),
-        "change_20d": pctx.get("change_20d_pct"),
-        "rvol": pctx.get("rvol"),
-        "post_vol_ratio": pctx.get("rvol"),
-        "atr_pct": pctx.get("atr_pct"),
-        "sector_change_pct": sector_chg,
-        "market_cap": fund.get("market_cap") or pctx.get("market_cap"),
-        "avg_dollar_vol": pctx.get("avg_dollar_vol"),
-        "spread_pct": spread_pct,
-        "short_float_pct": fund.get("short_float_pct"),
-        "days_to_cover": fund.get("days_to_cover"),
-    }
-    from alphadesk.quant import signals as qs
-    result = qs.compute_composite(rctx, weights)
-    result["_pctx"] = pctx
-    return result
+    if not pctx or pctx.get("sma_50") is None:
+        return None, "insufficient price history"
+    setup, reason = _entry_signal(sym, pctx)
+    if setup is None:
+        return None, reason
+    setup["_pctx"] = pctx
+    return setup, None
 
 
 def _reset_daily_count_if_new_day() -> None:
@@ -181,16 +251,19 @@ def _reset_daily_count_if_new_day() -> None:
     if _booked_today_date != today:
         _booked_today_date = today
         _booked_today_count = 0
+        _reentry_state.clear()
+        _bookings_today.clear()
 
 
-async def _book(sym: str, arts: list[dict], result: dict, cur_sess: str,
+async def _book(sym: str, arts: list[dict], setup: dict, cur_sess: str,
                 gate_reasons: list[dict]) -> str | None:
     """Gate + book one qualifying candidate. Returns the symbol if booked, else
     None (appending a reason to gate_reasons on rejection)."""
     global _booked_today_count
     loop = asyncio.get_running_loop()
-    direction = result["direction"]
-    pctx = result.get("_pctx") or {}
+    direction = setup["direction"]
+    pctx = setup.get("_pctx") or {}
+    key = (sym.upper(), direction)
 
     if pctx.get("low_liquidity"):
         gate_reasons.append({"symbol": sym,
@@ -224,35 +297,42 @@ async def _book(sym: str, arts: list[dict], result: dict, cur_sess: str,
             trade = {"entry": round(last, 4),
                      "target": round(last * (1 + atr / 100 * PLAN_TARGET_ATR), 4),
                      "stop": round(last * (1 - atr / 100 * PLAN_STOP_ATR), 4),
-                     "note": f"Quant: {direction} {sym}", "order": "market"}
+                     "note": f"MA setup: {direction} {sym}", "order": "market"}
         else:
             trade = {"entry": round(last, 4),
                      "target": round(last * (1 - atr / 100 * PLAN_TARGET_ATR), 4),
                      "stop": round(last * (1 + atr / 100 * PLAN_STOP_ATR), 4),
-                     "note": f"Quant: {direction} {sym}", "order": "market"}
+                     "note": f"MA setup: {direction} {sym}", "order": "market"}
 
-    # Absolute conviction scale — no batch to compare against anymore (see
-    # QUANT_SCORE_FULL_CONVICTION's docstring in config.py).
-    sizing = min(abs(result["score"]) / QUANT_SCORE_FULL_CONVICTION, 1.0)
+    # Informational sizing scale only (see _entry_signal's "score" comment) —
+    # has zero effect on actual paper exposure (qty=1 always, see
+    # portfolio.route_pick); kept so the ledger/UI's existing conviction
+    # display has a number to show.
+    sizing = min(setup["score"] / QUANT_SCORE_FULL_CONVICTION, 1.0)
     conviction = max(0, min(round(25 + sizing * 75), 100))
 
     spy_ctx = await loop.run_in_executor(None, prices.get_context, "SPY")
+    sig = setup["signals"]
+    thesis = (f"MA setup: {sym} {direction} ({setup['entry_mode']}) — "
+              f"gap {sig['ma_gap_pct']:+.2f}% (was {sig['ma_gap_pct_3d_ago']:+.2f}% "
+              f"{MA_CONVERGENCE_LOOKBACK_DAYS}d ago), RSI-9 {sig['rsi_9']:.0f}, "
+              f"rvol {sig['rvol']:.1f}x, cross {sig['days_since_ma_cross']}d ago")
     pick_id = store.record_pick({
         "symbol": sym, "arm": "QUANT", "edge": edge,
         "source": "QUANT", "decision_id": f"q-{sym}",
         "trigger_src": "ENTRY_WATCH", "session": cur_sess,
         "direction": direction, "horizon_days": horizon,
         "cluster": cluster,   # sector|direction — for the concentration cap
-        "score": result["score"],
+        "score": setup["score"],
         "adjusted_score": conviction,
         "confidence": conviction,
         "verdict": "QUANT",
         "approved": 1,
-        "triage_reason": f"Quant composite={result['composite']:.1f}",
-        "thesis": f"Quant pick: {sym} {direction} composite={result['composite']:.1f}",
-        "debate": {"quant_signals": result.get("signals", {})},
+        "triage_reason": thesis,
+        "thesis": thesis,
+        "debate": {"quant_signals": sig},
         "briefs": [],
-        "model_tags": {"mode": "entry_watch"},
+        "model_tags": {"mode": "entry_watch", "entry_mode": setup["entry_mode"]},
         "low_liquidity": int(bool(pctx.get("low_liquidity"))),
         "skeptic_moved_score": 0.0,
         "arbiter_overrode": 0,
@@ -264,8 +344,8 @@ async def _book(sym: str, arts: list[dict], result: dict, cur_sess: str,
         "plan_note": (trade or {}).get("note"),
         "order_type": "market",
     })
-    log.info("QUANT pick #%d: %s %s score=%.0f entry=%.2f stop=%.2f tgt=%.2f",
-             pick_id, sym, direction, result["score"],
+    log.info("QUANT pick #%d: %s %s (%s) score=%.0f entry=%.2f stop=%.2f tgt=%.2f",
+             pick_id, sym, direction, setup["entry_mode"], setup["score"],
              (trade or {}).get("entry", 0), (trade or {}).get("stop", 0), (trade or {}).get("target", 0))
 
     if PAPER_TRADING:
@@ -280,16 +360,17 @@ async def _book(sym: str, arts: list[dict], result: dict, cur_sess: str,
 
     store.mark_taken([pick_id])
     _booked_today_count += 1
+    _bookings_today[key] = _bookings_today.get(key, 0) + 1
+    _reentry_state.pop(key, None)
     return sym
 
 
 async def tick() -> list[str]:
     """One evaluation pass over every currently-watched candidate. Each is
-    judged purely on its own merit against QUANT_PREFILTER_MIN_SCORE — no
+    judged purely on its own MA-convergence setup (_entry_signal) — no
     ranking against the rest of the pool, no slot cap. Returns symbols booked
     this tick (each graduates out of the watch pool into a live position,
-    where the existing exit watcher — quant/watcher.py, unchanged — takes
-    over)."""
+    where the existing exit watcher — quant/watcher.py — takes over)."""
     if not _watched:
         return []
 
@@ -305,7 +386,6 @@ async def tick() -> list[str]:
         return []
 
     cur_sess = session()
-    loop = asyncio.get_running_loop()
 
     # Anti-double-dip re-check (cheap; a symbol's prior position may have
     # exited since the last pool refresh, freeing it up to trade again today).
@@ -314,38 +394,23 @@ async def tick() -> list[str]:
     if not pool:
         return []
 
-    from alphadesk.quant import calibrate as qc
-    weights = qc.load_weights()
-
-    # One batched download for every watched candidate's post-report move —
-    # moves_since_report's own 60s TTL cache (keyed on the exact symbol set)
-    # means a mostly-stable pool mostly cache-hits between ticks.
-    all_items = [
-        {"symbol": a.get("tickers", [sym])[0] if a.get("tickers") else sym,
-         "report_date": a.get("published_at", "")[:10] if a.get("published_at") else "",
-         "session": a.get("mentions", [{}])[0].get("category", "DAY")}
-        for sym, arts in pool.items() for a in arts if a.get("published_at")
-    ]
-    moves = (await loop.run_in_executor(None, prices.moves_since_report, all_items)
-             if all_items else {})
-
     sem = asyncio.Semaphore(8)   # bound concurrent yfinance fetches
 
     async def _guarded(sym, arts):
         async with sem:
-            return sym, arts, await score_candidate(sym, arts, moves, weights)
+            setup, reason = await score_candidate(sym, arts)
+            return sym, arts, setup, reason
 
     gate_reasons: list[dict] = []
     drop_reasons: list[dict] = []
     booked: list[str] = []
 
     for coro in asyncio.as_completed([_guarded(s, a) for s, a in pool.items()]):
-        sym, arts, result = await coro
-        if QUANT_PREFILTER_MIN_SCORE > 0 and result["score"] < QUANT_PREFILTER_MIN_SCORE:
-            drop_reasons.append({"symbol": sym,
-                                 "reason": f"quant pre-filter: score {result['score']:.1f}"})
+        sym, arts, setup, reason = await coro
+        if setup is None:
+            drop_reasons.append({"symbol": sym, "reason": reason})
             continue
-        won = await _book(sym, arts, result, cur_sess, gate_reasons)
+        won = await _book(sym, arts, setup, cur_sess, gate_reasons)
         if won:
             booked.append(won)
             _watched.pop(won, None)

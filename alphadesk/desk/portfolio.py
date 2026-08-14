@@ -174,7 +174,23 @@ def close_and_exit(pick: dict, reason: str, exit_px: float, spy_now: float | Non
         perf = realized_exit(pick["direction"], entry, exit_px,
                              pick.get("spy_price"), spy_now,
                              bool(pick.get("low_liquidity")))
-        return store.record_exit(pick_id, reason, **perf)
+        result = store.record_exit(pick_id, reason, **perf)
+        # Reentry tracking: remember how far price had moved from the MA at
+        # the moment of exit (desk/watcher.py's technical-setup reentry
+        # logic) — every exit path funnels through this function, so it's the
+        # single choke-point to record it, regardless of WHY the exit fired.
+        # Best-effort: a missing price context just means a later tick needs
+        # a fresh cross to reenter instead of qualifying via distance-from-MA
+        # growth — a safe fallback, not a failure.
+        try:
+            from alphadesk.desk.watcher import record_exit_distance
+            from alphadesk.ingest import prices as _prices
+            gap = (_prices.get_context(pick["symbol"]) or {}).get("ma_gap_pct")
+            if gap is not None:
+                record_exit_distance(pick["symbol"], pick["direction"], gap)
+        except Exception:
+            pass
+        return result
     finally:
         with _closing_lock:
             _closing_ids.discard(pick_id)
