@@ -7,18 +7,17 @@ composite-score engine (2026-08-14): "did THIS stock's own trend just start"
 instead of "is this the best of today's batch" or "did this reaction clear a
 threshold."
 
-The strategy (price/MA convergence/divergence, see _entry_signal):
+The strategy (price/SMA-50 crossover, see _entry_signal):
   • ENTRY: price crossed its 50-day SMA recently (a fresh trend just
     started), confirmed by RSI-9 momentum, relative volume, and a minimum
     ATR% (a dead/near-zero-volatility stock has no room to reach a
-    meaningful target/stop), and NOT already re-converging (which would
-    signal an imminent reversal).
+    meaningful target/stop).
   • REENTRY: after an exit, if price later extends further from the MA in
     the same direction (the trend continued past where we got out), a fresh
     entry is allowed without waiting for a brand new cross — capped at
     MAX_REENTRIES_PER_SYMBOL_PER_DAY total bookings per symbol+direction.
-  • EXIT: the existing tiered exits (quant/watcher.py) are unchanged, plus a
-    new MA-reconvergence trigger wired in from main.py's quant watch loop.
+  • EXIT: the existing tiered exits (quant/watcher.py) — target/stop/
+    trailing/spike/stale/session-close — are unchanged.
 
 Capital-size coordination (MAX_OPEN_POSITIONS / CONCENTRATION_MAX_PER_CLUSTER)
 stays wired in exactly as before — both are currently 0 (disabled) on the
@@ -32,7 +31,6 @@ from alphadesk.config import (
     CONCENTRATION_MAX_PER_CLUSTER,
     DAILY_LOSS_STOP_PCT,
     LOW_LIQUIDITY_DOLLAR_VOL,
-    MA_CONVERGENCE_LOOKBACK_DAYS,
     MA_CROSS_FRESH_DAYS,
     MA_ENTRY_MIN_ATR_PCT,
     MA_ENTRY_MIN_RVOL,
@@ -155,47 +153,24 @@ def refresh_pool() -> None:
                  len(_watched), len(new_syms), len(dropped), len(illiquid))
 
 
-def ma_trend_status(pctx: dict) -> dict:
-    """The same 'converging' definition _entry_signal uses to block new
-    entries, exposed for the exit side (main.py's _quantity_watch_loop) to
-    reuse verbatim — one definition, two call sites. Fails OPEN
-    (converging=False) on missing data, unlike the entry side's fail-closed —
-    forcing an exit off absent data would strip a position of its actual
-    safety net for no reason; quant/watcher.py's other five exit tiers remain
-    the backstop regardless."""
-    gap = pctx.get("ma_gap_pct")
-    gap_prior = pctx.get("ma_gap_pct_3d_ago")
-    if gap is None or gap_prior is None:
-        return {"converging": False}
-    return {"converging": abs(gap) < abs(gap_prior)}
-
-
 def _entry_signal(sym: str, pctx: dict) -> tuple[dict | None, str | None]:
-    """Rule-based MA-convergence/divergence entry gate — each candidate judged
-    purely on its own technical setup, no comparison against other candidates,
-    no composite score to tune against a batch. Returns (setup, None) on a
+    """Rule-based MA-crossover entry gate — each candidate judged purely on
+    its own technical setup, no comparison against other candidates, no
+    composite score to tune against a batch. Returns (setup, None) on a
     pass, (None, reason) on a drop. Never raises.
 
-    Entries fail CLOSED on missing MA/RSI data — better no signal than one we
-    can't confirm isn't about to reverse. (The exit-side MA-reconvergence
-    check in quant/watcher.py reuses this same "converging" definition but
-    fails OPEN on missing data instead — see main.py's _quantity_watch_loop.)
-    """
+    Fails CLOSED on missing MA/RSI data — better no signal than a guess."""
     gap = pctx.get("ma_gap_pct")
-    gap_prior = pctx.get("ma_gap_pct_3d_ago")
     rsi = pctx.get("rsi_9")
     rvol = pctx.get("rvol")
     days_since_cross = pctx.get("days_since_ma_cross")
 
-    if gap is None or gap_prior is None or rsi is None:
+    if gap is None or rsi is None:
         return None, "insufficient MA/RSI data"
 
     direction = "LONG" if gap > 0 else "SHORT" if gap < 0 else None
     if direction is None:
         return None, "no MA divergence"
-
-    if abs(gap) < abs(gap_prior):
-        return None, "MA converging — blocked, imminent reversal risk"
 
     if direction == "LONG":
         if not (RSI_LONG_MIN <= rsi <= RSI_LONG_MAX):
@@ -232,8 +207,8 @@ def _entry_signal(sym: str, pctx: dict) -> tuple[dict | None, str | None]:
     setup = {
         "direction": direction, "score": score,
         "entry_mode": "reentry" if is_reentry else "fresh_cross",
-        "signals": {"ma_gap_pct": gap, "ma_gap_pct_3d_ago": gap_prior,
-                    "days_since_ma_cross": days_since_cross, "rsi_9": rsi, "rvol": rvol},
+        "signals": {"ma_gap_pct": gap, "days_since_ma_cross": days_since_cross,
+                    "rsi_9": rsi, "rvol": rvol},
     }
     return setup, None
 
@@ -321,8 +296,7 @@ async def _book(sym: str, arts: list[dict], setup: dict, cur_sess: str,
     spy_ctx = await loop.run_in_executor(None, prices.get_context, "SPY")
     sig = setup["signals"]
     thesis = (f"MA setup: {sym} {direction} ({setup['entry_mode']}) — "
-              f"gap {sig['ma_gap_pct']:+.2f}% (was {sig['ma_gap_pct_3d_ago']:+.2f}% "
-              f"{MA_CONVERGENCE_LOOKBACK_DAYS}d ago), RSI-9 {sig['rsi_9']:.0f}, "
+              f"gap {sig['ma_gap_pct']:+.2f}%, RSI-9 {sig['rsi_9']:.0f}, "
               f"rvol {sig['rvol']:.1f}x, cross {sig['days_since_ma_cross']}d ago")
     pick_id = store.record_pick({
         "symbol": sym, "arm": "QUANT", "edge": edge,

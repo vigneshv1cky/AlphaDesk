@@ -385,17 +385,9 @@ async def _serve() -> None:
                         atr_pct = abs(target - entry) / entry / PLAN_TARGET_ATR * 100
                         qwatcher.set_atr(p["id"], atr_pct)
                     qwatcher.update_price(p["id"], cur)
-                    # MA-reconvergence exit: reuses get_context()'s 120s TTL
-                    # cache (already paid for by the entry watcher), so
-                    # calling it every 5s here is a cache hit ~24/25 times —
-                    # no new load class introduced.
-                    from alphadesk.desk.watcher import ma_trend_status
-                    from alphadesk.ingest import prices as _prices
-                    pctx = await loop.run_in_executor(None, _prices.get_context, p["symbol"])
-                    ma_converging = ma_trend_status(pctx or {})["converging"]
                     result = qwatcher.check_exits(
                         p["id"], p["direction"], entry,
-                        p["plan_target"], p["plan_stop"], cur, ma_converging)
+                        p["plan_target"], p["plan_stop"], cur)
                     if result:
                         spy_now = live_prices.get("SPY")
                         reason = f"quant-{result['reason']}"

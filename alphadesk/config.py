@@ -61,14 +61,13 @@ EARNINGS_POST_MAX_DAYS = int(os.environ.get("EARNINGS_POST_MAX_DAYS", "5"))
 MATERIAL_REACTION_PCT = float(os.environ.get("MATERIAL_REACTION_PCT", "1.5"))
 REACTION_AB_HORIZON_DAYS = int(os.environ.get("REACTION_AB_HORIZON_DAYS", "3"))
 
-# ── MA convergence/divergence entry engine (desk/watcher.py) ─────────────────
+# ── MA crossover entry engine (desk/watcher.py) ───────────────────────────────
 # Indicator periods themselves (SMA-50, RSI-9) are hardcoded at the
 # computation site in ingest/prices.py, matching the existing ATR-14
 # precedent — identity of the indicator, not a tunable. These are strategy
 # behavior, tunable independently of the indicator math.
 MA_CROSS_LOOKBACK_DAYS = int(os.environ.get("MA_CROSS_LOOKBACK_DAYS", "20"))       # trading days searched for a sign flip
 MA_CROSS_FRESH_DAYS = int(os.environ.get("MA_CROSS_FRESH_DAYS", "3"))             # cross must be within this many days to be "recent"
-MA_CONVERGENCE_LOOKBACK_DAYS = int(os.environ.get("MA_CONVERGENCE_LOOKBACK_DAYS", "3"))  # days-back reference for widening/narrowing check
 MA_ENTRY_MIN_RVOL = float(os.environ.get("MA_ENTRY_MIN_RVOL", "1.2"))
 # Floor only, no ceiling: a stock with near-zero volatility doesn't have room
 # to reach a meaningful target/stop even if trend/momentum/volume all confirm

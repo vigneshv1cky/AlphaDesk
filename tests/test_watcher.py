@@ -154,13 +154,13 @@ def test_tick_dropped_candidate_is_not_booked():
     assert any(r["symbol"] == "AAPL" and "no fresh cross" in r["reason"] for r in skipped)
 
 
-# ── _entry_signal: the MA-convergence rule engine ───────────────────────────
+# ── _entry_signal: the MA-crossover rule engine ─────────────────────────────
 
-def _pctx(gap=3.0, gap_prior=1.0, rsi=60.0, rvol=1.5, days_since_cross=1, atr_pct=2.0):
+def _pctx(gap=3.0, rsi=60.0, rvol=1.5, days_since_cross=1, atr_pct=2.0):
     """A pctx fixture that passes every gate by default (fresh-cross LONG) —
     each test overrides just the field(s) it's probing."""
-    return {"ma_gap_pct": gap, "ma_gap_pct_3d_ago": gap_prior, "rsi_9": rsi,
-            "rvol": rvol, "days_since_ma_cross": days_since_cross, "atr_pct": atr_pct}
+    return {"ma_gap_pct": gap, "rsi_9": rsi, "rvol": rvol,
+            "days_since_ma_cross": days_since_cross, "atr_pct": atr_pct}
 
 
 def test_entry_signal_fresh_cross_long_passes():
@@ -172,7 +172,7 @@ def test_entry_signal_fresh_cross_long_passes():
 
 def test_entry_signal_fresh_cross_short_passes():
     setup, reason = watcher._entry_signal(
-        "AAPL", _pctx(gap=-3.0, gap_prior=-1.0, rsi=40.0))
+        "AAPL", _pctx(gap=-3.0, rsi=40.0))
     assert reason is None
     assert setup["direction"] == "SHORT"
     assert setup["entry_mode"] == "fresh_cross"
@@ -182,15 +182,6 @@ def test_entry_signal_missing_data_fails_closed():
     setup, reason = watcher._entry_signal("AAPL", _pctx(gap=None))
     assert setup is None
     assert "insufficient" in reason
-
-
-def test_entry_signal_converging_blocks_entry():
-    """Gap narrowing vs. 3 days ago (was 3.0%, now 1.0%) signals an imminent
-    reversal — blocked even though direction/RSI/rvol/fresh-cross all pass."""
-    setup, reason = watcher._entry_signal(
-        "AAPL", _pctx(gap=1.0, gap_prior=3.0))
-    assert setup is None
-    assert "converging" in reason
 
 
 def test_entry_signal_rsi_out_of_band_rejects():
@@ -232,7 +223,7 @@ def test_entry_signal_reentry_without_fresh_cross_passes():
     needed, unlike the initial entry."""
     watcher._reentry_state[("AAPL", "LONG")] = 2.0
     setup, reason = watcher._entry_signal(
-        "AAPL", _pctx(gap=3.0, gap_prior=1.0, days_since_cross=10))
+        "AAPL", _pctx(gap=3.0, days_since_cross=10))
     assert reason is None
     assert setup["entry_mode"] == "reentry"
 
@@ -242,7 +233,7 @@ def test_entry_signal_reentry_needs_greater_distance():
     exit — no qualifying reentry."""
     watcher._reentry_state[("AAPL", "LONG")] = 2.0
     setup, reason = watcher._entry_signal(
-        "AAPL", _pctx(gap=1.5, gap_prior=1.0, days_since_cross=10))
+        "AAPL", _pctx(gap=1.5, days_since_cross=10))
     assert setup is None
     assert "no fresh cross" in reason
 
@@ -256,22 +247,8 @@ def test_entry_signal_per_symbol_reentry_cap():
     assert "cap" in reason
 
 
-# ── record_exit_distance / ma_trend_status ──────────────────────────────────
+# ── record_exit_distance ─────────────────────────────────────────────────────
 
 def test_record_exit_distance_stores_absolute_value():
     watcher.record_exit_distance("aapl", "SHORT", -2.5)
     assert watcher._reentry_state[("AAPL", "SHORT")] == 2.5
-
-
-def test_ma_trend_status_converging_true():
-    assert watcher.ma_trend_status(_pctx(gap=1.0, gap_prior=3.0))["converging"] is True
-
-
-def test_ma_trend_status_converging_false():
-    assert watcher.ma_trend_status(_pctx(gap=3.0, gap_prior=1.0))["converging"] is False
-
-
-def test_ma_trend_status_fails_open_on_missing_data():
-    """Unlike _entry_signal (fails closed), the exit-side check fails open —
-    missing data should never force an exit."""
-    assert watcher.ma_trend_status({})["converging"] is False

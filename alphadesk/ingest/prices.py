@@ -17,7 +17,6 @@ from typing import Any, Optional
 
 from alphadesk.config import (
     LOW_LIQUIDITY_DOLLAR_VOL,
-    MA_CONVERGENCE_LOOKBACK_DAYS,
     MA_CROSS_LOOKBACK_DAYS,
     now_et,
 )
@@ -164,8 +163,7 @@ def get_context(symbol: str) -> Optional[dict]:
         # its 50-day moving average) not a reaction magnitude. None-safe on
         # insufficient history, same try/except-per-indicator style as ATR
         # above (a bad indicator shouldn't fail the whole context dict).
-        sma_50 = None
-        ma_gap_pct = ma_gap_pct_3d_ago = None
+        sma_50 = ma_gap_pct = None
         days_since_ma_cross: int | None = None
         try:
             if len(closes) >= 50:
@@ -174,9 +172,6 @@ def get_context(symbol: str) -> Optional[dict]:
                 if len(gap_series):
                     sma_50 = round(float(sma_50_series.iloc[-1]), 4)
                     ma_gap_pct = round(float(gap_series.iloc[-1]), 3)
-                    if len(gap_series) > MA_CONVERGENCE_LOOKBACK_DAYS:
-                        ma_gap_pct_3d_ago = round(
-                            float(gap_series.iloc[-1 - MA_CONVERGENCE_LOOKBACK_DAYS]), 3)
                     # Days since the gap's sign last flipped, searched within a
                     # lookback window: walk backward from today counting
                     # consecutive days sharing today's sign. If the whole
@@ -237,7 +232,6 @@ def get_context(symbol: str) -> Optional[dict]:
             "sma_50": sma_50,
             "rsi_9": rsi_9,
             "ma_gap_pct": ma_gap_pct,
-            "ma_gap_pct_3d_ago": ma_gap_pct_3d_ago,
             "days_since_ma_cross": days_since_ma_cross,
             "last_trade_ts": rt_ts,  # None if no real-time Alpaca trade (stale yfinance only)
         }
