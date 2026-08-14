@@ -35,10 +35,11 @@ def test_refresh_pool_populates_from_candidates():
          patch("alphadesk.quant.stream.register") as mock_register:
         watcher.refresh_pool()
     assert set(watcher.watched_symbols()) == {"AAPL", "TSLA"}
-    # Every newly-seen symbol registers on the live price stream immediately —
-    # the old batch scanner never did this, so get_spread() was silently None
-    # for freshly-scored candidates the whole run.
-    assert mock_register.call_count == 2
+    # Watched candidates do NOT register on the live price stream — that
+    # 30-symbol budget (Basic data plan) is reserved for SPY + open positions,
+    # which the exit-side watcher depends on. get_spread() stays None for
+    # watched candidates, same as before the (reverted) eager-registration change.
+    mock_register.assert_not_called()
 
 
 def test_refresh_pool_anti_double_dip_excludes_held_symbol():

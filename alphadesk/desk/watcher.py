@@ -86,10 +86,16 @@ def clear_pool() -> None:
 
 def refresh_pool() -> None:
     """Refresh the set of symbols under watch from the earnings calendar. Cheap
-    (mostly DB reads); the only step on a slower cadence than tick(). Registers
-    newly-seen symbols on the live price stream immediately — the old batch
-    scanner never did this for candidates, so get_spread() was silently None
-    for them the whole run."""
+    (mostly DB reads); the only step on a slower cadence than tick(). Does NOT
+    register candidates on the live price stream — the account's data plan caps
+    WebSocket subscriptions at 30 symbols total, and that budget is reserved for
+    SPY + open positions (quant/watcher.py's exit monitoring depends on it).
+    With an uncapped watch pool (hundreds of candidates, vs. the old batch
+    scanner's top-6-per-cycle), registering every candidate blew through the
+    cap immediately (repeated "symbol limit exceeded" / 405 errors) and could
+    starve exit-side registrations of slots. get_spread()'s bid/ask is a soft
+    liquidity signal (score_candidate handles it being None), not worth the
+    live-stream slot; scoring otherwise runs entirely off REST/cached prices."""
     global _watched
     candidates = earnings.drift_candidates(EARNINGS_DRIFT_DAYS)
 
@@ -108,10 +114,6 @@ def refresh_pool() -> None:
         candidates.pop(sym, None)
 
     new_syms = set(candidates) - set(_watched)
-    if new_syms:
-        from alphadesk.quant import stream as qstream
-        for sym in new_syms:
-            qstream.register(sym)
 
     dropped = set(_watched) - set(candidates)
     _watched = candidates
