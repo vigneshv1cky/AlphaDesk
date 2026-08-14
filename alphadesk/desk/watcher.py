@@ -1,25 +1,30 @@
 """Entry watcher — continuous per-candidate evaluation. Zero LLM.
 
 Every earnings-adjacent candidate is watched continuously and judged purely
-on its own moving-average setup — no comparison against other candidates,
-no composite score, no reaction magnitude. This replaced a reaction-gated
-composite-score engine (2026-08-14): "did THIS stock's own trend just start"
-instead of "is this the best of today's batch" or "did this reaction clear a
-threshold."
+on its own technical setup — no comparison against other candidates, no
+composite score, no reaction magnitude.
 
-The strategy (price/SMA-50 crossover, see _entry_signal):
-  • ENTRY: price crossed its 50-day SMA recently (a fresh trend just
-    started), confirmed by RSI-9 momentum, relative volume, and a minimum
-    ATR% (a dead/near-zero-volatility stock has no room to reach a
-    meaningful target/stop).
-  • REENTRY: after an exit, if price later extends further from the MA in
-    the same direction (the trend continued past where we got out), a fresh
-    entry is allowed without waiting for a brand new cross — capped at
-    MAX_REENTRIES_PER_SYMBOL_PER_DAY total bookings per symbol+direction.
+Positions here are session-scoped (held for hours, not weeks), so the
+signal has to move on that clock. The strategy (see _entry_signal):
+  • DIRECTION: the slope of an INTRADAY moving average (1-min bars, see
+    ingest/prices.py's get_intraday_ma_context) — is the average itself
+    rising or falling, not which side of it price happens to be on. Raw
+    price whipsaws back and forth through an average constantly intraday;
+    the average is already smoothed, so its own slope is far more
+    chop-resistant than a live price/MA comparison.
+  • ENTRY: as soon as the slope direction is confirmed by RSI-9 momentum
+    (also intraday), relative volume, and a minimum ATR% (a dead/near-zero-
+    volatility stock has no room to reach a meaningful target/stop) — no
+    separate freshness gate, since the slope itself is already the
+    up-to-the-minute read.
   • EXIT: the existing tiered exits (quant/watcher.py) — target/stop/
-    trailing/spike/stale/session-close — are unchanged.
+    trailing/spike/stale/session-close — plus a trend-reversal tier: exit
+    when that same slope flips against the position.
 
 MAX_ENTRIES_PER_DAY is a runaway backstop, not a capital control.
+MAX_BOOKINGS_PER_SYMBOL_PER_DAY caps how many times one symbol+direction can
+be (re)booked in a day — since there's no freshness gate, a symbol can in
+principle requalify on the very next tick after an exit.
 """
 
 import asyncio
@@ -28,11 +33,10 @@ import logging
 from alphadesk.config import (
     DAILY_LOSS_STOP_PCT,
     LOW_LIQUIDITY_DOLLAR_VOL,
-    MA_CROSS_FRESH_DAYS,
     MA_ENTRY_MIN_ATR_PCT,
     MA_ENTRY_MIN_RVOL,
+    MAX_BOOKINGS_PER_SYMBOL_PER_DAY,
     MAX_ENTRIES_PER_DAY,
-    MAX_REENTRIES_PER_SYMBOL_PER_DAY,
     PAPER_TRADING,
     PLAN_STOP_ATR,
     PLAN_TARGET_ATR,
@@ -55,14 +59,8 @@ _shortable_cache: dict[str, bool] = {}
 _watched: dict[str, list[dict]] = {}
 _booked_today_count = 0
 _booked_today_date = None
-# (symbol, direction) → |ma_gap_pct| at the moment of the last exit — a later
-# tick may reenter the same symbol+direction once price has moved further
-# from the MA than this, without needing a fresh cross. Written by
-# desk/portfolio.py's close_and_exit() (the single choke-point every exit
-# path funnels through), consumed by _entry_signal() below.
-_reentry_state: dict[tuple[str, str], float] = {}
-# (symbol, direction) → total bookings today (initial + reentries) — enforces
-# MAX_REENTRIES_PER_SYMBOL_PER_DAY independent of the global MAX_ENTRIES_PER_DAY.
+# (symbol, direction) → total bookings today — enforces
+# MAX_BOOKINGS_PER_SYMBOL_PER_DAY independent of the global MAX_ENTRIES_PER_DAY.
 _bookings_today: dict[tuple[str, str], int] = {}
 
 
@@ -97,18 +95,7 @@ def clear_pool() -> None:
     _watched = {}
     _booked_today_count = 0
     _booked_today_date = None
-    _reentry_state.clear()
     _bookings_today.clear()
-
-
-def record_exit_distance(symbol: str, direction: str, distance_pct: float) -> None:
-    """Called by desk/portfolio.py's close_and_exit() — the single choke-point
-    every exit path (quant watcher, bar-touch watcher, session-close sweep)
-    funnels through — to remember how far price had moved from the MA at the
-    moment of exit. A later tick may reenter the same symbol+direction once
-    price has moved further from the MA than this, without waiting for a
-    fresh cross (see _entry_signal)."""
-    _reentry_state[(symbol.upper(), direction)] = abs(distance_pct)
 
 
 def refresh_pool() -> None:
@@ -150,23 +137,24 @@ def refresh_pool() -> None:
 
 
 def _entry_signal(sym: str, pctx: dict) -> tuple[dict | None, str | None]:
-    """Rule-based MA-crossover entry gate — each candidate judged purely on
-    its own technical setup, no comparison against other candidates, no
-    composite score to tune against a batch. Returns (setup, None) on a
-    pass, (None, reason) on a drop. Never raises.
+    """Rule-based MA-slope entry gate — each candidate judged purely on its
+    own technical setup, no comparison against other candidates, no
+    composite score to tune against a batch. Direction comes from the
+    INTRADAY moving average's own slope, not which side of it price happens
+    to be on (see the module docstring). Returns (setup, None) on a pass,
+    (None, reason) on a drop. Never raises.
 
-    Fails CLOSED on missing MA/RSI data — better no signal than a guess."""
-    gap = pctx.get("ma_gap_pct")
+    Fails CLOSED on missing data — better no signal than a guess."""
+    slope = pctx.get("sma_slope_pct")
     rsi = pctx.get("rsi_9")
     rvol = pctx.get("rvol")
-    days_since_cross = pctx.get("days_since_ma_cross")
 
-    if gap is None or rsi is None:
-        return None, "insufficient MA/RSI data"
+    if slope is None or rsi is None:
+        return None, "insufficient intraday MA/RSI data"
 
-    direction = "LONG" if gap > 0 else "SHORT" if gap < 0 else None
+    direction = "LONG" if slope > 0 else "SHORT" if slope < 0 else None
     if direction is None:
-        return None, "no MA divergence"
+        return None, "flat MA slope"
 
     if direction == "LONG":
         if not (RSI_LONG_MIN <= rsi <= RSI_LONG_MAX):
@@ -182,44 +170,39 @@ def _entry_signal(sym: str, pctx: dict) -> tuple[dict | None, str | None]:
     if atr_pct is None or atr_pct < MA_ENTRY_MIN_ATR_PCT:
         return None, f"volatility {atr_pct} below {MA_ENTRY_MIN_ATR_PCT:g}% ATR floor"
 
-    fresh_cross = days_since_cross is not None and days_since_cross <= MA_CROSS_FRESH_DAYS
     key = (sym.upper(), direction)
-    reentry_bar = _reentry_state.get(key)
-    # Reentry (pyramiding onto an already-established trend) does NOT need a
-    # fresh cross, but does still need every other confirmation above.
-    is_reentry = not fresh_cross and reentry_bar is not None and abs(gap) > reentry_bar
-    if not (fresh_cross or is_reentry):
-        return None, "no fresh cross, no qualifying reentry"
-
-    if _bookings_today.get(key, 0) >= MAX_REENTRIES_PER_SYMBOL_PER_DAY:
-        return None, f"per-symbol daily entry cap reached ({MAX_REENTRIES_PER_SYMBOL_PER_DAY})"
+    if _bookings_today.get(key, 0) >= MAX_BOOKINGS_PER_SYMBOL_PER_DAY:
+        return None, f"per-symbol daily entry cap reached ({MAX_BOOKINGS_PER_SYMBOL_PER_DAY})"
 
     # Informational magnitude only — NOT used to gate or rank candidates
     # against each other (the boolean chain above already decided pass/fail
     # independently per symbol). Reused for _book()'s conviction-sizing math,
     # which has zero effect on actual paper exposure (qty=1 always).
-    score = round(min(100.0, abs(gap) * 3.0 + abs(rsi - 50) * 0.5
+    score = round(min(100.0, abs(slope) * 100.0 + abs(rsi - 50) * 0.5
                        + max(0.0, (rvol or 0) - 1) * 5.0), 1)
     setup = {
         "direction": direction, "score": score,
-        "entry_mode": "reentry" if is_reentry else "fresh_cross",
-        "signals": {"ma_gap_pct": gap, "days_since_ma_cross": days_since_cross,
-                    "rsi_9": rsi, "rvol": rvol},
+        "signals": {"sma_slope_pct": slope, "rsi_9": rsi, "rvol": rvol, "atr_pct": atr_pct},
     }
     return setup, None
 
 
 async def score_candidate(sym: str, arts: list[dict]) -> tuple[dict | None, str | None]:
-    """Fetch price context and evaluate the technical setup for one candidate.
-    Returns (setup, None) on a pass, (None, reason) on a drop."""
+    """Fetch price context (daily liquidity/ATR facts + intraday MA slope/RSI)
+    and evaluate the technical setup for one candidate. Returns (setup, None)
+    on a pass, (None, reason) on a drop."""
     loop = asyncio.get_running_loop()
     pctx = await loop.run_in_executor(None, prices.get_context, sym) or {}
-    if not pctx or pctx.get("sma_50") is None:
+    if not pctx:
         return None, "insufficient price history"
-    setup, reason = _entry_signal(sym, pctx)
+    ma_ctx = await loop.run_in_executor(None, prices.get_intraday_ma_context, sym)
+    if not ma_ctx:
+        return None, "insufficient intraday bar history"
+    merged = {**pctx, **ma_ctx}
+    setup, reason = _entry_signal(sym, merged)
     if setup is None:
         return None, reason
-    setup["_pctx"] = pctx
+    setup["_pctx"] = merged
     return setup, None
 
 
@@ -229,7 +212,6 @@ def _reset_daily_count_if_new_day() -> None:
     if _booked_today_date != today:
         _booked_today_date = today
         _booked_today_count = 0
-        _reentry_state.clear()
         _bookings_today.clear()
 
 
@@ -280,9 +262,9 @@ async def _book(sym: str, arts: list[dict], setup: dict, cur_sess: str,
 
     spy_ctx = await loop.run_in_executor(None, prices.get_context, "SPY")
     sig = setup["signals"]
-    thesis = (f"MA setup: {sym} {direction} ({setup['entry_mode']}) — "
-              f"gap {sig['ma_gap_pct']:+.2f}%, RSI-9 {sig['rsi_9']:.0f}, "
-              f"rvol {sig['rvol']:.1f}x, cross {sig['days_since_ma_cross']}d ago")
+    thesis = (f"MA setup: {sym} {direction} — "
+              f"slope {sig['sma_slope_pct']:+.3f}%, RSI-9 {sig['rsi_9']:.0f}, "
+              f"rvol {sig['rvol']:.1f}x, ATR {sig['atr_pct']:.1f}%")
     pick_id = store.record_pick({
         "symbol": sym, "arm": "QUANT", "edge": edge,
         "source": "QUANT", "decision_id": f"q-{sym}",
@@ -297,7 +279,7 @@ async def _book(sym: str, arts: list[dict], setup: dict, cur_sess: str,
         "thesis": thesis,
         "debate": {"quant_signals": sig},
         "briefs": [],
-        "model_tags": {"mode": "entry_watch", "entry_mode": setup["entry_mode"]},
+        "model_tags": {"mode": "entry_watch"},
         "low_liquidity": int(bool(pctx.get("low_liquidity"))),
         "skeptic_moved_score": 0.0,
         "arbiter_overrode": 0,
@@ -309,8 +291,8 @@ async def _book(sym: str, arts: list[dict], setup: dict, cur_sess: str,
         "plan_note": (trade or {}).get("note"),
         "order_type": "market",
     })
-    log.info("QUANT pick #%d: %s %s (%s) score=%.0f entry=%.2f stop=%.2f tgt=%.2f",
-             pick_id, sym, direction, setup["entry_mode"], setup["score"],
+    log.info("QUANT pick #%d: %s %s score=%.0f entry=%.2f stop=%.2f tgt=%.2f",
+             pick_id, sym, direction, setup["score"],
              (trade or {}).get("entry", 0), (trade or {}).get("stop", 0), (trade or {}).get("target", 0))
 
     if PAPER_TRADING:
@@ -326,7 +308,6 @@ async def _book(sym: str, arts: list[dict], setup: dict, cur_sess: str,
     store.mark_taken([pick_id])
     _booked_today_count += 1
     _bookings_today[key] = _bookings_today.get(key, 0) + 1
-    _reentry_state.pop(key, None)
     return sym
 
 

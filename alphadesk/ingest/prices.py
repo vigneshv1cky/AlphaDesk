@@ -17,7 +17,8 @@ from typing import Any, Optional
 
 from alphadesk.config import (
     LOW_LIQUIDITY_DOLLAR_VOL,
-    MA_CROSS_LOOKBACK_DAYS,
+    MA_INTRADAY_HISTORY_DAYS,
+    MA_SLOPE_LOOKBACK_BARS,
     now_et,
 )
 
@@ -87,11 +88,7 @@ def get_context(symbol: str) -> Optional[dict]:
             return hit[1]
     try:
         import yfinance as yf
-        # 180d: SMA-50 needs 50 valid closes for one point, and tracking the
-        # price/SMA-50 gap as a SERIES over MA_CROSS_LOOKBACK_DAYS on top of that
-        # needs ~70 trading days minimum (~101 calendar days) — 180d leaves
-        # comfortable margin for holidays/gaps.
-        df = yf.Ticker(sym).history(period="180d", interval="1d")
+        df = yf.Ticker(sym).history(period="90d", interval="1d")
         if df is None or len(df) < 5:
             return None
         closes = df["Close"].astype(float)
@@ -158,52 +155,6 @@ def get_context(symbol: str) -> Optional[dict]:
         except Exception:
             pass
 
-        # SMA-50, RSI-9, and price/MA-gap/cross tracking — the technical-setup
-        # entry engine (desk/watcher.py) judges a stock's own trend (price vs
-        # its 50-day moving average) not a reaction magnitude. None-safe on
-        # insufficient history, same try/except-per-indicator style as ATR
-        # above (a bad indicator shouldn't fail the whole context dict).
-        sma_50 = ma_gap_pct = None
-        days_since_ma_cross: int | None = None
-        try:
-            if len(closes) >= 50:
-                sma_50_series = closes.rolling(50).mean()
-                gap_series = ((closes - sma_50_series) / sma_50_series * 100).dropna()
-                if len(gap_series):
-                    sma_50 = round(float(sma_50_series.iloc[-1]), 4)
-                    ma_gap_pct = round(float(gap_series.iloc[-1]), 3)
-                    # Days since the gap's sign last flipped, searched within a
-                    # lookback window: walk backward from today counting
-                    # consecutive days sharing today's sign. If the whole
-                    # window shares one sign, the flip is older than what
-                    # counts as "recent" — None, not 0 or the window length.
-                    sign_list = [1 if v > 0 else (-1 if v < 0 else 0)
-                                 for v in gap_series.tail(MA_CROSS_LOOKBACK_DAYS + 1)]
-                    cur_sign = sign_list[-1]
-                    if cur_sign != 0:
-                        run = 0
-                        for s in reversed(sign_list):
-                            if s == cur_sign:
-                                run += 1
-                            else:
-                                break
-                        days_since_ma_cross = (run - 1) if run < len(sign_list) else None
-        except Exception:
-            pass
-
-        rsi_9: float | None = None
-        try:
-            delta = closes.diff()
-            gain = delta.clip(lower=0)
-            loss = -delta.clip(upper=0)
-            avg_gain = gain.ewm(alpha=1 / 9, min_periods=9, adjust=False).mean()
-            avg_loss = loss.ewm(alpha=1 / 9, min_periods=9, adjust=False).mean()
-            ag, al = float(avg_gain.iloc[-1]), float(avg_loss.iloc[-1])
-            if math.isfinite(ag) and math.isfinite(al):
-                rsi_9 = 100.0 if al == 0 else round(100 - 100 / (1 + ag / al), 2)
-        except Exception:
-            pass
-
         def _pct_change(ref_idx: int) -> float:
             if len(closes) <= abs(ref_idx):
                 return 0.0
@@ -218,10 +169,6 @@ def get_context(symbol: str) -> Optional[dict]:
             "change_today_pct": round((last - prev) / prev * 100, 2) if prev else 0.0,
             "change_5d_pct": _pct_change(-6),
             "change_20d_pct": _pct_change(-21),
-            # Bounded to the trailing ~90 CALENDAR days (~63 trading days at
-            # a 5/7 ratio) independent of the wider 180d fetch above — before
-            # this bound, widening the fetch would have silently turned these
-            # into 180d figures while keeping the "_90d" name.
             "high_90d": round(float(closes.tail(63).max()), 2),
             "low_90d": round(float(closes.tail(63).min()), 2),
             "avg_dollar_vol": round(avg_dollar_vol),
@@ -229,10 +176,6 @@ def get_context(symbol: str) -> Optional[dict]:
             "low_liquidity": avg_dollar_vol < LOW_LIQUIDITY_DOLLAR_VOL,
             "closes_10d": [round(float(c), 2) for c in closes.tail(10)],
             "atr_pct": atr_pct,
-            "sma_50": sma_50,
-            "rsi_9": rsi_9,
-            "ma_gap_pct": ma_gap_pct,
-            "days_since_ma_cross": days_since_ma_cross,
             "last_trade_ts": rt_ts,  # None if no real-time Alpaca trade (stale yfinance only)
         }
         with _cache_lock:
@@ -693,6 +636,65 @@ def intraday_bars(symbol: str, start) -> list[dict]:
     except Exception as exc:
         log.debug("intraday_bars failed for %s: %s", symbol, exc)
         return []
+
+
+_intraday_ma_cache: dict[str, tuple[float, Optional[dict]]] = {}
+_INTRADAY_MA_TTL_S = 30
+
+
+def get_intraday_ma_context(symbol: str) -> Optional[dict]:
+    """Day-trading-scale technical signal — SMA-50 and RSI-9 computed on
+    MA_INTRADAY_HISTORY_DAYS of 1-minute bars (via intraday_bars(), Alpaca
+    IEX), not daily closes. Positions here are session-scoped (held for
+    hours, not weeks), so the signal has to move on that clock — a daily
+    SMA's slope barely changes within a single session.
+
+    Direction comes from sma_slope_pct: is the MOVING AVERAGE ITSELF rising
+    or falling over the last MA_SLOPE_LOOKBACK_BARS bars — not which side of
+    it price happens to be on right now. Raw price crossing back and forth
+    through the average is exactly the whipsaw noise this is built to avoid;
+    the average is already smoothed, so its own slope is far more
+    chop-resistant than a live price/MA comparison.
+
+    TTL-cached separately from get_context() — short enough an exit check
+    stays fresh, long enough not to refetch faster than a new bar can even
+    form."""
+    sym = symbol.upper()
+    with _cache_lock:
+        hit = _intraday_ma_cache.get(sym)
+        if hit and time.time() - hit[0] < _INTRADAY_MA_TTL_S:
+            return hit[1]
+    result: Optional[dict] = None
+    try:
+        from datetime import timedelta
+        start = now_et() - timedelta(days=MA_INTRADAY_HISTORY_DAYS + 3)  # weekend/holiday buffer
+        bars = intraday_bars(sym, start)
+        if len(bars) >= 50 + MA_SLOPE_LOOKBACK_BARS:
+            import pandas as pd
+            closes = pd.Series([b["close"] for b in bars])
+            sma = closes.rolling(50).mean().dropna()
+            if len(sma) > MA_SLOPE_LOOKBACK_BARS:
+                sma_now = float(sma.iloc[-1])
+                sma_then = float(sma.iloc[-1 - MA_SLOPE_LOOKBACK_BARS])
+                slope_pct = (round((sma_now - sma_then) / sma_then * 100, 4)
+                             if sma_then and math.isfinite(sma_then) else None)
+                delta = closes.diff()
+                gain = delta.clip(lower=0)
+                loss = -delta.clip(upper=0)
+                avg_gain = gain.ewm(alpha=1 / 9, min_periods=9, adjust=False).mean()
+                avg_loss = loss.ewm(alpha=1 / 9, min_periods=9, adjust=False).mean()
+                ag, al = float(avg_gain.iloc[-1]), float(avg_loss.iloc[-1])
+                rsi = None
+                if math.isfinite(ag) and math.isfinite(al):
+                    rsi = 100.0 if al == 0 else round(100 - 100 / (1 + ag / al), 2)
+                result = {"sma_50": round(sma_now, 4), "sma_slope_pct": slope_pct, "rsi_9": rsi}
+    except Exception as exc:
+        log.debug("intraday MA context failed %s: %s", sym, exc)
+    with _cache_lock:
+        if len(_intraday_ma_cache) >= _CACHE_MAX_ENTRIES:
+            _evict_expired(_intraday_ma_cache, _INTRADAY_MA_TTL_S)
+        _intraday_ma_cache[sym] = (time.time(), result)
+    return result
 
 
 def latest_prices(symbols: list[str]) -> dict[str, float]:

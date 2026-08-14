@@ -385,9 +385,20 @@ async def _serve() -> None:
                         atr_pct = abs(target - entry) / entry / PLAN_TARGET_ATR * 100
                         qwatcher.set_atr(p["id"], atr_pct)
                     qwatcher.update_price(p["id"], cur)
+                    # Trend-reversal exit: reuses get_intraday_ma_context()'s
+                    # 30s TTL cache (already paid for by the entry watcher),
+                    # so calling it every 5s here is a cache hit almost every
+                    # time — no new load class introduced.
+                    from alphadesk.ingest import prices as _prices
+                    ma_ctx = await loop.run_in_executor(
+                        None, _prices.get_intraday_ma_context, p["symbol"])
+                    slope = (ma_ctx or {}).get("sma_slope_pct")
+                    trend_reversed = slope is not None and (
+                        (p["direction"] == "LONG" and slope < 0)
+                        or (p["direction"] == "SHORT" and slope > 0))
                     result = qwatcher.check_exits(
                         p["id"], p["direction"], entry,
-                        p["plan_target"], p["plan_stop"], cur)
+                        p["plan_target"], p["plan_stop"], cur, trend_reversed)
                     if result:
                         spy_now = live_prices.get("SPY")
                         reason = f"quant-{result['reason']}"

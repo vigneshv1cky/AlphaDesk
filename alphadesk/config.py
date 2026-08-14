@@ -60,12 +60,22 @@ MATERIAL_REACTION_PCT = float(os.environ.get("MATERIAL_REACTION_PCT", "1.5"))
 REACTION_AB_HORIZON_DAYS = int(os.environ.get("REACTION_AB_HORIZON_DAYS", "3"))
 
 # ── MA crossover entry engine (desk/watcher.py) ───────────────────────────────
-# Indicator periods themselves (SMA-50, RSI-9) are hardcoded at the
-# computation site in ingest/prices.py, matching the existing ATR-14
-# precedent — identity of the indicator, not a tunable. These are strategy
-# behavior, tunable independently of the indicator math.
-MA_CROSS_LOOKBACK_DAYS = int(os.environ.get("MA_CROSS_LOOKBACK_DAYS", "20"))       # trading days searched for a sign flip
-MA_CROSS_FRESH_DAYS = int(os.environ.get("MA_CROSS_FRESH_DAYS", "3"))             # cross must be within this many days to be "recent"
+# Positions here are session-scoped (held for hours, not weeks), so the
+# direction/entry/exit signal has to move on that same clock — a daily SMA's
+# slope barely changes within a single session. sma_slope_pct/rsi_9 are
+# computed on INTRADAY bars (ingest/prices.py's get_intraday_ma_context),
+# not daily closes. Indicator periods (SMA-50, RSI-9) are hardcoded at the
+# computation site, matching the existing ATR-14 precedent — identity of the
+# indicator, not a tunable. These are strategy behavior, tunable
+# independently of the indicator math.
+MA_INTRADAY_BAR_MINUTES = int(os.environ.get("MA_INTRADAY_BAR_MINUTES", "1"))
+MA_INTRADAY_HISTORY_DAYS = int(os.environ.get("MA_INTRADAY_HISTORY_DAYS", "5"))
+# How many bars back to compare the SMA against for its slope — direction
+# comes from whether the average ITSELF is rising or falling, not which side
+# of it price happens to be on right now (that flips on every intraday
+# whipsaw; the average is already smoothed, so its slope is far more
+# chop-resistant).
+MA_SLOPE_LOOKBACK_BARS = int(os.environ.get("MA_SLOPE_LOOKBACK_BARS", "15"))
 MA_ENTRY_MIN_RVOL = float(os.environ.get("MA_ENTRY_MIN_RVOL", "1.2"))
 # Floor only, no ceiling: a stock with near-zero volatility doesn't have room
 # to reach a meaningful target/stop even if trend/momentum/volume all confirm
@@ -77,7 +87,10 @@ RSI_LONG_MIN = float(os.environ.get("RSI_LONG_MIN", "50"))
 RSI_LONG_MAX = float(os.environ.get("RSI_LONG_MAX", "70"))
 RSI_SHORT_MIN = float(os.environ.get("RSI_SHORT_MIN", "30"))
 RSI_SHORT_MAX = float(os.environ.get("RSI_SHORT_MAX", "50"))
-MAX_REENTRIES_PER_SYMBOL_PER_DAY = int(os.environ.get("MAX_REENTRIES_PER_SYMBOL_PER_DAY", "2"))
+# Total bookings (not just "reentries" — there's no separate freshness gate
+# anymore) allowed for one symbol+direction per day; a simple backstop
+# against rapid oscillation, not a capital control.
+MAX_BOOKINGS_PER_SYMBOL_PER_DAY = int(os.environ.get("MAX_BOOKINGS_PER_SYMBOL_PER_DAY", "2"))
 
 # ── Quant ────────────────────────────────────────────────────────────────────
 QUANT_STREAM_ENABLED = os.environ.get("QUANT_STREAM_ENABLED", "1") not in ("0", "", "false", "False", "no")
