@@ -156,11 +156,11 @@ def test_tick_dropped_candidate_is_not_booked():
 
 # ── _entry_signal: the MA-convergence rule engine ───────────────────────────
 
-def _pctx(gap=3.0, gap_prior=1.0, rsi=60.0, rvol=1.5, days_since_cross=1):
+def _pctx(gap=3.0, gap_prior=1.0, rsi=60.0, rvol=1.5, days_since_cross=1, atr_pct=2.0):
     """A pctx fixture that passes every gate by default (fresh-cross LONG) —
     each test overrides just the field(s) it's probing."""
     return {"ma_gap_pct": gap, "ma_gap_pct_3d_ago": gap_prior, "rsi_9": rsi,
-            "rvol": rvol, "days_since_ma_cross": days_since_cross}
+            "rvol": rvol, "days_since_ma_cross": days_since_cross, "atr_pct": atr_pct}
 
 
 def test_entry_signal_fresh_cross_long_passes():
@@ -203,6 +203,20 @@ def test_entry_signal_low_rvol_rejects():
     setup, reason = watcher._entry_signal("AAPL", _pctx(rvol=0.5))
     assert setup is None
     assert "rvol" in reason
+
+
+def test_entry_signal_low_volatility_rejects():
+    """Below the ATR% floor, a stock has no room to reach a meaningful
+    target/stop even with trend/momentum/volume all confirming."""
+    setup, reason = watcher._entry_signal("AAPL", _pctx(atr_pct=0.3))
+    assert setup is None
+    assert "volatility" in reason
+
+
+def test_entry_signal_missing_atr_rejects():
+    setup, reason = watcher._entry_signal("AAPL", _pctx(atr_pct=None))
+    assert setup is None
+    assert "volatility" in reason
 
 
 def test_entry_signal_no_fresh_cross_no_reentry_rejects():

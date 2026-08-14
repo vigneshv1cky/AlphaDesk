@@ -70,6 +70,12 @@ MA_CROSS_LOOKBACK_DAYS = int(os.environ.get("MA_CROSS_LOOKBACK_DAYS", "20"))    
 MA_CROSS_FRESH_DAYS = int(os.environ.get("MA_CROSS_FRESH_DAYS", "3"))             # cross must be within this many days to be "recent"
 MA_CONVERGENCE_LOOKBACK_DAYS = int(os.environ.get("MA_CONVERGENCE_LOOKBACK_DAYS", "3"))  # days-back reference for widening/narrowing check
 MA_ENTRY_MIN_RVOL = float(os.environ.get("MA_ENTRY_MIN_RVOL", "1.2"))
+# Floor only, no ceiling: a stock with near-zero volatility doesn't have room
+# to reach a meaningful target/stop even if trend/momentum/volume all confirm
+# — the setup is weak regardless. High volatility isn't filtered here since
+# plan.atr_plan already scales stop distance to it (PLAN_STOP_ATR); an
+# unvalidated first-pass value, not yet calibrated against outcomes.
+MA_ENTRY_MIN_ATR_PCT = float(os.environ.get("MA_ENTRY_MIN_ATR_PCT", "1.5"))
 RSI_LONG_MIN = float(os.environ.get("RSI_LONG_MIN", "50"))
 RSI_LONG_MAX = float(os.environ.get("RSI_LONG_MAX", "70"))
 RSI_SHORT_MIN = float(os.environ.get("RSI_SHORT_MIN", "30"))

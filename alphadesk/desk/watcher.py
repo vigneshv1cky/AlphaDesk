@@ -9,8 +9,10 @@ threshold."
 
 The strategy (price/MA convergence/divergence, see _entry_signal):
   • ENTRY: price crossed its 50-day SMA recently (a fresh trend just
-    started), confirmed by RSI-9 momentum and relative volume, and NOT
-    already re-converging (which would signal an imminent reversal).
+    started), confirmed by RSI-9 momentum, relative volume, and a minimum
+    ATR% (a dead/near-zero-volatility stock has no room to reach a
+    meaningful target/stop), and NOT already re-converging (which would
+    signal an imminent reversal).
   • REENTRY: after an exit, if price later extends further from the MA in
     the same direction (the trend continued past where we got out), a fresh
     entry is allowed without waiting for a brand new cross — capped at
@@ -32,6 +34,7 @@ from alphadesk.config import (
     LOW_LIQUIDITY_DOLLAR_VOL,
     MA_CONVERGENCE_LOOKBACK_DAYS,
     MA_CROSS_FRESH_DAYS,
+    MA_ENTRY_MIN_ATR_PCT,
     MA_ENTRY_MIN_RVOL,
     MAX_ENTRIES_PER_DAY,
     MAX_OPEN_POSITIONS,
@@ -203,6 +206,10 @@ def _entry_signal(sym: str, pctx: dict) -> tuple[dict | None, str | None]:
 
     if rvol is None or rvol < MA_ENTRY_MIN_RVOL:
         return None, f"rvol {rvol} below {MA_ENTRY_MIN_RVOL:g}x"
+
+    atr_pct = pctx.get("atr_pct")
+    if atr_pct is None or atr_pct < MA_ENTRY_MIN_ATR_PCT:
+        return None, f"volatility {atr_pct} below {MA_ENTRY_MIN_ATR_PCT:g}% ATR floor"
 
     fresh_cross = days_since_cross is not None and days_since_cross <= MA_CROSS_FRESH_DAYS
     key = (sym.upper(), direction)
