@@ -315,8 +315,14 @@ async def _serve() -> None:
             try:
                 from alphadesk.quant import stream as qstream
                 log.info("Starting Alpaca WebSocket stream for real-time prices")
-                await qstream.start_stream()
-                qstream.register("SPY")
+                # SPY must be in start_stream()'s initial symbol list, not a
+                # register() call right after — register() only sends a
+                # subscribe message once _connected is set, which happens
+                # inside the _run() task it just scheduled via create_task().
+                # That task hasn't had a chance to run yet (no await occurred
+                # in between), so _connected.is_set() is always False here and
+                # the SPY subscribe silently no-ops forever.
+                await qstream.start_stream(["SPY"])
             except Exception as exc:
                 log.warning("Alpaca stream start failed: %s — using REST price checks", exc)
         from alphadesk.quant import watcher as qwatcher
