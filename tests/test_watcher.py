@@ -113,13 +113,6 @@ def test_tick_respects_daily_safety_cap():
     assert asyncio.run(watcher.tick()) == []
 
 
-def test_tick_respects_max_open_positions_rail():
-    watcher._watched = {"AAPL": [{}]}
-    with patch.object(watcher, "MAX_OPEN_POSITIONS", 5), \
-         patch("alphadesk.ledger.store.open_position_count", return_value=5):
-        assert asyncio.run(watcher.tick()) == []
-
-
 def test_tick_respects_daily_loss_stop_rail():
     watcher._watched = {"AAPL": [{}]}
     with patch.object(watcher, "DAILY_LOSS_STOP_PCT", 10.0), \
@@ -137,8 +130,7 @@ def test_tick_dropped_candidate_is_not_booked():
     async def fake_score(sym, arts):
         return None, "no fresh cross, no qualifying reentry"
 
-    with patch.object(watcher, "MAX_OPEN_POSITIONS", 0), \
-         patch.object(watcher, "DAILY_LOSS_STOP_PCT", 0), \
+    with patch.object(watcher, "DAILY_LOSS_STOP_PCT", 0), \
          patch("alphadesk.ledger.store.open_taken_picks", return_value=[]), \
          patch.object(watcher, "score_candidate", side_effect=fake_score), \
          patch("alphadesk.ledger.store.funnel_add") as mock_funnel, \

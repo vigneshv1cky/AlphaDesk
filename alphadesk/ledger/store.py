@@ -964,11 +964,11 @@ def record_exit(pick_id: int, reason: str, exit_price: float | None = None,
 
 
 def open_position_count() -> int:
-    """Live open TAKEN positions (not exited, within window) — feeds the
-    MAX_OPEN_POSITIONS risk rail. exit_ts alone, not graded_at too — see
-    live_picks()'s docstring; a graded-but-unexited ghost position must still
-    count against the cap, real exposure doesn't stop existing just because a
-    horizon-based grade got computed on it."""
+    """Live open TAKEN positions (not exited, within window) — an informational
+    stat (dashboard /api/system, alert summaries). exit_ts alone, not
+    graded_at too — see live_picks()'s docstring; a graded-but-unexited ghost
+    position must still count as open, real exposure doesn't stop existing
+    just because a horizon-based grade got computed on it."""
     with _connect() as conn:
         return int(conn.execute(
             "SELECT count(*) FROM picks WHERE taken=1 AND exit_ts IS NULL"
@@ -999,19 +999,6 @@ def today_exit_stats() -> dict:
         per[s] = per.get(s, 0.0) + (r["exit_return_pct"] or 0)
     return {"total": round(total, 2), "n": len(rows),
             "per_session": {k: round(v, 2) for k, v in per.items()}}
-
-
-def cluster_take_count(cluster: str) -> int:
-    """How many TAKEN picks today share this (sector|direction) cluster."""
-    with _connect() as conn:
-        return int(conn.execute(
-            "SELECT count(*) FROM picks WHERE taken=1 AND cluster=? AND ts >= ?",
-            (cluster, _et_day_start_utc())).fetchone()[0])
-
-
-def set_cluster(pick_id: int, cluster: str | None) -> None:
-    with _lock, _connect() as conn:
-        conn.execute("UPDATE picks SET cluster=? WHERE id=?", (cluster, int(pick_id)))
 
 
 def cached_daily(symbols: list[str], start: str, end: str) -> dict[str, list[dict]]:

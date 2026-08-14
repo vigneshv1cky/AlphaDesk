@@ -19,23 +19,19 @@ The strategy (price/SMA-50 crossover, see _entry_signal):
   • EXIT: the existing tiered exits (quant/watcher.py) — target/stop/
     trailing/spike/stale/session-close — are unchanged.
 
-Capital-size coordination (MAX_OPEN_POSITIONS / CONCENTRATION_MAX_PER_CLUSTER)
-stays wired in exactly as before — both are currently 0 (disabled) on the
-live system. MAX_ENTRIES_PER_DAY is a runaway backstop, not a capital control.
+MAX_ENTRIES_PER_DAY is a runaway backstop, not a capital control.
 """
 
 import asyncio
 import logging
 
 from alphadesk.config import (
-    CONCENTRATION_MAX_PER_CLUSTER,
     DAILY_LOSS_STOP_PCT,
     LOW_LIQUIDITY_DOLLAR_VOL,
     MA_CROSS_FRESH_DAYS,
     MA_ENTRY_MIN_ATR_PCT,
     MA_ENTRY_MIN_RVOL,
     MAX_ENTRIES_PER_DAY,
-    MAX_OPEN_POSITIONS,
     MAX_REENTRIES_PER_SYMBOL_PER_DAY,
     PAPER_TRADING,
     PLAN_STOP_ATR,
@@ -258,17 +254,6 @@ async def _book(sym: str, arts: list[dict], setup: dict, cur_sess: str,
             gate_reasons.append({"symbol": sym, "reason": "SHORT not shortable at broker"})
             return None
 
-    cluster = None
-    if CONCENTRATION_MAX_PER_CLUSTER > 0:
-        fund = await loop.run_in_executor(None, prices.get_fundamentals, sym) or {}
-        sector = fund.get("sector")
-        if sector:
-            cluster = f"{sector}|{direction}"
-            if store.cluster_take_count(cluster) >= CONCENTRATION_MAX_PER_CLUSTER:
-                gate_reasons.append({"symbol": sym,
-                                     "reason": f"concentration cap: {cluster} already at {CONCENTRATION_MAX_PER_CLUSTER}"})
-                return None
-
     edge = "PRE_EARNINGS" if arts and arts[0].get("category") == "PRE_EARNINGS" else "MOMENTUM"
     horizon = pinned_horizon(edge)
     last = pctx.get("last_price")
@@ -303,7 +288,6 @@ async def _book(sym: str, arts: list[dict], setup: dict, cur_sess: str,
         "source": "QUANT", "decision_id": f"q-{sym}",
         "trigger_src": "ENTRY_WATCH", "session": cur_sess,
         "direction": direction, "horizon_days": horizon,
-        "cluster": cluster,   # sector|direction — for the concentration cap
         "score": setup["score"],
         "adjusted_score": conviction,
         "confidence": conviction,
@@ -359,8 +343,6 @@ async def tick() -> list[str]:
     if _booked_today_count >= MAX_ENTRIES_PER_DAY:
         return []
 
-    if MAX_OPEN_POSITIONS > 0 and store.open_position_count() >= MAX_OPEN_POSITIONS:
-        return []
     if DAILY_LOSS_STOP_PCT > 0 and store.today_realized_pnl_pct() <= -DAILY_LOSS_STOP_PCT:
         from alphadesk.app.alerts import notify
         notify(f"Risk rail: daily realized loss <= -{DAILY_LOSS_STOP_PCT:g}% — halted for the day", "error")
