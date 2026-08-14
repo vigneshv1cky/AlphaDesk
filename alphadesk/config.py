@@ -62,7 +62,7 @@ MATERIAL_REACTION_PCT = float(os.environ.get("MATERIAL_REACTION_PCT", "1.5"))
 REACTION_AB_HORIZON_DAYS = int(os.environ.get("REACTION_AB_HORIZON_DAYS", "3"))
 
 # ── MA convergence/divergence entry engine (desk/watcher.py) ─────────────────
-# Indicator periods themselves (SMA-20/50, RSI-9) are hardcoded at the
+# Indicator periods themselves (SMA-50, RSI-9) are hardcoded at the
 # computation site in ingest/prices.py, matching the existing ATR-14
 # precedent — identity of the indicator, not a tunable. These are strategy
 # behavior, tunable independently of the indicator math.

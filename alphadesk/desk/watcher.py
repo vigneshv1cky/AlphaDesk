@@ -7,10 +7,10 @@ composite-score engine (2026-08-14): "did THIS stock's own trend just start"
 instead of "is this the best of today's batch" or "did this reaction clear a
 threshold."
 
-The strategy (MA convergence/divergence, see _entry_signal):
-  • ENTRY: SMA-20/50 crossed recently (a fresh trend just started), confirmed
-    by RSI-9 momentum and relative volume, and NOT already re-converging
-    (which would signal an imminent reversal).
+The strategy (price/MA convergence/divergence, see _entry_signal):
+  • ENTRY: price crossed its 50-day SMA recently (a fresh trend just
+    started), confirmed by RSI-9 momentum and relative volume, and NOT
+    already re-converging (which would signal an imminent reversal).
   • REENTRY: after an exit, if price later extends further from the MA in
     the same direction (the trend continued past where we got out), a fresh
     entry is allowed without waiting for a brand new cross — capped at

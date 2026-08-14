@@ -89,7 +89,7 @@ def get_context(symbol: str) -> Optional[dict]:
     try:
         import yfinance as yf
         # 180d: SMA-50 needs 50 valid closes for one point, and tracking the
-        # SMA20/50 gap as a SERIES over MA_CROSS_LOOKBACK_DAYS on top of that
+        # price/SMA-50 gap as a SERIES over MA_CROSS_LOOKBACK_DAYS on top of that
         # needs ~70 trading days minimum (~101 calendar days) — 180d leaves
         # comfortable margin for holidays/gaps.
         df = yf.Ticker(sym).history(period="180d", interval="1d")
@@ -159,21 +159,19 @@ def get_context(symbol: str) -> Optional[dict]:
         except Exception:
             pass
 
-        # SMA-20/50, RSI-9, and MA-gap/cross tracking — the technical-setup
-        # entry engine (desk/watcher.py) judges a stock's own trend, not a
-        # reaction magnitude. None-safe on insufficient history, same
-        # try/except-per-indicator style as ATR above (a bad indicator
-        # shouldn't fail the whole context dict).
-        sma_20 = sma_50 = None
+        # SMA-50, RSI-9, and price/MA-gap/cross tracking — the technical-setup
+        # entry engine (desk/watcher.py) judges a stock's own trend (price vs
+        # its 50-day moving average) not a reaction magnitude. None-safe on
+        # insufficient history, same try/except-per-indicator style as ATR
+        # above (a bad indicator shouldn't fail the whole context dict).
+        sma_50 = None
         ma_gap_pct = ma_gap_pct_3d_ago = None
         days_since_ma_cross: int | None = None
         try:
             if len(closes) >= 50:
-                sma_20_series = closes.rolling(20).mean()
                 sma_50_series = closes.rolling(50).mean()
-                gap_series = ((sma_20_series - sma_50_series) / sma_50_series * 100).dropna()
+                gap_series = ((closes - sma_50_series) / sma_50_series * 100).dropna()
                 if len(gap_series):
-                    sma_20 = round(float(sma_20_series.iloc[-1]), 4)
                     sma_50 = round(float(sma_50_series.iloc[-1]), 4)
                     ma_gap_pct = round(float(gap_series.iloc[-1]), 3)
                     if len(gap_series) > MA_CONVERGENCE_LOOKBACK_DAYS:
@@ -236,7 +234,6 @@ def get_context(symbol: str) -> Optional[dict]:
             "low_liquidity": avg_dollar_vol < LOW_LIQUIDITY_DOLLAR_VOL,
             "closes_10d": [round(float(c), 2) for c in closes.tail(10)],
             "atr_pct": atr_pct,
-            "sma_20": sma_20,
             "sma_50": sma_50,
             "rsi_9": rsi_9,
             "ma_gap_pct": ma_gap_pct,

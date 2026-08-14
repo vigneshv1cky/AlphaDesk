@@ -10,7 +10,7 @@ Exit tiers (priority order):
   4. Spike reversal — unusual volatility spike that reverses (blow-off top /
      capitulation bottom)
   5. Stale exit — no significant movement hours after entry
-  7. MA reconvergence — the SMA20/50 gap that justified entry (desk/watcher.py's
+  7. MA reconvergence — the price/SMA-50 gap that justified entry (desk/watcher.py's
      technical-setup engine) is closing back up; checked after hard
      target/stop (never skip a realized fill for a soft signal) but before
      trailing/give-back/spike (a "thesis invalidated" signal is more decisive
@@ -151,7 +151,7 @@ def check_exits(pick_id: int, direction: str, entry: float,
     """Check all exit tiers for a position. Returns the FIRST exit triggered,
     or None if no exit condition is met.
 
-    ma_converging: True if the SMA20/50 gap that justified a technical-setup
+    ma_converging: True if the price/SMA-50 gap that justified a technical-setup
     entry (desk/watcher.py) is closing back up — the trend is fading, exit
     regardless of P&L. Fails open by default (False) so positions entered
     some other way, or with missing indicator data, are unaffected.
