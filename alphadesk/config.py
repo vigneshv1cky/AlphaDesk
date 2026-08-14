@@ -65,7 +65,29 @@ QUANT_CALIBRATE = os.environ.get("QUANT_CALIBRATE", "1") not in ("0", "", "false
 # tradeable movers before they were ever scored; 80 covers a normal day much more
 # fully while still finishing inside the 5-min cadence at the existing 8-way
 # concurrency.
+# UNUSED as of the entry-watcher replacement (2026-08-13) — desk/watcher.py
+# watches every candidate uncapped, no batch-cadence deadline to size against.
+# Left defined (dead, harmless) rather than deleted.
 QUANT_SCORE_CANDIDATES = int(os.environ.get("QUANT_SCORE_CANDIDATES", "80"))
+
+# ── Entry watcher (continuous per-candidate, replaces the batch scanner) ─────
+# How often the watcher re-evaluates its whole pool (each tick is cheap: mostly
+# TTL-cache hits in prices.get_context/get_fundamentals/moves_since_report).
+ENTRY_WATCH_INTERVAL_S = int(os.environ.get("ENTRY_WATCH_INTERVAL_S", "30"))
+# How often the candidate pool itself (which symbols are being watched at all)
+# refreshes from the earnings calendar — this is the only DB-heavy step.
+POOL_REFRESH_S = int(os.environ.get("POOL_REFRESH_S", "60"))
+# Absolute reference point for conviction sizing (composite score that counts as
+# "full conviction"). The old batch scanner scaled against the strongest score
+# in that run's top-N; with no batch there's nothing to scale against, so this
+# is a fixed empirical anchor instead. Doesn't affect order size (qty=1 either
+# way) — only the stored conviction/confidence display fields.
+QUANT_SCORE_FULL_CONVICTION = float(os.environ.get("QUANT_SCORE_FULL_CONVICTION", "30"))
+# Runaway guard: an uncapped continuous watcher can in principle book far more
+# per day than the old top-6-per-cycle scanner ever could. Not a capital/sizing
+# control (that's still deferred) — a basic backstop against a bug causing
+# repeated/runaway booking, same spirit as the old (now-removed) daily API cap.
+MAX_ENTRIES_PER_DAY = int(os.environ.get("MAX_ENTRIES_PER_DAY", "100"))
 
 # ── Exit parameters (self-optimizing via calibrator) ─────────────────────────
 PLAN_TARGET_ATR = float(os.environ.get("PLAN_TARGET_ATR", "2.0"))        # target = entry ± ATR × this

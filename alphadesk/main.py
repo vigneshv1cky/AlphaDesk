@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import logging
 import sys
+import time
 
 
 def _setup_logging() -> None:
@@ -77,8 +78,8 @@ async def _serve() -> None:
         """Watch open picks between runs — the price-based exit (pure code):
         walk intraday minute bars, close at the first target/stop touched.
         OPEN hours: bar-based + Model-A fills; CLOSED: skip monitoring. Entries
-        are OPEN-only (see desk/stream.py), so there's no extended-hours fill
-        path here anymore — any position still open in PRE/AFTER (from before
+        are OPEN-only (see _entry_watch_loop below), so there's no extended-hours
+        fill path here anymore — any position still open in PRE/AFTER (from before
         that gate, or the tail end of an OPEN position still winding down) is
         covered by the quant tiered-exit watcher (_quantity_watch_loop, which
         monitors any session but CLOSED) and the session-close sweep below."""
@@ -189,7 +190,7 @@ async def _serve() -> None:
                                         "%.1f%% from current price %.2f — possibly thin "
                                         "extended-hours fill",
                                         p["id"], p["symbol"], fill_px, div, cur)
-                    # Entries are OPEN-only (see desk/stream.py's session gate), so
+                    # Entries are OPEN-only (see _entry_watch_loop's session gate), so
                     # every live pick here fills at decision time. Anything still
                     # unfilled once its fill moment has passed (e.g. a limit never
                     # reached) was never filled → NOT TAKEN.
@@ -271,85 +272,36 @@ async def _serve() -> None:
             scheduler.beat()   # 180s liveness for /healthz (grader's hourly beat is too coarse)
             await asyncio.sleep(WATCH_INTERVAL_S)   # configurable; default 60s
 
-    async def _autorun_loop():
-        """Auto-fire Find Trades every AUTORUN_INTERVAL_MINUTES within [START, END] ET."""
-        from datetime import datetime, timedelta
-
-        from alphadesk.config import (
-            AUTORUN_END_ET,
-            AUTORUN_INTERVAL_MINUTES,
-            AUTORUN_START_ET,
-            ET,
-            now_et,
-        )
-        from alphadesk.ledger import store
-        log = logging.getLogger("alphadesk.autorun")
-        if AUTORUN_INTERVAL_MINUTES <= 0 or not AUTORUN_START_ET:
-            log.info("Auto-run disabled")
-            return
-        try:
-            s_h, s_m = (int(x) for x in AUTORUN_START_ET.split(":"))
-            e_h, e_m = (int(x) for x in AUTORUN_END_ET.split(":"))
-        except Exception:
-            log.error("Bad AUTORUN_START/END_ET — auto-run disabled")
-            return
-        log.info("Auto-run: every %dm, %s–%s ET", int(AUTORUN_INTERVAL_MINUTES),
-                 AUTORUN_START_ET, AUTORUN_END_ET)
-        running = False
+    async def _entry_watch_loop():
+        """Continuous per-candidate entry decisions — replaces the old batch
+        Find Trades scanner (2026-08-13). No fixed cadence forcing candidates to
+        compete for a top-N slot: every earnings candidate is watched
+        independently and booked the moment it clears the score bar on its own
+        merit. See desk/watcher.py's module docstring for the full rationale."""
+        from alphadesk.config import ENTRY_WATCH_INTERVAL_S, POOL_REFRESH_S
+        from alphadesk.config import entry_allowed
+        from alphadesk.config import session as market_session
+        from alphadesk.desk import watcher as entry_watcher
+        log = logging.getLogger("alphadesk.entrywatch")
+        loop = asyncio.get_running_loop()
+        last_refresh = 0.0
         while True:
             try:
-                now = now_et()
-                in_window = (now.weekday() < 5
-                             and (now.hour, now.minute) >= (s_h, s_m)
-                             and (now.hour, now.minute) < (e_h, e_m))
-                window_start = now.replace(hour=s_h, minute=s_m, second=0, microsecond=0)
-                mins_since_start = (now - window_start).total_seconds() / 60
-                interval_min = int(AUTORUN_INTERVAL_MINUTES)
-                elapsed = int(mins_since_start) // interval_min
-                current_slot = window_start + timedelta(minutes=elapsed * interval_min)
-                if in_window and not running and now >= current_slot:
-                    lt = store.last_run_time("FIND_TRADES")
-                    last_slot = None
-                    if lt:
-                        try:
-                            last_dt = datetime.fromisoformat(lt).astimezone(ET)
-                            last_slot = last_dt.replace(minute=int(last_dt.minute // interval_min) * interval_min,
-                                                        second=0, microsecond=0)
-                        except (ValueError, TypeError):
-                            pass
-                    if last_slot is None or last_slot < current_slot:
-                        running = True
-                        try:
-                            log.info("Auto-run: firing Find Trades")
-                            from alphadesk.desk.stream import stream_find_trades
-                            picks_found = 0
-                            quant_picks = 0
-                            quant_dropped = 0
-                            async for _ev in stream_find_trades(hours=24.0):
-                                t = _ev.get("type", "")
-                                if t == "decision":
-                                    picks_found += 1
-                                elif t == "status":
-                                    msg = _ev.get("msg", "")
-                                    if "Quant pre-filter dropped" in msg:
-                                        quant_dropped = int(
-                                            msg.split()[4]) if len(msg.split()) > 4 else 0
-                                    elif msg.startswith("Quant-only:"):
-                                        quant_picks += 1
-                            summary_parts = [f"{picks_found} pick(s)"]
-                            if quant_picks:
-                                summary_parts.append(f"{quant_picks} quant-only")
-                            if quant_dropped:
-                                summary_parts.append(f"{quant_dropped} pre-filtered out")
-                            log.info("Auto-run complete — %s", ", ".join(summary_parts))
-                            if picks_found:
-                                from alphadesk.app.alerts import notify
-                                notify("Find Trades: " + ", ".join(summary_parts), "pick")
-                        finally:
-                            running = False
+                if market_session() == "OPEN" and entry_allowed():
+                    now = time.monotonic()
+                    if now - last_refresh >= POOL_REFRESH_S:
+                        await loop.run_in_executor(None, entry_watcher.refresh_pool)
+                        last_refresh = now
+                    booked = await entry_watcher.tick()
+                    if booked:
+                        log.info("Entry watch: booked %s", ", ".join(booked))
+                        from alphadesk.app.alerts import notify
+                        notify(f"Entry watch: booked {', '.join(booked)}", "pick")
             except Exception as exc:
-                log.error("auto-run error: %s", exc)
-            await asyncio.sleep(60)   # check each minute
+                log.error("entry watch error: %s", exc)
+            from alphadesk.app import scheduler
+            scheduler.beat()
+            await asyncio.sleep(ENTRY_WATCH_INTERVAL_S)
 
     async def _quantity_watch_loop():
         """Quant-tiered exits (trailing stop, spike detection, stale expiry) — runs
@@ -463,7 +415,7 @@ async def _serve() -> None:
                 log.error("daily summary error: %s", exc)
             await asyncio.sleep(300)
 
-    await asyncio.gather(_grader_loop(), _earnings_loop(), _autorun_loop(),
+    await asyncio.gather(_grader_loop(), _earnings_loop(), _entry_watch_loop(),
                          _position_watch_loop(), _quantity_watch_loop(),
                          _daily_summary_loop(), _web_server().serve())
 

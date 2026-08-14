@@ -61,7 +61,7 @@ def route_pick(pick_id: int, symbol: str, direction: str, price: float,
     this doesn't affect research correctness, only actual paper-account
     dollar exposure per name (which now varies by price instead of being
     pinned to ~$10 — acceptable for a research/paper system, not real money).
-    Entries are OPEN-only (see desk/stream.py's session gate), so this only
+    Entries are OPEN-only (see main.py's _entry_watch_loop session gate), so this only
     ever places a regular-hours market order — no extended-hours limit path.
     Returns True if routed, or False on an actual failure (bad price, API
     error — the caller should NOT take the pick). Never raises."""

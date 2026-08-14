@@ -47,7 +47,7 @@ async def research_run(candidates: dict[str, list[dict]], trigger_src: str = "ST
         _seed_cooldowns_from_ledger()
     now = time.monotonic()
 
-    # Entries are OPEN-only (matches desk/stream.py's live pipeline gate). Without
+    # Entries are OPEN-only (matches desk/watcher.py's live pipeline gate). Without
     # this, a CLOSED-time run stamped its pick "PRE" with entry_price left None
     # for "the next 4:00 fill" — but entry_fill_time() only actually queues a
     # fill for a pick stamped literally "CLOSED", not "PRE", so that pick's fill
