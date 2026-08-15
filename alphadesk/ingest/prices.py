@@ -644,22 +644,22 @@ _INTRADAY_MA_TTL_S = 30
 
 
 def get_intraday_ma_context(symbol: str) -> Optional[dict]:
-    """Day-trading-scale technical signal — MACD(12,26,9) and RSI-9 computed
-    on MA_INTRADAY_HISTORY_DAYS of 1-minute bars (via intraday_bars(),
-    Alpaca IEX), not daily closes. Positions here are session-scoped (held
-    for hours, not weeks), so the signal has to move on that clock.
-
-    macd_regime: is the MACD line (EMA-12 minus EMA-26) currently above or
-    below its own signal line (EMA-9 of the MACD line) — the classic
-    12/26/9 periods, used as-is rather than rescaled for intraday bars.
-    This is the DIRECTION/trend filter, not an entry trigger by itself.
+    """Day-trading-scale technical signal — RSI-9 computed on
+    MA_INTRADAY_HISTORY_DAYS of 1-minute bars (via intraday_bars(), Alpaca
+    IEX), not daily closes. Positions here are session-scoped (held for
+    hours, not weeks), so the signal has to move on that clock.
 
     rsi_cross: RSI-9 crossing UP through RSI_CROSS_OVERSOLD or DOWN through
     RSI_CROSS_OVERBOUGHT between the last two bars — a threshold-CROSSING
     event, not "wait for the extreme" (only knowable in hindsight, after
-    it's already reversed). This is the ENTRY TIMING signal within whichever
-    direction macd_regime allows: the trend decides direction, this decides
-    when.
+    it's already reversed). This ONE signal decides both DIRECTION and
+    TIMING: which threshold got crossed, and which way, is the whole setup.
+
+    Deliberately a single indicator. An earlier build paired MACD(12,26,9)
+    as a separate trend/direction filter, but two independently-moving
+    signals can briefly disagree (MACD about to flip while RSI has already
+    crossed for the OLD regime), which entered trades right before a
+    reversal. One signal can't disagree with itself.
 
     TTL-cached separately from get_context() — short enough an exit check
     stays fresh, long enough not to refetch faster than a new bar can even
@@ -674,16 +674,11 @@ def get_intraday_ma_context(symbol: str) -> Optional[dict]:
         from datetime import timedelta
         start = now_et() - timedelta(days=MA_INTRADAY_HISTORY_DAYS + 3)  # weekend/holiday buffer
         bars = intraday_bars(sym, start)
-        if len(bars) >= 60:
+        # 30 bars, not the 60 the MACD build needed (EMA-26 convergence):
+        # RSI-9's Wilder smoothing is settled well inside 3x its period.
+        if len(bars) >= 30:
             import pandas as pd
             closes = pd.Series([b["close"] for b in bars])
-
-            ema_fast = closes.ewm(span=12, adjust=False).mean()
-            ema_slow = closes.ewm(span=26, adjust=False).mean()
-            macd_line = ema_fast - ema_slow
-            signal_line = macd_line.ewm(span=9, adjust=False).mean()
-            macd_diff = float((macd_line - signal_line).iloc[-1])
-            macd_regime = "LONG" if macd_diff > 0 else "SHORT" if macd_diff < 0 else None
 
             delta = closes.diff()
             gain = delta.clip(lower=0)
@@ -697,14 +692,14 @@ def get_intraday_ma_context(symbol: str) -> Optional[dict]:
 
             rsi_now = float(rsi_series.iloc[-1])
             rsi_prev = float(rsi_series.iloc[-2]) if len(rsi_series) > 1 else None
-            # Four crossing flags, not one: MACD+RSI drive BOTH entry and
+            # Four crossing flags, not one: RSI alone drives BOTH entry and
             # exit, and each direction needs a different pair. Entry: RSI
-            # crossing UP through oversold confirms a LONG, crossing DOWN
-            # through overbought confirms a SHORT (the reversion just
-            # started). Exit: the OPPOSITE crossing — RSI crossing UP through
-            # overbought means a LONG's reversion has played out (take the
-            # signal-based exit), crossing DOWN through oversold means the
-            # same for a SHORT.
+            # crossing UP through oversold IS the LONG, crossing DOWN
+            # through overbought IS the SHORT (the reversion just started —
+            # the cross decides direction, nothing else votes). Exit: the
+            # OPPOSITE crossing — RSI crossing UP through overbought means a
+            # LONG's reversion has played out (take the signal-based exit),
+            # crossing DOWN through oversold means the same for a SHORT.
             rsi_cross_up_oversold = rsi_cross_down_overbought = False
             rsi_cross_up_overbought = rsi_cross_down_oversold = False
             if rsi_prev is not None and math.isfinite(rsi_prev) and math.isfinite(rsi_now):
@@ -714,8 +709,6 @@ def get_intraday_ma_context(symbol: str) -> Optional[dict]:
                 rsi_cross_down_oversold = rsi_prev > RSI_CROSS_OVERSOLD >= rsi_now
 
             result = {
-                "macd_regime": macd_regime,
-                "macd_diff": round(macd_diff, 4),
                 "rsi_9": round(rsi_now, 2) if math.isfinite(rsi_now) else None,
                 "rsi_cross_up_oversold": rsi_cross_up_oversold,
                 "rsi_cross_down_overbought": rsi_cross_down_overbought,

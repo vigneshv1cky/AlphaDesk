@@ -385,25 +385,20 @@ async def _serve() -> None:
                         atr_pct = abs(target - entry) / entry / PLAN_TARGET_ATR * 100
                         qwatcher.set_atr(p["id"], atr_pct)
                     qwatcher.update_price(p["id"], cur)
-                    # Signal-reversal exit: MACD and RSI together, same as
-                    # entry — MACD regime flipping against the position means
-                    # the trend that justified entry is gone; RSI crossing
-                    # the OPPOSITE threshold (overbought for a LONG, oversold
-                    # for a SHORT) means the reversion it was timed on has
-                    # completed. Either one exits. Reuses
+                    # Signal-reversal exit: the same lone RSI that set the
+                    # entry direction, crossing the OPPOSITE threshold —
+                    # overbought for a LONG, oversold for a SHORT — means the
+                    # reversion it was timed on has completed. Reuses
                     # get_intraday_ma_context()'s 30s TTL cache (already paid
                     # for by the entry watcher), so calling it every 5s here
                     # is a cache hit almost every time — no new load class.
                     from alphadesk.ingest import prices as _prices
                     ma_ctx = await loop.run_in_executor(
                         None, _prices.get_intraday_ma_context, p["symbol"])
-                    macd_regime = (ma_ctx or {}).get("macd_regime")
                     if p["direction"] == "LONG":
-                        signal_reversed = (macd_regime == "SHORT"
-                                          or bool((ma_ctx or {}).get("rsi_cross_up_overbought")))
+                        signal_reversed = bool((ma_ctx or {}).get("rsi_cross_up_overbought"))
                     else:
-                        signal_reversed = (macd_regime == "LONG"
-                                          or bool((ma_ctx or {}).get("rsi_cross_down_oversold")))
+                        signal_reversed = bool((ma_ctx or {}).get("rsi_cross_down_oversold"))
                     result = qwatcher.check_exits(
                         p["id"], p["direction"], entry,
                         p["plan_target"], p["plan_stop"], cur, signal_reversed)

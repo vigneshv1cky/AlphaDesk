@@ -10,11 +10,11 @@ Exit tiers (priority order):
   4. Spike reversal — unusual volatility spike that reverses (blow-off top /
      capitulation bottom)
   5. Stale exit — no significant movement hours after entry
-  7. Signal reversal — the intraday MACD/RSI setup that justified entry
-     (desk/watcher.py's technical-setup engine) has reversed: MACD regime
-     flipped against the position, OR RSI crossed the opposite threshold
-     (overbought for a LONG, oversold for a SHORT — the reversion it was
-     timed on has completed). Checked after hard target/stop (never skip a
+  7. Signal reversal — the intraday RSI setup that justified entry
+     (desk/watcher.py's technical-setup engine) has reversed: RSI crossed
+     the opposite threshold (overbought for a LONG, oversold for a SHORT —
+     the reversion it was timed on has completed). Checked after hard
+     target/stop (never skip a
      realized fill for a soft signal) but before trailing/give-back/spike (a
      "thesis invalidated" signal is more decisive than those heuristics).
      This is the PRIMARY expected exit for this engine — the hard stop-loss
@@ -156,11 +156,11 @@ def check_exits(pick_id: int, direction: str, entry: float,
     """Check all exit tiers for a position. Returns the FIRST exit triggered,
     or None if no exit condition is met.
 
-    signal_reversed: True if the intraday MACD/RSI setup that set the entry
-    direction (desk/watcher.py) has reversed — MACD regime flipped against
-    the position, or RSI crossed the opposite threshold (the reversion it
-    was timed on completed). Either means the thesis that justified entry is
-    gone, exit regardless of P&L. Fails open by default (False) so positions
+    signal_reversed: True if the intraday RSI setup that set the entry
+    direction (desk/watcher.py) has reversed — RSI crossed the opposite
+    threshold, so the reversion it was timed on has completed. The thesis
+    that justified entry is gone; exit regardless of P&L. Fails open by
+    default (False) so positions
     entered some other way, or with missing indicator data, are unaffected.
 
     Returns {level, price, reason} or None.
@@ -185,7 +185,7 @@ def check_exits(pick_id: int, direction: str, entry: float,
     # (a "thesis invalidated" signal is more decisive than those heuristics).
     if signal_reversed:
         return {"level": "signal-reverse", "price": round(ptr, 4),
-                "reason": "MACD/RSI signal reversed — thesis invalidated", "tier": EXIT_TREND_REVERSE}
+                "reason": "RSI signal reversed — thesis invalidated", "tier": EXIT_TREND_REVERSE}
 
     # Tier 2: trailing stop (only if activated by profit)
     peak = _trail_peaks.get(pick_id, entry)

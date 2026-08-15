@@ -59,15 +59,14 @@ EARNINGS_POST_MAX_DAYS = int(os.environ.get("EARNINGS_POST_MAX_DAYS", "5"))
 MATERIAL_REACTION_PCT = float(os.environ.get("MATERIAL_REACTION_PCT", "1.5"))
 REACTION_AB_HORIZON_DAYS = int(os.environ.get("REACTION_AB_HORIZON_DAYS", "3"))
 
-# ── MA crossover entry engine (desk/watcher.py) ───────────────────────────────
+# ── RSI entry engine (desk/watcher.py) ────────────────────────────────────────
 # Positions here are session-scoped (held for hours, not weeks), so the
-# direction/entry/exit signal has to move on that same clock. macd_regime/
-# rsi_9 are computed on INTRADAY bars (ingest/prices.py's
-# get_intraday_ma_context), not daily closes. Indicator periods (MACD
-# 12/26/9 — the classic periods, used as-is rather than rescaled for
-# intraday bars; RSI-9) are hardcoded at the computation site, matching the
-# existing ATR-14 precedent — identity of the indicator, not a tunable.
-# These are strategy behavior, tunable independently of the indicator math.
+# direction/entry/exit signal has to move on that same clock. rsi_9 is
+# computed on INTRADAY bars (ingest/prices.py's get_intraday_ma_context),
+# not daily closes. The indicator period (RSI-9) is hardcoded at the
+# computation site, matching the existing ATR-14 precedent — identity of
+# the indicator, not a tunable. These are strategy behavior, tunable
+# independently of the indicator math.
 MA_INTRADAY_BAR_MINUTES = int(os.environ.get("MA_INTRADAY_BAR_MINUTES", "1"))
 MA_INTRADAY_HISTORY_DAYS = int(os.environ.get("MA_INTRADAY_HISTORY_DAYS", "5"))
 MA_ENTRY_MIN_RVOL = float(os.environ.get("MA_ENTRY_MIN_RVOL", "1.2"))
@@ -77,22 +76,22 @@ MA_ENTRY_MIN_RVOL = float(os.environ.get("MA_ENTRY_MIN_RVOL", "1.2"))
 # plan.atr_plan already scales stop distance to it; an unvalidated
 # first-pass value, not yet calibrated against outcomes.
 MA_ENTRY_MIN_ATR_PCT = float(os.environ.get("MA_ENTRY_MIN_ATR_PCT", "1.5"))
-# RSI crossing thresholds — entry timing within the MACD-confirmed direction
-# is a THRESHOLD CROSSING, not "wait for the extreme" (that's only knowable
-# in hindsight, after it's already reversed). LONG needs RSI crossing UP
-# through the oversold line; SHORT needs RSI crossing DOWN through the
-# overbought line.
+# RSI crossing thresholds — the entry is a THRESHOLD CROSSING, not "wait
+# for the extreme" (that's only knowable in hindsight, after it's already
+# reversed). Crossing UP through the oversold line IS the LONG; crossing
+# DOWN through the overbought line IS the SHORT — this one cross sets both
+# direction and timing, with no separate trend filter voting alongside it.
 RSI_CROSS_OVERSOLD = float(os.environ.get("RSI_CROSS_OVERSOLD", "30"))
 RSI_CROSS_OVERBOUGHT = float(os.environ.get("RSI_CROSS_OVERBOUGHT", "70"))
 # Total bookings (not just "reentries" — there's no separate freshness gate
 # anymore) allowed for one symbol+direction per day; a simple backstop
 # against rapid oscillation, not a capital control.
 MAX_BOOKINGS_PER_SYMBOL_PER_DAY = int(os.environ.get("MAX_BOOKINGS_PER_SYMBOL_PER_DAY", "2"))
-# Rarely-triggered backstop, not the primary exit — MACD/RSI reversal
+# Rarely-triggered backstop, not the primary exit — the RSI reversal
 # (quant/watcher.py's trend-reversal tier) is expected to fire first under
 # normal conditions. This is deliberately much wider than PLAN_STOP_ATR
 # (which desk/workflow.py's offline path still uses as its primary stop —
-# this constant is scoped to the live MA-crossover engine only, passed
+# this constant is scoped to the live RSI entry engine only, passed
 # explicitly to plan.atr_plan()'s stop_atr_mult override) so it only
 # protects against a violent gap or a data outage that leaves the
 # signal-based exit unable to compute (which fails open — no exit — so this

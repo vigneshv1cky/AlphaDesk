@@ -5,25 +5,29 @@ on its own technical setup — no comparison against other candidates, no
 composite score, no reaction magnitude.
 
 Positions here are session-scoped (held for hours, not weeks), so the
-signal has to move on that clock. The strategy (see _entry_signal) uses
-MACD and RSI TOGETHER for both entry and exit — not one indicator per job:
-  • DIRECTION (trend filter): MACD(12,26,9) — the classic periods, used
-    as-is rather than rescaled for intraday bars — computed on 1-min bars
-    (see ingest/prices.py's get_intraday_ma_context). MACD line above its
-    signal line → LONG regime; below → SHORT regime.
-  • ENTRY (timing, within that regime): RSI-9 CROSSING a threshold, not
-    "wait for the extreme" (only knowable in hindsight, after it's already
-    reversed). LONG needs RSI crossing UP through oversold (30); SHORT
-    needs RSI crossing DOWN through overbought (70) — plus relative volume
-    and a minimum ATR% (a dead/near-zero-volatility stock has no room to
-    reach a meaningful target/stop). No separate freshness gate beyond that.
+signal has to move on that clock. The strategy (see _entry_signal) is pure
+RSI-9 mean reversion — ONE indicator deciding both direction and timing,
+computed on 1-min bars (see ingest/prices.py's get_intraday_ma_context):
+  • ENTRY: RSI-9 CROSSING a threshold, not "wait for the extreme" (only
+    knowable in hindsight, after it's already reversed). Crossing UP
+    through oversold (30) IS the LONG; crossing DOWN through overbought
+    (70) IS the SHORT — the cross decides the direction, there is no
+    separate trend vote. Plus relative volume and a minimum ATR% (a
+    dead/near-zero-volatility stock has no room to reach a meaningful
+    target/stop). No separate freshness gate beyond that.
   • EXIT: the existing tiered exits (quant/watcher.py) — target/stop/
-    trailing/spike/stale/session-close — plus a signal-reversal tier that
-    also uses BOTH: MACD regime flipping against the position (trend
-    invalidated), OR RSI crossing the OPPOSITE threshold (a LONG's reversion
-    completing at overbought, a SHORT's at oversold). The hard stop-loss
-    (MA_STOP_BACKSTOP_ATR) is a deliberately wide, rarely-triggered backstop
-    — this signal-based tier is the expected primary exit.
+    trailing/spike/stale/session-close — plus a signal-reversal tier on
+    the same indicator: RSI crossing the OPPOSITE threshold (a LONG's
+    reversion completing at overbought, a SHORT's at oversold). The hard
+    stop-loss (MA_STOP_BACKSTOP_ATR) is a deliberately wide,
+    rarely-triggered backstop — this signal tier is the primary exit.
+
+Deliberately one indicator. An earlier build paired MACD(12,26,9) as a
+trend/direction filter, but two independently-moving signals can briefly
+disagree — MACD about to flip while RSI had already crossed for the OLD
+regime — which entered trades right before a reversal. Dropping MACD
+removes that whole bug class by construction rather than patching it. The
+accepted trade-off: no directional trend-bias check at all.
 
 MAX_ENTRIES_PER_DAY is a runaway backstop, not a capital control.
 MAX_BOOKINGS_PER_SYMBOL_PER_DAY caps how many times one symbol+direction can
@@ -137,29 +141,28 @@ def refresh_pool() -> None:
 
 
 def _entry_signal(sym: str, pctx: dict) -> tuple[dict | None, str | None]:
-    """Rule-based MACD-regime + RSI-crossing entry gate — each candidate
-    judged purely on its own technical setup, no comparison against other
-    candidates, no composite score to tune against a batch. MACD sets the
-    allowed direction (trend filter); RSI crossing a threshold times the
-    entry within it (see the module docstring). Returns (setup, None) on a
-    pass, (None, reason) on a drop. Never raises.
+    """Rule-based RSI-crossing entry gate — each candidate judged purely on
+    its own technical setup, no comparison against other candidates, no
+    composite score to tune against a batch. The RSI cross alone sets BOTH
+    direction and timing (see the module docstring). Returns (setup, None)
+    on a pass, (None, reason) on a drop. Never raises.
 
     Fails CLOSED on missing data — better no signal than a guess."""
-    macd_regime = pctx.get("macd_regime")
     rsi = pctx.get("rsi_9")
     rvol = pctx.get("rvol")
 
-    if macd_regime is None or rsi is None:
-        return None, "insufficient intraday MACD/RSI data"
+    if rsi is None:
+        return None, "insufficient intraday RSI data"
 
-    if macd_regime == "LONG":
-        if not pctx.get("rsi_cross_up_oversold"):
-            return None, "no RSI cross up through oversold to confirm LONG"
-    else:
-        if not pctx.get("rsi_cross_down_overbought"):
-            return None, "no RSI cross down through overbought to confirm SHORT"
-
-    direction = macd_regime
+    # The cross IS the direction — nothing else votes, so the two can't
+    # disagree. Both firing on one bar would be contradictory data; drop it
+    # rather than pick a winner.
+    cross_long = bool(pctx.get("rsi_cross_up_oversold"))
+    cross_short = bool(pctx.get("rsi_cross_down_overbought"))
+    if cross_long == cross_short:
+        return None, ("contradictory RSI crosses on one bar" if cross_long
+                      else "no RSI threshold cross")
+    direction = "LONG" if cross_long else "SHORT"
 
     if rvol is None or rvol < MA_ENTRY_MIN_RVOL:
         return None, f"rvol {rvol} below {MA_ENTRY_MIN_RVOL:g}x"
@@ -176,18 +179,19 @@ def _entry_signal(sym: str, pctx: dict) -> tuple[dict | None, str | None]:
     # against each other (the boolean chain above already decided pass/fail
     # independently per symbol). Reused for _book()'s conviction-sizing math,
     # which has zero effect on actual paper exposure (qty=1 always).
-    macd_diff = pctx.get("macd_diff") or 0.0
-    score = round(min(100.0, abs(macd_diff) * 20.0 + abs(rsi - 50) * 0.5
+    # How stretched RSI still is from neutral (the reversion left to run)
+    # plus how much volume is behind it.
+    score = round(min(100.0, abs(rsi - 50) * 2.0
                        + max(0.0, (rvol or 0) - 1) * 5.0), 1)
     setup = {
         "direction": direction, "score": score,
-        "signals": {"macd_diff": macd_diff, "rsi_9": rsi, "rvol": rvol, "atr_pct": atr_pct},
+        "signals": {"rsi_9": rsi, "rvol": rvol, "atr_pct": atr_pct},
     }
     return setup, None
 
 
 async def score_candidate(sym: str, arts: list[dict]) -> tuple[dict | None, str | None]:
-    """Fetch price context (daily liquidity/ATR facts + intraday MACD/RSI)
+    """Fetch price context (daily liquidity/ATR facts + intraday RSI)
     and evaluate the technical setup for one candidate. Returns (setup, None)
     on a pass, (None, reason) on a drop."""
     loop = asyncio.get_running_loop()
@@ -239,7 +243,7 @@ async def _book(sym: str, arts: list[dict], setup: dict, cur_sess: str,
     horizon = pinned_horizon(edge)
     last = pctx.get("last_price")
     # MA_STOP_BACKSTOP_ATR, not PLAN_STOP_ATR (the offline desk/workflow.py
-    # path's primary stop) — this engine's primary exit is the MACD/RSI
+    # path's primary stop) — this engine's primary exit is the RSI
     # signal-reversal tier; the hard stop here only needs to catch a violent
     # gap or a data outage that leaves the signal-based exit unable to fire.
     trade = plan.atr_plan(sym, direction, horizon, last, pctx.get("atr_pct"),
@@ -266,8 +270,9 @@ async def _book(sym: str, arts: list[dict], setup: dict, cur_sess: str,
 
     spy_ctx = await loop.run_in_executor(None, prices.get_context, "SPY")
     sig = setup["signals"]
-    thesis = (f"MACD/RSI setup: {sym} {direction} — "
-              f"MACD diff {sig['macd_diff']:+.4f}, RSI-9 {sig['rsi_9']:.0f}, "
+    cross = "up through oversold" if direction == "LONG" else "down through overbought"
+    thesis = (f"RSI setup: {sym} {direction} — RSI-9 crossed {cross} "
+              f"(now {sig['rsi_9']:.0f}), "
               f"rvol {sig['rvol']:.1f}x, ATR {sig['atr_pct']:.1f}%")
     pick_id = store.record_pick({
         "symbol": sym, "arm": "QUANT", "edge": edge,

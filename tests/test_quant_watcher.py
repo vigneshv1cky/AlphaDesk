@@ -1,5 +1,5 @@
 """Tests for the signal-reversal exit tier in quant/watcher.py — the exit-side
-trigger for desk/watcher.py's intraday MACD/RSI entries."""
+trigger for desk/watcher.py's intraday RSI entries."""
 
 from alphadesk.quant import watcher as qwatcher
 
