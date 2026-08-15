@@ -101,7 +101,7 @@ function Shell() {
           </Button>
         </div>
       </header>
-      <main className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
+      <main className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[1200px] space-y-4 px-5 py-5">
           <Suspense fallback={<div className="text-sm text-muted-foreground">Loading…</div>}>
             <Routes>
