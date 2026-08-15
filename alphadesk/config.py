@@ -61,36 +61,43 @@ REACTION_AB_HORIZON_DAYS = int(os.environ.get("REACTION_AB_HORIZON_DAYS", "3"))
 
 # ── MA crossover entry engine (desk/watcher.py) ───────────────────────────────
 # Positions here are session-scoped (held for hours, not weeks), so the
-# direction/entry/exit signal has to move on that same clock — a daily SMA's
-# slope barely changes within a single session. sma_slope_pct/rsi_9 are
-# computed on INTRADAY bars (ingest/prices.py's get_intraday_ma_context),
-# not daily closes. Indicator periods (SMA-50, RSI-9) are hardcoded at the
-# computation site, matching the existing ATR-14 precedent — identity of the
-# indicator, not a tunable. These are strategy behavior, tunable
-# independently of the indicator math.
+# direction/entry/exit signal has to move on that same clock. macd_regime/
+# rsi_9 are computed on INTRADAY bars (ingest/prices.py's
+# get_intraday_ma_context), not daily closes. Indicator periods (MACD
+# 12/26/9 — the classic periods, used as-is rather than rescaled for
+# intraday bars; RSI-9) are hardcoded at the computation site, matching the
+# existing ATR-14 precedent — identity of the indicator, not a tunable.
+# These are strategy behavior, tunable independently of the indicator math.
 MA_INTRADAY_BAR_MINUTES = int(os.environ.get("MA_INTRADAY_BAR_MINUTES", "1"))
 MA_INTRADAY_HISTORY_DAYS = int(os.environ.get("MA_INTRADAY_HISTORY_DAYS", "5"))
-# How many bars back to compare the SMA against for its slope — direction
-# comes from whether the average ITSELF is rising or falling, not which side
-# of it price happens to be on right now (that flips on every intraday
-# whipsaw; the average is already smoothed, so its slope is far more
-# chop-resistant).
-MA_SLOPE_LOOKBACK_BARS = int(os.environ.get("MA_SLOPE_LOOKBACK_BARS", "15"))
 MA_ENTRY_MIN_RVOL = float(os.environ.get("MA_ENTRY_MIN_RVOL", "1.2"))
 # Floor only, no ceiling: a stock with near-zero volatility doesn't have room
 # to reach a meaningful target/stop even if trend/momentum/volume all confirm
 # — the setup is weak regardless. High volatility isn't filtered here since
-# plan.atr_plan already scales stop distance to it (PLAN_STOP_ATR); an
-# unvalidated first-pass value, not yet calibrated against outcomes.
+# plan.atr_plan already scales stop distance to it; an unvalidated
+# first-pass value, not yet calibrated against outcomes.
 MA_ENTRY_MIN_ATR_PCT = float(os.environ.get("MA_ENTRY_MIN_ATR_PCT", "1.5"))
-RSI_LONG_MIN = float(os.environ.get("RSI_LONG_MIN", "50"))
-RSI_LONG_MAX = float(os.environ.get("RSI_LONG_MAX", "70"))
-RSI_SHORT_MIN = float(os.environ.get("RSI_SHORT_MIN", "30"))
-RSI_SHORT_MAX = float(os.environ.get("RSI_SHORT_MAX", "50"))
+# RSI crossing thresholds — entry timing within the MACD-confirmed direction
+# is a THRESHOLD CROSSING, not "wait for the extreme" (that's only knowable
+# in hindsight, after it's already reversed). LONG needs RSI crossing UP
+# through the oversold line; SHORT needs RSI crossing DOWN through the
+# overbought line.
+RSI_CROSS_OVERSOLD = float(os.environ.get("RSI_CROSS_OVERSOLD", "30"))
+RSI_CROSS_OVERBOUGHT = float(os.environ.get("RSI_CROSS_OVERBOUGHT", "70"))
 # Total bookings (not just "reentries" — there's no separate freshness gate
 # anymore) allowed for one symbol+direction per day; a simple backstop
 # against rapid oscillation, not a capital control.
 MAX_BOOKINGS_PER_SYMBOL_PER_DAY = int(os.environ.get("MAX_BOOKINGS_PER_SYMBOL_PER_DAY", "2"))
+# Rarely-triggered backstop, not the primary exit — MACD/RSI reversal
+# (quant/watcher.py's trend-reversal tier) is expected to fire first under
+# normal conditions. This is deliberately much wider than PLAN_STOP_ATR
+# (which desk/workflow.py's offline path still uses as its primary stop —
+# this constant is scoped to the live MA-crossover engine only, passed
+# explicitly to plan.atr_plan()'s stop_atr_mult override) so it only
+# protects against a violent gap or a data outage that leaves the
+# signal-based exit unable to compute (which fails open — no exit — so this
+# hard floor is the one thing that still catches that case).
+MA_STOP_BACKSTOP_ATR = float(os.environ.get("MA_STOP_BACKSTOP_ATR", "4.0"))
 
 # ── Quant ────────────────────────────────────────────────────────────────────
 QUANT_STREAM_ENABLED = os.environ.get("QUANT_STREAM_ENABLED", "1") not in ("0", "", "false", "False", "no")

@@ -5,21 +5,25 @@ on its own technical setup — no comparison against other candidates, no
 composite score, no reaction magnitude.
 
 Positions here are session-scoped (held for hours, not weeks), so the
-signal has to move on that clock. The strategy (see _entry_signal):
-  • DIRECTION: the slope of an INTRADAY moving average (1-min bars, see
-    ingest/prices.py's get_intraday_ma_context) — is the average itself
-    rising or falling, not which side of it price happens to be on. Raw
-    price whipsaws back and forth through an average constantly intraday;
-    the average is already smoothed, so its own slope is far more
-    chop-resistant than a live price/MA comparison.
-  • ENTRY: as soon as the slope direction is confirmed by RSI-9 momentum
-    (also intraday), relative volume, and a minimum ATR% (a dead/near-zero-
-    volatility stock has no room to reach a meaningful target/stop) — no
-    separate freshness gate, since the slope itself is already the
-    up-to-the-minute read.
+signal has to move on that clock. The strategy (see _entry_signal) uses
+MACD and RSI TOGETHER for both entry and exit — not one indicator per job:
+  • DIRECTION (trend filter): MACD(12,26,9) — the classic periods, used
+    as-is rather than rescaled for intraday bars — computed on 1-min bars
+    (see ingest/prices.py's get_intraday_ma_context). MACD line above its
+    signal line → LONG regime; below → SHORT regime.
+  • ENTRY (timing, within that regime): RSI-9 CROSSING a threshold, not
+    "wait for the extreme" (only knowable in hindsight, after it's already
+    reversed). LONG needs RSI crossing UP through oversold (30); SHORT
+    needs RSI crossing DOWN through overbought (70) — plus relative volume
+    and a minimum ATR% (a dead/near-zero-volatility stock has no room to
+    reach a meaningful target/stop). No separate freshness gate beyond that.
   • EXIT: the existing tiered exits (quant/watcher.py) — target/stop/
-    trailing/spike/stale/session-close — plus a trend-reversal tier: exit
-    when that same slope flips against the position.
+    trailing/spike/stale/session-close — plus a signal-reversal tier that
+    also uses BOTH: MACD regime flipping against the position (trend
+    invalidated), OR RSI crossing the OPPOSITE threshold (a LONG's reversion
+    completing at overbought, a SHORT's at oversold). The hard stop-loss
+    (MA_STOP_BACKSTOP_ATR) is a deliberately wide, rarely-triggered backstop
+    — this signal-based tier is the expected primary exit.
 
 MAX_ENTRIES_PER_DAY is a runaway backstop, not a capital control.
 MAX_BOOKINGS_PER_SYMBOL_PER_DAY caps how many times one symbol+direction can
@@ -35,16 +39,12 @@ from alphadesk.config import (
     LOW_LIQUIDITY_DOLLAR_VOL,
     MA_ENTRY_MIN_ATR_PCT,
     MA_ENTRY_MIN_RVOL,
+    MA_STOP_BACKSTOP_ATR,
     MAX_BOOKINGS_PER_SYMBOL_PER_DAY,
     MAX_ENTRIES_PER_DAY,
     PAPER_TRADING,
-    PLAN_STOP_ATR,
     PLAN_TARGET_ATR,
     QUANT_SCORE_FULL_CONVICTION,
-    RSI_LONG_MAX,
-    RSI_LONG_MIN,
-    RSI_SHORT_MAX,
-    RSI_SHORT_MIN,
     now_et,
     pinned_horizon,
     session,
@@ -137,31 +137,29 @@ def refresh_pool() -> None:
 
 
 def _entry_signal(sym: str, pctx: dict) -> tuple[dict | None, str | None]:
-    """Rule-based MA-slope entry gate — each candidate judged purely on its
-    own technical setup, no comparison against other candidates, no
-    composite score to tune against a batch. Direction comes from the
-    INTRADAY moving average's own slope, not which side of it price happens
-    to be on (see the module docstring). Returns (setup, None) on a pass,
-    (None, reason) on a drop. Never raises.
+    """Rule-based MACD-regime + RSI-crossing entry gate — each candidate
+    judged purely on its own technical setup, no comparison against other
+    candidates, no composite score to tune against a batch. MACD sets the
+    allowed direction (trend filter); RSI crossing a threshold times the
+    entry within it (see the module docstring). Returns (setup, None) on a
+    pass, (None, reason) on a drop. Never raises.
 
     Fails CLOSED on missing data — better no signal than a guess."""
-    slope = pctx.get("sma_slope_pct")
+    macd_regime = pctx.get("macd_regime")
     rsi = pctx.get("rsi_9")
     rvol = pctx.get("rvol")
 
-    if slope is None or rsi is None:
-        return None, "insufficient intraday MA/RSI data"
+    if macd_regime is None or rsi is None:
+        return None, "insufficient intraday MACD/RSI data"
 
-    direction = "LONG" if slope > 0 else "SHORT" if slope < 0 else None
-    if direction is None:
-        return None, "flat MA slope"
-
-    if direction == "LONG":
-        if not (RSI_LONG_MIN <= rsi <= RSI_LONG_MAX):
-            return None, f"RSI {rsi:.0f} not confirming LONG ({RSI_LONG_MIN:g}-{RSI_LONG_MAX:g})"
+    if macd_regime == "LONG":
+        if not pctx.get("rsi_cross_up_oversold"):
+            return None, "no RSI cross up through oversold to confirm LONG"
     else:
-        if not (RSI_SHORT_MIN <= rsi <= RSI_SHORT_MAX):
-            return None, f"RSI {rsi:.0f} not confirming SHORT ({RSI_SHORT_MIN:g}-{RSI_SHORT_MAX:g})"
+        if not pctx.get("rsi_cross_down_overbought"):
+            return None, "no RSI cross down through overbought to confirm SHORT"
+
+    direction = macd_regime
 
     if rvol is None or rvol < MA_ENTRY_MIN_RVOL:
         return None, f"rvol {rvol} below {MA_ENTRY_MIN_RVOL:g}x"
@@ -178,17 +176,18 @@ def _entry_signal(sym: str, pctx: dict) -> tuple[dict | None, str | None]:
     # against each other (the boolean chain above already decided pass/fail
     # independently per symbol). Reused for _book()'s conviction-sizing math,
     # which has zero effect on actual paper exposure (qty=1 always).
-    score = round(min(100.0, abs(slope) * 100.0 + abs(rsi - 50) * 0.5
+    macd_diff = pctx.get("macd_diff") or 0.0
+    score = round(min(100.0, abs(macd_diff) * 20.0 + abs(rsi - 50) * 0.5
                        + max(0.0, (rvol or 0) - 1) * 5.0), 1)
     setup = {
         "direction": direction, "score": score,
-        "signals": {"sma_slope_pct": slope, "rsi_9": rsi, "rvol": rvol, "atr_pct": atr_pct},
+        "signals": {"macd_diff": macd_diff, "rsi_9": rsi, "rvol": rvol, "atr_pct": atr_pct},
     }
     return setup, None
 
 
 async def score_candidate(sym: str, arts: list[dict]) -> tuple[dict | None, str | None]:
-    """Fetch price context (daily liquidity/ATR facts + intraday MA slope/RSI)
+    """Fetch price context (daily liquidity/ATR facts + intraday MACD/RSI)
     and evaluate the technical setup for one candidate. Returns (setup, None)
     on a pass, (None, reason) on a drop."""
     loop = asyncio.get_running_loop()
@@ -239,18 +238,23 @@ async def _book(sym: str, arts: list[dict], setup: dict, cur_sess: str,
     edge = "PRE_EARNINGS" if arts and arts[0].get("category") == "PRE_EARNINGS" else "MOMENTUM"
     horizon = pinned_horizon(edge)
     last = pctx.get("last_price")
-    trade = plan.atr_plan(sym, direction, horizon, last, pctx.get("atr_pct"))
+    # MA_STOP_BACKSTOP_ATR, not PLAN_STOP_ATR (the offline desk/workflow.py
+    # path's primary stop) — this engine's primary exit is the MACD/RSI
+    # signal-reversal tier; the hard stop here only needs to catch a violent
+    # gap or a data outage that leaves the signal-based exit unable to fire.
+    trade = plan.atr_plan(sym, direction, horizon, last, pctx.get("atr_pct"),
+                          stop_atr_mult=MA_STOP_BACKSTOP_ATR)
     if not trade and last:
         atr = pctx.get("atr_pct") or 2.0
         if direction == "LONG":
             trade = {"entry": round(last, 4),
                      "target": round(last * (1 + atr / 100 * PLAN_TARGET_ATR), 4),
-                     "stop": round(last * (1 - atr / 100 * PLAN_STOP_ATR), 4),
+                     "stop": round(last * (1 - atr / 100 * MA_STOP_BACKSTOP_ATR), 4),
                      "note": f"MA setup: {direction} {sym}", "order": "market"}
         else:
             trade = {"entry": round(last, 4),
                      "target": round(last * (1 - atr / 100 * PLAN_TARGET_ATR), 4),
-                     "stop": round(last * (1 + atr / 100 * PLAN_STOP_ATR), 4),
+                     "stop": round(last * (1 + atr / 100 * MA_STOP_BACKSTOP_ATR), 4),
                      "note": f"MA setup: {direction} {sym}", "order": "market"}
 
     # Informational sizing scale only (see _entry_signal's "score" comment) —
@@ -262,8 +266,8 @@ async def _book(sym: str, arts: list[dict], setup: dict, cur_sess: str,
 
     spy_ctx = await loop.run_in_executor(None, prices.get_context, "SPY")
     sig = setup["signals"]
-    thesis = (f"MA setup: {sym} {direction} — "
-              f"slope {sig['sma_slope_pct']:+.3f}%, RSI-9 {sig['rsi_9']:.0f}, "
+    thesis = (f"MACD/RSI setup: {sym} {direction} — "
+              f"MACD diff {sig['macd_diff']:+.4f}, RSI-9 {sig['rsi_9']:.0f}, "
               f"rvol {sig['rvol']:.1f}x, ATR {sig['atr_pct']:.1f}%")
     pick_id = store.record_pick({
         "symbol": sym, "arm": "QUANT", "edge": edge,

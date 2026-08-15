@@ -121,7 +121,8 @@ def limit_fill(direction: str, order_type: str | None, entry: float | None,
 
 
 def atr_plan(symbol: str, direction: str, horizon_days: int,
-             last_price: float, atr_pct: float | None = None) -> dict | None:
+             last_price: float, atr_pct: float | None = None,
+             stop_atr_mult: float | None = None) -> dict | None:
     if not last_price or last_price <= 0:
         return None
     from alphadesk.config import PLAN_TARGET_ATR, PLAN_STOP_ATR
@@ -129,7 +130,11 @@ def atr_plan(symbol: str, direction: str, horizon_days: int,
     atr = max(atr, 0.5)
     atr_dec = atr / 100.0
     tgt_mult = PLAN_TARGET_ATR
-    sl_mult = PLAN_STOP_ATR
+    # stop_atr_mult lets a caller override the stop distance without
+    # touching PLAN_STOP_ATR (shared with desk/workflow.py's offline path) —
+    # e.g. desk/watcher.py's live engine passes a much wider backstop
+    # multiple, since its primary exit is signal-based, not this stop.
+    sl_mult = stop_atr_mult if stop_atr_mult is not None else PLAN_STOP_ATR
 
     if direction == "LONG":
         target = round(last_price * (1 + atr_dec * tgt_mult), 4)

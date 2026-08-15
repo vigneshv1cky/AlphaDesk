@@ -128,7 +128,7 @@ def test_tick_dropped_candidate_is_not_booked():
     watcher._watched = {"AAPL": [{"published_at": "2026-08-13T09:00:00+00:00", "tickers": ["AAPL"]}]}
 
     async def fake_score(sym, arts):
-        return None, "flat MA slope"
+        return None, "insufficient intraday MACD/RSI data"
 
     with patch.object(watcher, "DAILY_LOSS_STOP_PCT", 0), \
          patch("alphadesk.ledger.store.open_taken_picks", return_value=[]), \
@@ -143,15 +143,20 @@ def test_tick_dropped_candidate_is_not_booked():
     mock_funnel.assert_called_once()
     mock_skips.assert_called_once()
     skipped = mock_skips.call_args[0][0]
-    assert any(r["symbol"] == "AAPL" and "flat MA slope" in r["reason"] for r in skipped)
+    assert any(r["symbol"] == "AAPL" and "insufficient intraday MACD/RSI data" in r["reason"] for r in skipped)
 
 
-# ── _entry_signal: the MA-slope rule engine ─────────────────────────────────
+# ── _entry_signal: the MACD-regime + RSI-crossing rule engine ──────────────
 
-def _pctx(slope=0.05, rsi=60.0, rvol=1.5, atr_pct=2.0):
-    """A pctx fixture that passes every gate by default (LONG) — each test
-    overrides just the field(s) it's probing."""
-    return {"sma_slope_pct": slope, "rsi_9": rsi, "rvol": rvol, "atr_pct": atr_pct}
+def _pctx(macd_regime="LONG", rsi=25.0, rsi_cross_up_oversold=True,
+          rsi_cross_down_overbought=False, rvol=1.5, atr_pct=2.0):
+    """A pctx fixture that passes every gate by default (LONG, confirmed by
+    an RSI cross up through oversold) — each test overrides just the
+    field(s) it's probing."""
+    return {"macd_regime": macd_regime, "macd_diff": 0.05, "rsi_9": rsi,
+            "rsi_cross_up_oversold": rsi_cross_up_oversold,
+            "rsi_cross_down_overbought": rsi_cross_down_overbought,
+            "rvol": rvol, "atr_pct": atr_pct}
 
 
 def test_entry_signal_long_passes():
@@ -162,27 +167,32 @@ def test_entry_signal_long_passes():
 
 def test_entry_signal_short_passes():
     setup, reason = watcher._entry_signal(
-        "AAPL", _pctx(slope=-0.05, rsi=40.0))
+        "AAPL", _pctx(macd_regime="SHORT", rsi=75.0,
+                      rsi_cross_up_oversold=False, rsi_cross_down_overbought=True))
     assert reason is None
     assert setup["direction"] == "SHORT"
 
 
 def test_entry_signal_missing_data_fails_closed():
-    setup, reason = watcher._entry_signal("AAPL", _pctx(slope=None))
+    setup, reason = watcher._entry_signal("AAPL", _pctx(macd_regime=None))
     assert setup is None
     assert "insufficient" in reason
 
 
-def test_entry_signal_flat_slope_rejects():
-    setup, reason = watcher._entry_signal("AAPL", _pctx(slope=0.0))
+def test_entry_signal_long_without_rsi_cross_rejects():
+    """MACD confirms an uptrend, but RSI hasn't crossed up through oversold
+    — no qualifying entry timing yet."""
+    setup, reason = watcher._entry_signal(
+        "AAPL", _pctx(rsi_cross_up_oversold=False))
     assert setup is None
-    assert "flat" in reason
+    assert "RSI cross" in reason
 
 
-def test_entry_signal_rsi_out_of_band_rejects():
-    setup, reason = watcher._entry_signal("AAPL", _pctx(rsi=85.0))
+def test_entry_signal_short_without_rsi_cross_rejects():
+    setup, reason = watcher._entry_signal(
+        "AAPL", _pctx(macd_regime="SHORT", rsi=75.0, rsi_cross_up_oversold=False))
     assert setup is None
-    assert "RSI" in reason
+    assert "RSI cross" in reason
 
 
 def test_entry_signal_low_rvol_rejects():

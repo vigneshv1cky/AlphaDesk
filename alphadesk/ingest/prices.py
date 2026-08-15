@@ -18,7 +18,8 @@ from typing import Any, Optional
 from alphadesk.config import (
     LOW_LIQUIDITY_DOLLAR_VOL,
     MA_INTRADAY_HISTORY_DAYS,
-    MA_SLOPE_LOOKBACK_BARS,
+    RSI_CROSS_OVERBOUGHT,
+    RSI_CROSS_OVERSOLD,
     now_et,
 )
 
@@ -643,18 +644,22 @@ _INTRADAY_MA_TTL_S = 30
 
 
 def get_intraday_ma_context(symbol: str) -> Optional[dict]:
-    """Day-trading-scale technical signal — SMA-50 and RSI-9 computed on
-    MA_INTRADAY_HISTORY_DAYS of 1-minute bars (via intraday_bars(), Alpaca
-    IEX), not daily closes. Positions here are session-scoped (held for
-    hours, not weeks), so the signal has to move on that clock — a daily
-    SMA's slope barely changes within a single session.
+    """Day-trading-scale technical signal — MACD(12,26,9) and RSI-9 computed
+    on MA_INTRADAY_HISTORY_DAYS of 1-minute bars (via intraday_bars(),
+    Alpaca IEX), not daily closes. Positions here are session-scoped (held
+    for hours, not weeks), so the signal has to move on that clock.
 
-    Direction comes from sma_slope_pct: is the MOVING AVERAGE ITSELF rising
-    or falling over the last MA_SLOPE_LOOKBACK_BARS bars — not which side of
-    it price happens to be on right now. Raw price crossing back and forth
-    through the average is exactly the whipsaw noise this is built to avoid;
-    the average is already smoothed, so its own slope is far more
-    chop-resistant than a live price/MA comparison.
+    macd_regime: is the MACD line (EMA-12 minus EMA-26) currently above or
+    below its own signal line (EMA-9 of the MACD line) — the classic
+    12/26/9 periods, used as-is rather than rescaled for intraday bars.
+    This is the DIRECTION/trend filter, not an entry trigger by itself.
+
+    rsi_cross: RSI-9 crossing UP through RSI_CROSS_OVERSOLD or DOWN through
+    RSI_CROSS_OVERBOUGHT between the last two bars — a threshold-CROSSING
+    event, not "wait for the extreme" (only knowable in hindsight, after
+    it's already reversed). This is the ENTRY TIMING signal within whichever
+    direction macd_regime allows: the trend decides direction, this decides
+    when.
 
     TTL-cached separately from get_context() — short enough an exit check
     stays fresh, long enough not to refetch faster than a new bar can even
@@ -669,25 +674,54 @@ def get_intraday_ma_context(symbol: str) -> Optional[dict]:
         from datetime import timedelta
         start = now_et() - timedelta(days=MA_INTRADAY_HISTORY_DAYS + 3)  # weekend/holiday buffer
         bars = intraday_bars(sym, start)
-        if len(bars) >= 50 + MA_SLOPE_LOOKBACK_BARS:
+        if len(bars) >= 60:
             import pandas as pd
             closes = pd.Series([b["close"] for b in bars])
-            sma = closes.rolling(50).mean().dropna()
-            if len(sma) > MA_SLOPE_LOOKBACK_BARS:
-                sma_now = float(sma.iloc[-1])
-                sma_then = float(sma.iloc[-1 - MA_SLOPE_LOOKBACK_BARS])
-                slope_pct = (round((sma_now - sma_then) / sma_then * 100, 4)
-                             if sma_then and math.isfinite(sma_then) else None)
-                delta = closes.diff()
-                gain = delta.clip(lower=0)
-                loss = -delta.clip(upper=0)
-                avg_gain = gain.ewm(alpha=1 / 9, min_periods=9, adjust=False).mean()
-                avg_loss = loss.ewm(alpha=1 / 9, min_periods=9, adjust=False).mean()
-                ag, al = float(avg_gain.iloc[-1]), float(avg_loss.iloc[-1])
-                rsi = None
-                if math.isfinite(ag) and math.isfinite(al):
-                    rsi = 100.0 if al == 0 else round(100 - 100 / (1 + ag / al), 2)
-                result = {"sma_50": round(sma_now, 4), "sma_slope_pct": slope_pct, "rsi_9": rsi}
+
+            ema_fast = closes.ewm(span=12, adjust=False).mean()
+            ema_slow = closes.ewm(span=26, adjust=False).mean()
+            macd_line = ema_fast - ema_slow
+            signal_line = macd_line.ewm(span=9, adjust=False).mean()
+            macd_diff = float((macd_line - signal_line).iloc[-1])
+            macd_regime = "LONG" if macd_diff > 0 else "SHORT" if macd_diff < 0 else None
+
+            delta = closes.diff()
+            gain = delta.clip(lower=0)
+            loss = -delta.clip(upper=0)
+            avg_gain = gain.ewm(alpha=1 / 9, min_periods=9, adjust=False).mean()
+            avg_loss = loss.ewm(alpha=1 / 9, min_periods=9, adjust=False).mean()
+            # avg_loss == 0 -> RSI 100 (no losses in the smoothing window);
+            # avoids a divide-by-zero on the raw gain/loss ratio.
+            rs = avg_gain / avg_loss.where(avg_loss != 0, other=float("nan"))
+            rsi_series = (100 - 100 / (1 + rs)).where(avg_loss != 0, other=100.0)
+
+            rsi_now = float(rsi_series.iloc[-1])
+            rsi_prev = float(rsi_series.iloc[-2]) if len(rsi_series) > 1 else None
+            # Four crossing flags, not one: MACD+RSI drive BOTH entry and
+            # exit, and each direction needs a different pair. Entry: RSI
+            # crossing UP through oversold confirms a LONG, crossing DOWN
+            # through overbought confirms a SHORT (the reversion just
+            # started). Exit: the OPPOSITE crossing — RSI crossing UP through
+            # overbought means a LONG's reversion has played out (take the
+            # signal-based exit), crossing DOWN through oversold means the
+            # same for a SHORT.
+            rsi_cross_up_oversold = rsi_cross_down_overbought = False
+            rsi_cross_up_overbought = rsi_cross_down_oversold = False
+            if rsi_prev is not None and math.isfinite(rsi_prev) and math.isfinite(rsi_now):
+                rsi_cross_up_oversold = rsi_prev <= RSI_CROSS_OVERSOLD < rsi_now
+                rsi_cross_down_overbought = rsi_prev >= RSI_CROSS_OVERBOUGHT > rsi_now
+                rsi_cross_up_overbought = rsi_prev < RSI_CROSS_OVERBOUGHT <= rsi_now
+                rsi_cross_down_oversold = rsi_prev > RSI_CROSS_OVERSOLD >= rsi_now
+
+            result = {
+                "macd_regime": macd_regime,
+                "macd_diff": round(macd_diff, 4),
+                "rsi_9": round(rsi_now, 2) if math.isfinite(rsi_now) else None,
+                "rsi_cross_up_oversold": rsi_cross_up_oversold,
+                "rsi_cross_down_overbought": rsi_cross_down_overbought,
+                "rsi_cross_up_overbought": rsi_cross_up_overbought,
+                "rsi_cross_down_oversold": rsi_cross_down_oversold,
+            }
     except Exception as exc:
         log.debug("intraday MA context failed %s: %s", sym, exc)
     with _cache_lock:

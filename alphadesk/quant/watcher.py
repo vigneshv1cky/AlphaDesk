@@ -10,13 +10,17 @@ Exit tiers (priority order):
   4. Spike reversal — unusual volatility spike that reverses (blow-off top /
      capitulation bottom)
   5. Stale exit — no significant movement hours after entry
-  7. Trend reversal — the intraday MA slope that set the entry direction
-     (desk/watcher.py's technical-setup engine) has flipped against the
-     position; checked after hard target/stop (never skip a realized fill
-     for a soft signal) but before trailing/give-back/spike (a "thesis
-     invalidated" signal is more decisive than those heuristics). Fails
-     open — missing data or a non-technical-setup position just means this
-     tier never fires.
+  7. Signal reversal — the intraday MACD/RSI setup that justified entry
+     (desk/watcher.py's technical-setup engine) has reversed: MACD regime
+     flipped against the position, OR RSI crossed the opposite threshold
+     (overbought for a LONG, oversold for a SHORT — the reversion it was
+     timed on has completed). Checked after hard target/stop (never skip a
+     realized fill for a soft signal) but before trailing/give-back/spike (a
+     "thesis invalidated" signal is more decisive than those heuristics).
+     This is the PRIMARY expected exit for this engine — the hard stop-loss
+     (tier 3) is a deliberately wide, rarely-triggered backstop, not the
+     normal path out. Fails open — missing data or a non-technical-setup
+     position just means this tier never fires.
 """
 
 import logging
@@ -41,7 +45,7 @@ EXIT_LABELS = {
     EXIT_SPIKE: "spike-reversal",
     EXIT_STALE: "stale-expiry",
     EXIT_CLOSE: "session-close",
-    EXIT_TREND_REVERSE: "trend-reversal",
+    EXIT_TREND_REVERSE: "signal-reversal",
 }
 
 # ── Configurable thresholds (env-overridable, self-optimizing) ────────────────
@@ -148,15 +152,16 @@ def update_price(pick_id: int, price: float):
 
 def check_exits(pick_id: int, direction: str, entry: float,
                 target: float, stop: float, current: float,
-                trend_reversed: bool = False) -> Optional[dict]:
+                signal_reversed: bool = False) -> Optional[dict]:
     """Check all exit tiers for a position. Returns the FIRST exit triggered,
     or None if no exit condition is met.
 
-    trend_reversed: True if the intraday MA slope that set the entry
-    direction (desk/watcher.py) has flipped against this position — the
-    trend that justified entry is gone, exit regardless of P&L. Fails open
-    by default (False) so positions entered some other way, or with missing
-    indicator data, are unaffected.
+    signal_reversed: True if the intraday MACD/RSI setup that set the entry
+    direction (desk/watcher.py) has reversed — MACD regime flipped against
+    the position, or RSI crossed the opposite threshold (the reversion it
+    was timed on completed). Either means the thesis that justified entry is
+    gone, exit regardless of P&L. Fails open by default (False) so positions
+    entered some other way, or with missing indicator data, are unaffected.
 
     Returns {level, price, reason} or None.
     """
@@ -175,12 +180,12 @@ def check_exits(pick_id: int, direction: str, entry: float,
         return {"level": "stop", "price": round(stop, 4),
                 "reason": "stop-loss hit", "tier": EXIT_STOP}
 
-    # Tier 7: trend reversal — checked after hard target/stop (never skip a
+    # Tier 7: signal reversal — checked after hard target/stop (never skip a
     # realized fill for a soft signal) but before trailing/give-back/spike
     # (a "thesis invalidated" signal is more decisive than those heuristics).
-    if trend_reversed:
-        return {"level": "trend-reverse", "price": round(ptr, 4),
-                "reason": "MA slope reversed — trend invalidated", "tier": EXIT_TREND_REVERSE}
+    if signal_reversed:
+        return {"level": "signal-reverse", "price": round(ptr, 4),
+                "reason": "MACD/RSI signal reversed — thesis invalidated", "tier": EXIT_TREND_REVERSE}
 
     # Tier 2: trailing stop (only if activated by profit)
     peak = _trail_peaks.get(pick_id, entry)
