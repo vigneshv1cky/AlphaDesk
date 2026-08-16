@@ -46,7 +46,8 @@ DAILY_LOSS_STOP_PCT = float(os.environ.get("DAILY_LOSS_STOP_PCT", "10"))
 # stop opening new positions after realized (equal-weight) losses pass this today
 
 # ── Earnings ────────────────────────────────────────────────────────────────
-# Candidate window for the live technical-setup entry engine (desk/watcher.py):
+# Candidate window for the terminal's watchlist — which symbols the earnings
+# calendar surfaces for a human to look at:
 # one continuous window from EARNINGS_PRE_WINDOW_DAYS before the report
 # through EARNINGS_POST_MAX_DAYS after it (i.e. -3 to +5 days around the
 # report date) — no gap, no exclusion window.
@@ -59,7 +60,13 @@ EARNINGS_POST_MAX_DAYS = int(os.environ.get("EARNINGS_POST_MAX_DAYS", "5"))
 MATERIAL_REACTION_PCT = float(os.environ.get("MATERIAL_REACTION_PCT", "1.5"))
 REACTION_AB_HORIZON_DAYS = int(os.environ.get("REACTION_AB_HORIZON_DAYS", "3"))
 
-# ── RSI entry engine (desk/watcher.py) ────────────────────────────────────────
+# ── Retired RSI entry engine — BACKTEST PARAMETERS ONLY ──────────────────────
+# The autonomous entry engine (desk/watcher.py) was DELETED on 2026-08-16 along
+# with every other trading bot: it measured -0.072% mean alpha over 503
+# backtested trades and -1.123% over 44 live ones. Nothing in the running
+# system reads the constants below — their only consumer is
+# ledger/rsi_backtest.py, which replays the retired engine against history.
+# Changing them changes a research replay, NOT any live behaviour.
 # Positions here are session-scoped (held for hours, not weeks), so the
 # direction/entry/exit signal has to move on that same clock. rsi_9 is
 # computed on INTRADAY bars (ingest/prices.py's get_intraday_ma_context),
@@ -90,9 +97,7 @@ MAX_BOOKINGS_PER_SYMBOL_PER_DAY = int(os.environ.get("MAX_BOOKINGS_PER_SYMBOL_PE
 # Rarely-triggered backstop, not the primary exit — the RSI reversal
 # (quant/watcher.py's trend-reversal tier) is expected to fire first under
 # normal conditions. This is deliberately much wider than PLAN_STOP_ATR
-# (which desk/workflow.py's offline path still uses as its primary stop —
-# this constant is scoped to the live RSI entry engine only, passed
-# explicitly to plan.atr_plan()'s stop_atr_mult override) so it only
+# (it is passed explicitly to plan.atr_plan()'s stop_atr_mult override) so it only
 # protects against a violent gap or a data outage that leaves the
 # signal-based exit unable to compute (which fails open — no exit — so this
 # hard floor is the one thing that still catches that case).
@@ -120,35 +125,14 @@ MANUAL_MAX_QUOTE_AGE_S = float(os.environ.get("MANUAL_MAX_QUOTE_AGE_S", "900")) 
 
 # ── Quant ────────────────────────────────────────────────────────────────────
 QUANT_STREAM_ENABLED = os.environ.get("QUANT_STREAM_ENABLED", "1") not in ("0", "", "false", "False", "no")
-QUANT_PREFILTER_MIN_SCORE = float(os.environ.get("QUANT_PREFILTER_MIN_SCORE", "5.0"))
 QUANT_TIERED_EXITS = os.environ.get("QUANT_TIERED_EXITS", "1") not in ("0", "", "false", "False", "no")
 QUANT_CALIBRATE = os.environ.get("QUANT_CALIBRATE", "1") not in ("0", "", "false", "False", "no")
-# How many candidates each Find Trades run scores (by reaction magnitude). A run
-# must finish within the 5-min autorun cadence to catch intraday movers, so this
-# can't be unbounded — each scored name costs a yfinance price/options/fundamental
-# fetch. A typical morning clears 100-150 gate-passed reactions at once (a busy
-# earnings day easily exceeds even this), so 40 was crowding out a real chunk of
-# tradeable movers before they were ever scored; 80 covers a normal day much more
-# fully while still finishing inside the 5-min cadence at the existing 8-way
-# concurrency.
-# UNUSED as of the entry-watcher replacement (2026-08-13) — desk/watcher.py
-# watches every candidate uncapped, no batch-cadence deadline to size against.
-# Left defined (dead, harmless) rather than deleted.
-QUANT_SCORE_CANDIDATES = int(os.environ.get("QUANT_SCORE_CANDIDATES", "80"))
 
-# ── Entry watcher (continuous per-candidate, replaces the batch scanner) ─────
-# How often the watcher re-evaluates its whole pool (each tick is cheap: mostly
-# TTL-cache hits in prices.get_context/get_fundamentals/moves_since_report).
-ENTRY_WATCH_INTERVAL_S = int(os.environ.get("ENTRY_WATCH_INTERVAL_S", "30"))
-# How often the candidate pool itself (which symbols are being watched at all)
-# refreshes from the earnings calendar — this is the only DB-heavy step.
-POOL_REFRESH_S = int(os.environ.get("POOL_REFRESH_S", "60"))
 # Absolute reference point for conviction sizing (composite score that counts as
 # "full conviction"). The old batch scanner scaled against the strongest score
 # in that run's top-N; with no batch there's nothing to scale against, so this
 # is a fixed empirical anchor instead. Doesn't affect order size (qty=1 either
 # way) — only the stored conviction/confidence display fields.
-QUANT_SCORE_FULL_CONVICTION = float(os.environ.get("QUANT_SCORE_FULL_CONVICTION", "30"))
 # Runaway guard: an uncapped continuous watcher can in principle book far more
 # per day than the old top-6-per-cycle scanner ever could. Not a capital/sizing
 # control (that's still deferred) — a basic backstop against a bug causing
@@ -173,9 +157,6 @@ LEAN_MODE = os.environ.get("LEAN_MODE", "1") not in ("0", "", "false", "False", 
 LEAN_EARNINGS_SKIP_NEWS = int(os.environ.get("LEAN_EARNINGS_SKIP_NEWS", "5"))
 
 # ── Autorun ──────────────────────────────────────────────────────────────────
-AUTORUN_INTERVAL_MINUTES = float(os.environ.get("AUTORUN_INTERVAL_MINUTES", "15"))
-AUTORUN_START_ET = os.environ.get("AUTORUN_START_ET", "09:35").strip()
-AUTORUN_END_ET = os.environ.get("AUTORUN_END_ET", "16:00").strip()
 
 # ── Paper trading (opt-in) ──────────────────────────────────────────────────
 PAPER_TRADING = os.environ.get("PAPER_TRADING", "0") not in ("0", "", "false", "False", "no")

@@ -10,7 +10,6 @@ import argparse
 import asyncio
 import logging
 import sys
-import time
 
 
 def _setup_logging() -> None:
@@ -78,7 +77,7 @@ async def _serve() -> None:
         """Watch open picks between runs — the price-based exit (pure code):
         walk intraday minute bars, close at the first target/stop touched.
         OPEN hours: bar-based + Model-A fills; CLOSED: skip monitoring. Entries
-        are OPEN-only (see _entry_watch_loop below), so there's no extended-hours
+        are booked by a human during OPEN, so there's no extended-hours
         fill path here anymore — any position still open in PRE/AFTER (from before
         that gate, or the tail end of an OPEN position still winding down) is
         covered by the quant tiered-exit watcher (_quantity_watch_loop, which
@@ -190,8 +189,8 @@ async def _serve() -> None:
                                         "%.1f%% from current price %.2f — possibly thin "
                                         "extended-hours fill",
                                         p["id"], p["symbol"], fill_px, div, cur)
-                    # Entries are OPEN-only (see _entry_watch_loop's session gate), so
-                    # every live pick here fills at decision time. Anything still
+                    # Entries are booked by a human at a live price, so every
+                    # live pick here fills at decision time. Anything still
                     # unfilled once its fill moment has passed (e.g. a limit never
                     # reached) was never filled → NOT TAKEN.
                     now = now_et()
@@ -271,37 +270,6 @@ async def _serve() -> None:
             from alphadesk.app import scheduler
             scheduler.beat()   # 180s liveness for /healthz (grader's hourly beat is too coarse)
             await asyncio.sleep(WATCH_INTERVAL_S)   # configurable; default 60s
-
-    async def _entry_watch_loop():
-        """Continuous per-candidate entry decisions — replaces the old batch
-        Find Trades scanner (2026-08-13). No fixed cadence forcing candidates to
-        compete for a top-N slot: every earnings candidate is watched
-        independently and booked the moment it clears the score bar on its own
-        merit. See desk/watcher.py's module docstring for the full rationale."""
-        from alphadesk.config import ENTRY_WATCH_INTERVAL_S, POOL_REFRESH_S
-        from alphadesk.config import entry_allowed
-        from alphadesk.config import session as market_session
-        from alphadesk.desk import watcher as entry_watcher
-        log = logging.getLogger("alphadesk.entrywatch")
-        loop = asyncio.get_running_loop()
-        last_refresh = 0.0
-        while True:
-            try:
-                if market_session() == "OPEN" and entry_allowed():
-                    now = time.monotonic()
-                    if now - last_refresh >= POOL_REFRESH_S:
-                        await loop.run_in_executor(None, entry_watcher.refresh_pool)
-                        last_refresh = now
-                    booked = await entry_watcher.tick()
-                    if booked:
-                        log.info("Entry watch: booked %s", ", ".join(booked))
-                        from alphadesk.app.alerts import notify
-                        notify(f"Entry watch: booked {', '.join(booked)}", "pick")
-            except Exception as exc:
-                log.error("entry watch error: %s", exc)
-            from alphadesk.app import scheduler
-            scheduler.beat()
-            await asyncio.sleep(ENTRY_WATCH_INTERVAL_S)
 
     async def _quantity_watch_loop():
         """Quant-tiered exits (trailing stop, spike detection, stale expiry) — runs
@@ -435,7 +403,10 @@ async def _serve() -> None:
                 log.error("daily summary error: %s", exc)
             await asyncio.sleep(300)
 
-    await asyncio.gather(_grader_loop(), _earnings_loop(), _entry_watch_loop(),
+    # No entry loop: nothing in this process decides or books a trade. The
+    # remaining loops serve the human terminal — refresh data, manage the
+    # exits on positions the operator booked, and grade the outcomes.
+    await asyncio.gather(_grader_loop(), _earnings_loop(),
                          _position_watch_loop(), _quantity_watch_loop(),
                          _daily_summary_loop(), _web_server().serve())
 
@@ -444,12 +415,9 @@ def main() -> None:
     _setup_logging()
     parser = argparse.ArgumentParser(prog="alphadesk")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("dashboard", help="dashboard — trades run on button click")
+    sub.add_parser("dashboard", help="run the terminal (no autonomous trading)")
     p_back = sub.add_parser("backfill")
     p_back.add_argument("--hours", type=float, default=72)
-    p_desk = sub.add_parser("desk", help="convene the team NOW on recent news")
-    p_desk.add_argument("--hours", type=float, default=8,
-                        help="news lookback for the candidate window")
     sub.add_parser("grade")
     sub.add_parser("status")
     p_bt = sub.add_parser("backtest", help="replay past earnings → does the drift edge pay vs SPY?")
@@ -464,7 +432,7 @@ def main() -> None:
 
     if args.cmd == "dashboard":
         log = logging.getLogger("alphadesk")
-        log.info("Dashboard on http://%s:%s — click Find Trades to run",
+        log.info("Terminal on http://%s:%s — nothing trades itself; /trade to book",
                  __import__("os").environ.get("DASHBOARD_HOST", "127.0.0.1"),
                  __import__("os").environ.get("DASHBOARD_PORT", "8000"))
         asyncio.run(_serve())
@@ -472,19 +440,6 @@ def main() -> None:
         from alphadesk.ingest.earnings import refresh_calendar
         n = refresh_calendar(days_back=int(args.hours / 24) or 5)
         print(f"earnings calendar refreshed: {n} reporters")
-    elif args.cmd == "desk":
-        from alphadesk.desk.workflow import research_run
-        from alphadesk.ingest.earnings import drift_candidates
-        async def _adhoc() -> None:
-            candidates = await asyncio.get_running_loop().run_in_executor(
-                None, drift_candidates)
-            print(f"{len(candidates)} earnings drift candidates")
-            if candidates:
-                ids = await research_run(candidates, trigger_src="DEEP_RUN")
-                print(f"{len(ids)} picks booked")
-            else:
-                print("no candidates")
-        asyncio.run(_adhoc())
     elif args.cmd == "grade":
         from alphadesk.ledger.grader import grade_due
         print(f"graded {grade_due()} picks")

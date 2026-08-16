@@ -354,6 +354,9 @@ export interface ManualPickResult {
   target: number
   stop: number
   managed_by: string
+  /** Non-blocking caution, e.g. booked inside the session's entry buffer where
+   * the close sweep will exit it early. Null when the timing is fine. */
+  warning: string | null
 }
 
 /** Realized performance split by who decided — you vs the machine, scored

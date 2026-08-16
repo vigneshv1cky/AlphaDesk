@@ -131,9 +131,8 @@ def atr_plan(symbol: str, direction: str, horizon_days: int,
     atr_dec = atr / 100.0
     tgt_mult = PLAN_TARGET_ATR
     # stop_atr_mult lets a caller override the stop distance without
-    # touching PLAN_STOP_ATR (shared with desk/workflow.py's offline path) —
-    # e.g. desk/watcher.py's live engine passes a much wider backstop
-    # multiple, since its primary exit is signal-based, not this stop.
+    # touching PLAN_STOP_ATR — e.g. the manual booking endpoint passes a much
+    # wider backstop multiple, since a stop is a safety net there, not the plan.
     sl_mult = stop_atr_mult if stop_atr_mult is not None else PLAN_STOP_ATR
 
     if direction == "LONG":

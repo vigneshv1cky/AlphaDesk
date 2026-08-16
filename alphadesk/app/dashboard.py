@@ -82,26 +82,25 @@ class ManualPick(BaseModel):
 
 @app.post("/api/picks/manual")
 def api_manual_pick(body: ManualPick):
-    """Book a HUMAN trading decision into the same ledger the bot uses.
+    """Book a trading decision. This is the ONLY way a trade enters the system
+    — every autonomous booking path was deleted on 2026-08-16.
 
-    trigger_src="HUMAN" is what separates these from ENTRY_WATCH rows, so the
-    performance page can score your judgment against the machine's on
-    identical terms. Nothing else needs wiring: quant/watcher.py discovers
-    positions via open_taken_picks() regardless of who created them, so a
-    manual entry gets the same target/stop/trailing management and the same
-    forward grading automatically.
+    trigger_src="HUMAN" tags the row. Nothing else needs wiring: quant/watcher.py
+    discovers positions via open_taken_picks() regardless of who created them,
+    so a manual entry gets the same target/stop/trailing management and the
+    same forward grading against SPY automatically.
 
     `thesis` is mandatory. A decision with no recorded reason can't be
     learned from later, and the entire value of this system is that it
     refuses to let you misremember why you did something.
 
-    Deliberately NOT enforced here: MAX_ENTRIES_PER_DAY, the per-symbol cap
-    and DAILY_LOSS_STOP_PCT. Those are governors on an unattended machine
-    booking trades in a loop; a human making a considered decision is the
-    thing they exist to approximate.
+    Returns a `warning` (never a refusal) when the clock is against the trade:
+    the session-close sweep is not optional, so booking inside the final
+    ENTRY_BUFFER_MIN means the position gets dumped before it can work.
+    Whether that's acceptable is the operator's call, not the server's.
     """
     from alphadesk.config import (MANUAL_MAX_QUOTE_AGE_S, MA_STOP_BACKSTOP_ATR,
-                                  PLAN_TARGET_ATR, session)
+                                  PLAN_TARGET_ATR, entry_allowed, session)
     from alphadesk.desk import plan
     from alphadesk.ingest import prices
 
@@ -118,11 +117,11 @@ def api_manual_pick(body: ManualPick):
     last = pctx.get("last_price")
     if not last:
         raise HTTPException(422, f"no live price for {sym} — not booking a blind entry")
-    # The engine's rule is "a pick with no live trade is not taken", but it
-    # tests last_trade_ts for EXISTENCE, which only means Alpaca ever printed a
-    # trade — on a Sunday that's Friday's close. The engine gets away with it
-    # because _entry_watch_loop only runs while session()=="OPEN"; this
-    # endpoint has no such gate, so it checks FRESHNESS instead. Booking on a
+    # The retired engine's rule was "a pick with no live trade is not taken",
+    # but it tested last_trade_ts for EXISTENCE, which only means Alpaca ever
+    # printed a trade — on a Sunday that's Friday's close. It got away with
+    # that because it only ran while session()=="OPEN"; this endpoint can be
+    # hit at any hour, so it checks FRESHNESS instead. Booking on a
     # stale price would record a fill that never happened and then grade it as
     # if it had. Also catches a halted symbol, whose last print goes stale
     # while the session is nominally open.
@@ -146,7 +145,7 @@ def api_manual_pick(body: ManualPick):
             stop = stop if stop is not None else auto["stop"]
         else:
             # atr_plan rejects the engine's wide-backstop geometry (reward/risk
-            # 0.5 vs MIN_RISK_REWARD_RATIO 1.5), same as desk/watcher.py hits.
+            # 0.5 vs MIN_RISK_REWARD_RATIO 1.5), as the retired engine also hit.
             sign = 1 if direction == "LONG" else -1
             target = target if target is not None else round(last * (1 + sign * atr / 100 * PLAN_TARGET_ATR), 4)
             stop = stop if stop is not None else round(last * (1 - sign * atr / 100 * MA_STOP_BACKSTOP_ATR), 4)
@@ -170,7 +169,10 @@ def api_manual_pick(body: ManualPick):
     store.mark_taken([pick_id])
     return {"id": pick_id, "symbol": sym, "direction": direction,
             "entry": round(last, 4), "target": target, "stop": stop,
-            "managed_by": "quant/watcher.py"}
+            "managed_by": "quant/watcher.py",
+            "warning": None if entry_allowed() else
+            "Booked inside the session's entry buffer — the close sweep will "
+            "exit this before it has much room to work."}
 
 
 @app.get("/api/stats")
@@ -631,13 +633,10 @@ def api_timelines(days: int = 30):
     return {"symbols": symbols, "market": market_session()}
 
 
-# The batch Find Trades scanner and its /api/find-trades SSE endpoint were
-# removed 2026-08-13 in favor of a continuous per-candidate entry watcher
-# (desk/watcher.py, driven by main.py's _entry_watch_loop) — there's no more
-# discrete "run" to stream. Confirmed via grep that nothing in ui/src ever
-# called this endpoint (no button, no SSE consumer), so removal doesn't
-# break the frontend. The removed support code (_within_daily_cap,
-# _log_run_event, _clip) had no other callers.
+# There is no endpoint that starts a trading run. The batch Find Trades
+# scanner went in 2026-08-13, its per-candidate replacement went with all the
+# other bots on 2026-08-16. Trades enter this system exactly one way now:
+# POST /api/picks/manual, from a human.
 
 
 # ---------------------------------------------------------------------------

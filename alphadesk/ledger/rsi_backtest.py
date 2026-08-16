@@ -1,4 +1,5 @@
-"""Intraday RSI backtest — replays desk/watcher.py's LIVE entry engine over
+"""Intraday RSI backtest — replays the RETIRED autonomous entry engine
+(desk/watcher.py, deleted 2026-08-16) over
 historical 1-minute bars. Separate from ledger/backtest.py, which is daily-bar
 post-earnings-drift research and structurally cannot test an intraday crossing.
 
@@ -158,7 +159,7 @@ def _rsi_series(closes: list[float]) -> list[float]:
 # ── replay ───────────────────────────────────────────────────────────────────
 
 def _live_plan(sym: str, direction: str, px: float, atr_pct: float | None) -> dict | None:
-    """Reproduce desk/watcher.py's _book() pricing, INCLUDING the fact that
+    """Reproduce the retired engine's _book() pricing, INCLUDING the fact that
     plan.atr_plan() never succeeds here.
 
     atr_plan applies _coherent(), which enforces MIN_RISK_REWARD_RATIO (1.5).
@@ -300,18 +301,22 @@ def replay_symbol(sym: str, minute: list[dict], dctx: dict) -> list[dict]:
 
 def backtest_rsi(days: int = 90, symbols: list[str] | None = None,
                  min_coverage: float = 0.0, max_symbols: int = 60) -> list[dict]:
-    """Replay the live RSI engine over `days` of history.
+    """Replay the (now-retired) RSI entry engine over `days` of history.
 
     min_coverage: required share of a full 390-bar regular session actually
-    present in the IEX feed (0.0 = take everything, as deployed).
+    present in the IEX feed (0.0 = take everything, as the engine ran).
+
+    The universe comes straight from the earnings calendar. This used to
+    borrow desk/watcher.py's live watch pool, but that module was deleted with
+    the trading bots (2026-08-16) — the pool was only ever
+    earnings.drift_candidates() minus symbols already held, and a historical
+    replay has no open book to exclude.
     """
     from alphadesk.config import now_et
-    from alphadesk.desk import watcher as entry_watcher
-    from alphadesk.ingest import prices
+    from alphadesk.ingest import earnings, prices
 
     if symbols is None:
-        entry_watcher.refresh_pool()
-        symbols = entry_watcher.watched_symbols()
+        symbols = sorted(earnings.drift_candidates())
     symbols = symbols[:max_symbols]
 
     start = now_et() - timedelta(days=days)

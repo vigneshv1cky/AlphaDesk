@@ -222,7 +222,7 @@ def drift_candidates() -> dict[str, list[dict]]:
     the run needs and shapes them as candidates.
 
     One continuous window, unfiltered by reaction/momentum (facts only —
-    desk/watcher.py's technical-setup engine is where the judgment lives):
+    a human reading the terminal is where the judgment lives):
     from EARNINGS_PRE_WINDOW_DAYS before the report through
     EARNINGS_POST_MAX_DAYS after it (-3 to +5 days around the report date,
     by default) — sourced as two pools (upcoming vs. already-reported are

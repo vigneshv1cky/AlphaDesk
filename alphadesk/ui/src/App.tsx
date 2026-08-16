@@ -4,7 +4,6 @@ import { api, type LivePick, type SymbolTimeline, type Stats, type EarningsRow }
 import { useTheme } from "@/lib/theme"
 import { Header } from "@/components/Header"
 import { Nav } from "@/components/Nav"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Moon, Monitor, Sun } from "lucide-react"
@@ -87,12 +86,9 @@ function Shell() {
             <span className="h-3.5 w-3.5 rotate-45 rounded-[3px] bg-indigo-500" />
             <div className="leading-none">
               <div className="text-sm font-bold tracking-tight">AlphaDesk</div>
-              <div className="mt-0.5 text-[10px] text-muted-foreground">Quant engine</div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">Research terminal</div>
             </div>
           </div>
-          <Badge className="gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-500">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />auto
-          </Badge>
           <Separator orientation="vertical" className="mx-1 h-8" />
           <Nav />
           <Separator orientation="vertical" className="mx-1 h-8" />

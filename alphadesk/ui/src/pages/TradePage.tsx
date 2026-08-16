@@ -211,6 +211,9 @@ function BookTrade({ symbol, last }: { symbol: string; last?: number }) {
               {result.direction} {result.symbol} @ {result.entry} · tgt {result.target} · stop{" "}
               {result.stop}
             </div>
+            {result.warning && (
+              <div className="mt-1.5 text-amber-700 dark:text-amber-500">{result.warning}</div>
+            )}
           </div>
         )}
       </form>
