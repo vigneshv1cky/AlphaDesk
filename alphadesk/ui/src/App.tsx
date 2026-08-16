@@ -16,6 +16,7 @@ const EarningsPage = lazy(() => import("@/pages/EarningsPage"))
 const MarketPage = lazy(() => import("@/pages/MarketPage"))
 const SystemPage = lazy(() => import("@/pages/SystemPage"))
 const PerformancePage = lazy(() => import("@/pages/PerformancePage"))
+const TradePage = lazy(() => import("@/pages/TradePage"))
 
 const TITLES: Record<string, string> = {
   "/live": "Live Positions · AlphaDesk",
@@ -24,6 +25,7 @@ const TITLES: Record<string, string> = {
   "/earnings": "Earnings · AlphaDesk",
   "/system": "System Health · AlphaDesk",
   "/performance": "Performance · AlphaDesk",
+  "/trade": "Trade · AlphaDesk",
 }
 
 function Shell() {
@@ -112,6 +114,7 @@ function Shell() {
               <Route path="/earnings" element={<EarningsPage earnings={earnings} />} />
               <Route path="/system" element={<SystemPage />} />
               <Route path="/performance" element={<PerformancePage />} />
+              <Route path="/trade" element={<TradePage />} />
               <Route path="*" element={<Navigate to="/live" replace />} />
             </Routes>
           </Suspense>

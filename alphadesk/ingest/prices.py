@@ -642,6 +642,41 @@ def intraday_bars(symbol: str, start) -> list[dict]:
 _intraday_ma_cache: dict[str, tuple[float, Optional[dict]]] = {}
 _INTRADAY_MA_TTL_S = 30
 
+# A full US regular session is 390 one-minute bars. The IEX feed prints far
+# fewer for illiquid names, so this ratio is the honest measure of whether a
+# "1-minute" indicator is really computed on 1-minute data.
+BARS_PER_SESSION = 390
+
+
+def _coverage_stats(bars: list[dict]) -> dict:
+    """How real is this "1-minute" series? Returns bar count, sessions
+    spanned, the fraction of a full session actually present, the median
+    intraday gap, and a single indicators_reliable verdict for the UI.
+
+    Exists because the IEX feed's sparsity is invisible on a rendered chart:
+    92 bars stretched across 5 sessions draws exactly like 1950 real ones.
+    """
+    from alphadesk.config import ET, CHART_MAX_MEDIAN_GAP_MIN, CHART_MIN_COVERAGE
+    n = len(bars)
+    if n < 2:
+        return {"bar_count": n, "sessions": 0, "coverage": 0.0,
+                "median_gap_min": None, "indicators_reliable": False}
+    sessions = len({b["ts"].astimezone(ET).date() for b in bars})
+    gaps = sorted(g for g in
+                  ((bars[i]["ts"] - bars[i - 1]["ts"]).total_seconds() / 60
+                   for i in range(1, n))
+                  if g < 240)          # drop overnight/weekend gaps
+    median_gap = gaps[len(gaps) // 2] if gaps else None
+    coverage = round(n / (sessions * BARS_PER_SESSION), 3) if sessions else 0.0
+    reliable = bool(coverage >= CHART_MIN_COVERAGE
+                    and median_gap is not None
+                    and median_gap <= CHART_MAX_MEDIAN_GAP_MIN)
+    # "bar_count", not "bars" — get_chart_series() merges this dict alongside
+    # its OHLC array, which owns the "bars" key.
+    return {"bar_count": n, "sessions": sessions, "coverage": coverage,
+            "median_gap_min": round(median_gap, 1) if median_gap is not None else None,
+            "indicators_reliable": reliable}
+
 
 def get_intraday_ma_context(symbol: str) -> Optional[dict]:
     """Day-trading-scale technical signal — RSI-9 computed on
@@ -655,11 +690,25 @@ def get_intraday_ma_context(symbol: str) -> Optional[dict]:
     it's already reversed). This ONE signal decides both DIRECTION and
     TIMING: which threshold got crossed, and which way, is the whole setup.
 
-    Deliberately a single indicator. An earlier build paired MACD(12,26,9)
-    as a separate trend/direction filter, but two independently-moving
-    signals can briefly disagree (MACD about to flip while RSI has already
-    crossed for the OLD regime), which entered trades right before a
-    reversal. One signal can't disagree with itself.
+    RSI stays the ONLY automated signal. An earlier build paired MACD as a
+    second automated filter, but two independently-moving signals can
+    briefly disagree (MACD about to flip while RSI has already crossed for
+    the OLD regime), which entered trades right before a reversal. Nothing
+    in code arbitrates between signals.
+
+    macd_*: computed and returned for the HUMAN chart only (Phase 0). It is
+    display data — no automated caller reads it, and re-wiring it into
+    _entry_signal would resurrect the disagreement bug. A human reading a
+    chart resolves "RSI oversold but MACD hasn't turned" with judgment,
+    which is exactly what the machine could not do.
+
+    coverage/*: the IEX feed carries only a few percent of consolidated
+    volume, so illiquid names have no print in most minutes and these
+    "1-minute" indicators are computed on a sparse, irregular series
+    (measured: 92 bars over 5 sessions with a 42-minute p90 gap, vs 1570
+    and 1.0 for AAPL). Callers that DISPLAY an indicator must surface
+    indicators_reliable — a chart that looks normal but isn't will recruit
+    a trader's judgment into a bad decision.
 
     TTL-cached separately from get_context() — short enough an exit check
     stays fresh, long enough not to refetch faster than a new bar can even
@@ -715,12 +764,92 @@ def get_intraday_ma_context(symbol: str) -> Optional[dict]:
                 "rsi_cross_up_overbought": rsi_cross_up_overbought,
                 "rsi_cross_down_oversold": rsi_cross_down_oversold,
             }
+            # MACD(12,26,9) — DISPLAY ONLY (see docstring). Needs 26+9 bars
+            # before the signal line means anything; below that, omit rather
+            # than emit a number that looks valid.
+            if len(bars) >= 35:
+                ema_fast = closes.ewm(span=12, adjust=False).mean()
+                ema_slow = closes.ewm(span=26, adjust=False).mean()
+                macd_line = ema_fast - ema_slow
+                signal_line = macd_line.ewm(span=9, adjust=False).mean()
+                diff = float((macd_line - signal_line).iloc[-1])
+                result.update({
+                    "macd_line": round(float(macd_line.iloc[-1]), 4),
+                    "macd_signal": round(float(signal_line.iloc[-1]), 4),
+                    "macd_diff": round(diff, 4),
+                    "macd_regime": "LONG" if diff > 0 else "SHORT" if diff < 0 else None,
+                })
+            result.update(_coverage_stats(bars))
     except Exception as exc:
         log.debug("intraday MA context failed %s: %s", sym, exc)
     with _cache_lock:
         if len(_intraday_ma_cache) >= _CACHE_MAX_ENTRIES:
             _evict_expired(_intraday_ma_cache, _INTRADAY_MA_TTL_S)
         _intraday_ma_cache[sym] = (time.time(), result)
+    return result
+
+
+_chart_cache: dict[str, tuple[float, Optional[dict]]] = {}
+_CHART_TTL_S = 30
+
+
+def get_chart_series(symbol: str, days: int = 2) -> Optional[dict]:
+    """OHLC + full RSI-9 and MACD(12,26,9) SERIES for the human chart.
+
+    get_intraday_ma_context() returns only the latest value (all an automated
+    exit check needs); a chart needs every point. Same indicator math, so the
+    number under the cursor matches what the engine acted on.
+
+    Indicators are computed over the whole fetched window but only marked
+    reliable via _coverage_stats — see CHART_MIN_COVERAGE. The caller is
+    expected to surface that, not silently draw.
+    """
+    sym = symbol.upper()
+    key = f"{sym}:{days}"
+    with _cache_lock:
+        hit = _chart_cache.get(key)
+        if hit and time.time() - hit[0] < _CHART_TTL_S:
+            return hit[1]
+    result: Optional[dict] = None
+    try:
+        from datetime import timedelta
+        bars = intraday_bars(sym, now_et() - timedelta(days=max(1, min(days, 30)) + 3))
+        if len(bars) >= 2:
+            import pandas as pd
+            closes = pd.Series([b["close"] for b in bars])
+
+            delta = closes.diff()
+            avg_gain = delta.clip(lower=0).ewm(alpha=1 / 9, min_periods=9, adjust=False).mean()
+            avg_loss = (-delta.clip(upper=0)).ewm(alpha=1 / 9, min_periods=9, adjust=False).mean()
+            rs = avg_gain / avg_loss.where(avg_loss != 0, other=float("nan"))
+            rsi = (100 - 100 / (1 + rs)).where(avg_loss != 0, other=100.0)
+
+            macd_line = (closes.ewm(span=12, adjust=False).mean()
+                         - closes.ewm(span=26, adjust=False).mean())
+            signal_line = macd_line.ewm(span=9, adjust=False).mean()
+
+            def _pt(v):
+                f = float(v)
+                return round(f, 4) if math.isfinite(f) else None
+
+            result = {
+                "symbol": sym,
+                "bars": [{"t": b["ts"].isoformat(), "o": b["open"], "h": b["high"],
+                          "l": b["low"], "c": b["close"]} for b in bars],
+                "rsi_9": [_pt(v) for v in rsi],
+                "macd": [_pt(v) for v in macd_line],
+                "macd_signal": [_pt(v) for v in signal_line],
+                "macd_hist": [_pt(a - b) for a, b in zip(macd_line, signal_line)],
+                "thresholds": {"rsi_oversold": RSI_CROSS_OVERSOLD,
+                               "rsi_overbought": RSI_CROSS_OVERBOUGHT},
+                **_coverage_stats(bars),
+            }
+    except Exception as exc:
+        log.debug("chart series failed %s: %s", sym, exc)
+    with _cache_lock:
+        if len(_chart_cache) >= _CACHE_MAX_ENTRIES:
+            _evict_expired(_chart_cache, _CHART_TTL_S)
+        _chart_cache[key] = (time.time(), result)
     return result
 
 

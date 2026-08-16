@@ -20,6 +20,29 @@ function apply(t: Theme) {
   document.documentElement.classList.toggle("dark", dark)
 }
 
+/** Is dark mode ACTUALLY applied right now?
+ *
+ * Distinct from useTheme()'s value, which can be "system" — a consumer that
+ * needs a real colour (canvas, chart, anything outside CSS) has to resolve
+ * that. Watches the `dark` class apply() toggles, so it stays correct when the
+ * OS preference flips under "system" too. */
+export function useIsDark(): boolean {
+  const [dark, setDark] = useState(
+    () => typeof document !== "undefined" && document.documentElement.classList.contains("dark"),
+  )
+  useEffect(() => {
+    const root = document.documentElement
+    const sync = () => setDark(root.classList.contains("dark"))
+    const obs = new MutationObserver(sync)
+    obs.observe(root, { attributes: true, attributeFilter: ["class"] })
+    const mq = window.matchMedia("(prefers-color-scheme: dark)")
+    mq.addEventListener("change", sync)
+    sync()
+    return () => { obs.disconnect(); mq.removeEventListener("change", sync) }
+  }, [])
+  return dark
+}
+
 export function useTheme(): [Theme, () => void] {
   const [theme, setTheme] = useState<Theme>(applied)
   useEffect(() => { apply(theme) }, [theme])

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from alphadesk.ledger import store
 
@@ -49,6 +50,127 @@ def api_pick(pick_id: int):
     if not pick:
         raise HTTPException(404, "no such pick")
     return pick
+
+
+@app.get("/api/chart/{symbol}")
+def api_chart(symbol: str, days: int = 2):
+    """OHLC + RSI-9 + MACD(12,26,9) series for the human decision chart.
+
+    Always returns the data-quality block (coverage / median_gap_min /
+    indicators_reliable). The UI must render that: on the free IEX feed an
+    illiquid name's "1-minute" chart can be a handful of prints stretched
+    across days, and it draws identically to a real one.
+    """
+    from alphadesk.ingest import prices
+    sym = "".join(c for c in symbol.upper() if c.isalnum() or c in ".-")[:12]
+    if not sym:
+        raise HTTPException(400, "bad symbol")
+    series = prices.get_chart_series(sym, days=days)
+    if not series:
+        raise HTTPException(404, f"no intraday bars for {sym}")
+    return series
+
+
+class ManualPick(BaseModel):
+    symbol: str
+    direction: str                      # LONG | SHORT
+    thesis: str                         # required on purpose — see below
+    target: float | None = None
+    stop: float | None = None
+    horizon_days: int = 1
+
+
+@app.post("/api/picks/manual")
+def api_manual_pick(body: ManualPick):
+    """Book a HUMAN trading decision into the same ledger the bot uses.
+
+    trigger_src="HUMAN" is what separates these from ENTRY_WATCH rows, so the
+    performance page can score your judgment against the machine's on
+    identical terms. Nothing else needs wiring: quant/watcher.py discovers
+    positions via open_taken_picks() regardless of who created them, so a
+    manual entry gets the same target/stop/trailing management and the same
+    forward grading automatically.
+
+    `thesis` is mandatory. A decision with no recorded reason can't be
+    learned from later, and the entire value of this system is that it
+    refuses to let you misremember why you did something.
+
+    Deliberately NOT enforced here: MAX_ENTRIES_PER_DAY, the per-symbol cap
+    and DAILY_LOSS_STOP_PCT. Those are governors on an unattended machine
+    booking trades in a loop; a human making a considered decision is the
+    thing they exist to approximate.
+    """
+    from alphadesk.config import (MANUAL_MAX_QUOTE_AGE_S, MA_STOP_BACKSTOP_ATR,
+                                  PLAN_TARGET_ATR, session)
+    from alphadesk.desk import plan
+    from alphadesk.ingest import prices
+
+    sym = "".join(c for c in body.symbol.upper() if c.isalnum() or c in ".-")[:12]
+    direction = body.direction.upper().strip()
+    if direction not in ("LONG", "SHORT"):
+        raise HTTPException(400, "direction must be LONG or SHORT")
+    if not sym:
+        raise HTTPException(400, "bad symbol")
+    if not body.thesis.strip():
+        raise HTTPException(400, "thesis is required — record why you took this")
+
+    pctx = prices.get_context(sym) or {}
+    last = pctx.get("last_price")
+    if not last:
+        raise HTTPException(422, f"no live price for {sym} — not booking a blind entry")
+    # The engine's rule is "a pick with no live trade is not taken", but it
+    # tests last_trade_ts for EXISTENCE, which only means Alpaca ever printed a
+    # trade — on a Sunday that's Friday's close. The engine gets away with it
+    # because _entry_watch_loop only runs while session()=="OPEN"; this
+    # endpoint has no such gate, so it checks FRESHNESS instead. Booking on a
+    # stale price would record a fill that never happened and then grade it as
+    # if it had. Also catches a halted symbol, whose last print goes stale
+    # while the session is nominally open.
+    from datetime import datetime, timezone
+    rt_ts = pctx.get("last_trade_ts")
+    age_s = (datetime.now(timezone.utc) - rt_ts).total_seconds() if rt_ts else None
+    if age_s is None or age_s > MANUAL_MAX_QUOTE_AGE_S:
+        mins = f"{age_s / 60:.0f} min" if age_s else "never"
+        raise HTTPException(
+            422,
+            f"{sym}'s last trade was {mins} ago — that price isn't a fill you could "
+            "get. Book while the symbol is actively trading.")
+
+    target, stop = body.target, body.stop
+    if target is None or stop is None:
+        atr = pctx.get("atr_pct") or 2.0
+        auto = plan.atr_plan(sym, direction, body.horizon_days, last, atr,
+                             stop_atr_mult=MA_STOP_BACKSTOP_ATR)
+        if auto:
+            target = target if target is not None else auto["target"]
+            stop = stop if stop is not None else auto["stop"]
+        else:
+            # atr_plan rejects the engine's wide-backstop geometry (reward/risk
+            # 0.5 vs MIN_RISK_REWARD_RATIO 1.5), same as desk/watcher.py hits.
+            sign = 1 if direction == "LONG" else -1
+            target = target if target is not None else round(last * (1 + sign * atr / 100 * PLAN_TARGET_ATR), 4)
+            stop = stop if stop is not None else round(last * (1 - sign * atr / 100 * MA_STOP_BACKSTOP_ATR), 4)
+
+    spy = (prices.get_context("SPY") or {}).get("last_price")
+    pick_id = store.record_pick({
+        "symbol": sym, "arm": "HUMAN", "edge": "MANUAL",
+        "source": "HUMAN", "decision_id": f"h-{sym}",
+        "trigger_src": "HUMAN", "session": session(),
+        "direction": direction, "horizon_days": body.horizon_days,
+        "score": 0.0, "adjusted_score": 0, "confidence": 0,
+        "verdict": "HUMAN", "approved": 1,
+        "triage_reason": body.thesis.strip(), "thesis": body.thesis.strip(),
+        "debate": {}, "briefs": [], "model_tags": {"mode": "manual"},
+        "low_liquidity": int(bool(pctx.get("low_liquidity"))),
+        "skeptic_moved_score": 0.0, "arbiter_overrode": 0,
+        "entry_price": last, "spy_price": spy,
+        "plan_entry": round(last, 4), "plan_target": target, "plan_stop": stop,
+        "plan_note": f"manual {direction} {sym}", "order_type": "market",
+    })
+    store.mark_taken([pick_id])
+    return {"id": pick_id, "symbol": sym, "direction": direction,
+            "entry": round(last, 4), "target": target, "stop": stop,
+            "managed_by": "quant/watcher.py"}
 
 
 @app.get("/api/stats")
@@ -140,6 +262,28 @@ def api_performance(days: int = 30):
         if (r.get("exit_return_pct") or 0) > 0:
             pm["wins"] += 1
 
+    # Human vs machine, scored identically. The bot keeps booking on paper as
+    # a control arm, so this is the comparison that says whether discretion is
+    # adding anything — the question a P&L alone can never answer.
+    by_decider: dict = {}
+    for r in rows:
+        src = r.get("trigger_src") or "?"
+        who = "HUMAN" if src == "HUMAN" else "MACHINE"
+        d = by_decider.setdefault(who, {"n": 0, "pnl": 0.0, "alpha": 0.0, "wins": 0})
+        ret = r.get("exit_return_pct") or 0
+        ea, an = r.get("exit_alpha"), r.get("alpha_net")
+        d["n"] += 1
+        d["pnl"] += ret
+        d["alpha"] += ea if ea is not None else (an if an is not None else 0)
+        if ret > 0:
+            d["wins"] += 1
+    for d in by_decider.values():
+        d["pnl"] = round(d["pnl"], 3)
+        d["alpha"] = round(d["alpha"], 3)
+        d["mean_return"] = round(d["pnl"] / d["n"], 3) if d["n"] else None
+        d["mean_alpha"] = round(d["alpha"] / d["n"], 3) if d["n"] else None
+        d["win_rate"] = round(100.0 * d["wins"] / d["n"], 1) if d["n"] else None
+
     return {
         "days": days,
         "curve": curve,
@@ -151,6 +295,7 @@ def api_performance(days: int = 30):
         "trade_sharpe": trade_sharpe,
         "daily_sharpe": daily_sharpe,
         "per_market": {k: {**v, "pnl": round(v["pnl"], 3)} for k, v in per_market.items()},
+        "by_decider": by_decider,
         "trades": rows,
     }
 

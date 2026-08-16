@@ -1388,10 +1388,14 @@ def runs_today(kind: str = "FIND_TRADES") -> int:
 
 def performance_rows(days: int = 30) -> list[dict]:
     """Exited picks with everything the performance page needs — realized P&L,
-    alpha, path (MFE/MAE), plan levels, and the quant signals that fired."""
+    alpha, path (MFE/MAE), plan levels, and the quant signals that fired.
+
+    trigger_src is included so the page can split human decisions from the
+    machine's: the bot keeps trading on paper as a control arm, and the whole
+    point is being able to compare the two on identical scoring."""
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT id, ts, symbol, direction, session, horizon_days,"
+            "SELECT id, ts, symbol, direction, session, horizon_days, trigger_src,"
             " exit_ts, exit_return_pct, exit_alpha, alpha_net, mfe_pct, mae_pct,"
             " plan_entry, plan_target, plan_stop, entry_price, exit_price,"
             " score, adjusted_score, thesis, debate"

@@ -98,6 +98,26 @@ MAX_BOOKINGS_PER_SYMBOL_PER_DAY = int(os.environ.get("MAX_BOOKINGS_PER_SYMBOL_PE
 # hard floor is the one thing that still catches that case).
 MA_STOP_BACKSTOP_ATR = float(os.environ.get("MA_STOP_BACKSTOP_ATR", "4.0"))
 
+# ── Chart data quality (human decision support) ──────────────────────────────
+# Alpaca's free IEX feed carries only a few percent of consolidated volume, so
+# an illiquid name has no print in most minutes. A "1-minute" RSI/MACD drawn on
+# that series is really an N-sample indicator over an unknown time span —
+# measured: ENTA had 92 bars across 5 sessions with a 42-min p90 gap, against
+# AAPL's 1570 bars at a 1.0-min median. The rendered chart looks identical
+# either way, which is the danger: the bot failed quietly, but a misleading
+# chart actively recruits a trader's judgment. Below either floor the UI must
+# mark indicators unreliable rather than silently drawing them.
+CHART_MIN_COVERAGE = float(os.environ.get("CHART_MIN_COVERAGE", "0.5"))        # share of a 390-bar session
+CHART_MAX_MEDIAN_GAP_MIN = float(os.environ.get("CHART_MAX_MEDIAN_GAP_MIN", "2.0"))
+
+# How stale the last real Alpaca print may be before a MANUAL booking is
+# refused. The entry engine only ever runs during OPEN so it can get away with
+# merely checking that last_trade_ts exists; a human can hit the booking
+# endpoint at 5pm Sunday, when "last price" is Friday's close — a fill nobody
+# could have gotten, which would then be graded as if they had. Freshness also
+# catches a halted symbol during an otherwise-open session.
+MANUAL_MAX_QUOTE_AGE_S = float(os.environ.get("MANUAL_MAX_QUOTE_AGE_S", "900"))  # 15 min
+
 # ── Quant ────────────────────────────────────────────────────────────────────
 QUANT_STREAM_ENABLED = os.environ.get("QUANT_STREAM_ENABLED", "1") not in ("0", "", "false", "False", "no")
 QUANT_PREFILTER_MIN_SCORE = float(os.environ.get("QUANT_PREFILTER_MIN_SCORE", "5.0"))

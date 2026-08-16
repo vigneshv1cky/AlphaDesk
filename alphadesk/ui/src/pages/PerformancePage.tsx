@@ -103,6 +103,45 @@ function TradeRow({ t }: { t: PerfTrade }) {
   )
 }
 
+/** You vs the machine, scored identically.
+ *
+ * The bot keeps booking on paper as a control arm, so this answers the one
+ * question a P&L alone never can: is discretion adding anything? Both arms are
+ * graded forward against SPY by the same code, so the comparison is fair. */
+function DeciderSplit({ by }: { by: PerformanceInfo["by_decider"] }) {
+  const rows = (["HUMAN", "MACHINE"] as const).map(k => [k, by?.[k]] as const).filter(([, v]) => v)
+  if (!rows.length) return null
+  return (
+    <Card><CardContent className="py-4">
+      <div className="mb-3 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+        Decision source
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {rows.map(([who, s]) => (
+          <div key={who} className="rounded-lg border p-3">
+            <div className="flex items-baseline justify-between">
+              <span className="text-sm font-semibold">{who === "HUMAN" ? "You" : "Machine"}</span>
+              <span className="text-[11px] text-muted-foreground">{s!.n} trades</span>
+            </div>
+            <div className={`mt-1 font-mono text-xl font-bold tabular-nums ${(s!.mean_alpha ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+              {(s!.mean_alpha ?? 0) >= 0 ? "+" : ""}{s!.mean_alpha?.toFixed(3) ?? "—"}%
+            </div>
+            <div className="text-[10px] text-muted-foreground">mean alpha vs SPY per trade</div>
+            <div className="mt-2 font-mono text-[11px] text-muted-foreground tabular-nums">
+              total {s!.pnl >= 0 ? "+" : ""}{s!.pnl.toFixed(2)}% · win {s!.win_rate?.toFixed(0) ?? "—"}%
+            </div>
+          </div>
+        ))}
+      </div>
+      {rows.length < 2 && (
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          Only one arm has closed trades so far — the comparison needs both.
+        </p>
+      )}
+    </CardContent></Card>
+  )
+}
+
 export default function PerformancePage() {
   const [data, setData] = useState<PerformanceInfo | null>(null)
   useEffect(() => {
@@ -140,6 +179,8 @@ export default function PerformancePage() {
       <Card><CardContent className="py-4">
         <EquityChart curve={data.curve} />
       </CardContent></Card>
+
+      <DeciderSplit by={data.by_decider} />
 
       <div className="grid grid-cols-3 gap-2">
         {Object.entries(data.per_market).map(([s, pm]) => (

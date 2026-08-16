@@ -295,6 +295,8 @@ export interface PerformanceInfo {
   trade_sharpe: number | null
   daily_sharpe: number | null
   per_market: Record<string, { n: number; pnl: number; wins: number }>
+  /** "HUMAN" | "MACHINE" — the control-arm comparison. */
+  by_decider: Record<string, DeciderStats>
   trades: PerfTrade[]
 }
 
@@ -304,8 +306,87 @@ async function get<T>(path: string): Promise<T> {
   return res.json() as Promise<T>
 }
 
+// ── Human decision support (Phase 0) ────────────────────────────────────────
+
+export interface ChartBar {
+  t: string
+  o: number
+  h: number
+  l: number
+  c: number
+}
+
+/** OHLC + indicator series for the decision chart.
+ *
+ * `indicators_reliable` is NOT cosmetic. Alpaca's free IEX feed carries a few
+ * percent of consolidated volume, so an illiquid name's "1-minute" series can
+ * be a handful of prints stretched over days — and it renders identically to a
+ * real one. Never draw RSI/MACD without surfacing this. */
+export interface ChartSeries {
+  symbol: string
+  bars: ChartBar[]
+  rsi_9: (number | null)[]
+  macd: (number | null)[]
+  macd_signal: (number | null)[]
+  macd_hist: (number | null)[]
+  thresholds: { rsi_oversold: number; rsi_overbought: number }
+  bar_count: number
+  sessions: number
+  coverage: number
+  median_gap_min: number | null
+  indicators_reliable: boolean
+}
+
+export interface ManualPickBody {
+  symbol: string
+  direction: "LONG" | "SHORT"
+  thesis: string
+  target?: number
+  stop?: number
+  horizon_days?: number
+}
+
+export interface ManualPickResult {
+  id: number
+  symbol: string
+  direction: string
+  entry: number
+  target: number
+  stop: number
+  managed_by: string
+}
+
+/** Realized performance split by who decided — you vs the machine, scored
+ * identically. The bot keeps booking on paper as a control arm. */
+export interface DeciderStats {
+  n: number
+  pnl: number
+  alpha: number
+  wins: number
+  mean_return: number | null
+  mean_alpha: number | null
+  win_rate: number | null
+}
+
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const r = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!r.ok) {
+    const detail = await r.json().catch(() => null)
+    throw new Error(detail?.detail ?? `${r.status} ${r.statusText}`)
+  }
+  return r.json() as Promise<T>
+}
+
 export const api = {
   pick: (id: number) => get<Pick>(`/api/picks/${id}`),
+  chart: (symbol: string, days = 2) =>
+    get<ChartSeries>(`/api/chart/${encodeURIComponent(symbol)}?days=${days}`),
+  bookManual: (body: ManualPickBody) =>
+    post<ManualPickResult>("/api/picks/manual", body),
   live: () => get<{ live: LivePick[]; market: string }>("/api/live"),
   timelines: () => get<{ symbols: SymbolTimeline[]; market: string }>("/api/timelines"),
   stats: () => get<Stats>("/api/stats"),
