@@ -223,6 +223,37 @@ CREATE TABLE IF NOT EXISTS price_daily (
     PRIMARY KEY (symbol, date)
 );
 CREATE INDEX IF NOT EXISTS idx_pricedaily_sym ON price_daily (symbol);
+
+-- Raw ticker-tagged articles (ingest/news.py). enrichment_cache holds the
+-- LLM's opinion of an article keyed by id; this holds the article itself
+-- (title/url/tickers) so the screener has something to render and a human
+-- has something to click through to — attribution needs the URL, not just
+-- the sentiment score.
+CREATE TABLE IF NOT EXISTS news_articles (
+    article_id   TEXT PRIMARY KEY,
+    title        TEXT,
+    summary      TEXT,
+    source       TEXT,
+    url          TEXT,
+    published_at TEXT,
+    tickers      TEXT,      -- JSON list, e.g. ["AAPL","NVDA"]
+    ingested_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_news_published ON news_articles (published_at);
+
+-- Cached AI digest per symbol (desk/screener.py). Keyed on a hash of the
+-- article-id set actually summarized, so a re-run with no new news for that
+-- symbol is a cache hit and costs nothing — the same amortization pattern as
+-- enrichment_cache, one level up.
+CREATE TABLE IF NOT EXISTS symbol_digests (
+    symbol       TEXT NOT NULL,
+    input_hash   TEXT NOT NULL,   -- sha1 of sorted article_ids that fed this digest
+    digest       TEXT,            -- 2-3 sentence summary
+    citations    TEXT,            -- JSON [{article_id, claim}]
+    model        TEXT,
+    generated_at TEXT,
+    PRIMARY KEY (symbol, input_hash)
+);
 """
 
 
@@ -678,8 +709,16 @@ def token_summary(days: int = 1) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def install_token_sink() -> None:
-    pass
+def record_tokens(role: str, model: str, input_tok: int, output_tok: int,
+                  decision_id: str | None = None, source: str | None = None) -> None:
+    """Log one LLM call's cost to token_usage — every call the news/screener
+    pipeline makes passes through here, so /api/tokens stays an honest ledger
+    of what the AI layer actually spent, not just the trade ledger."""
+    with _lock, _connect() as conn:
+        conn.execute(
+            "INSERT INTO token_usage (ts, role, model, input_tok, output_tok, decision_id, source)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (_now(), role, model, int(input_tok), int(output_tok), decision_id, source))
 
 
 def save_relationship(from_sym: str, to_sym: str, direction: str, chain: str) -> None:
@@ -1124,6 +1163,83 @@ def get_enrichment(article_ids: list[str]) -> dict[str, dict]:
             f" FROM enrichment_cache WHERE article_id IN ({ph})", article_ids
         ).fetchall()
     return {r["article_id"]: dict(r) for r in rows}
+
+
+def save_articles(articles: list[dict]) -> None:
+    """Persist raw articles (news_articles) — the record a human clicks through
+    to, not the AI's opinion of it. INSERT OR IGNORE: an article's own facts
+    (title/url/tickers) never change once published, and this can be called
+    on the same overlapping poll window repeatedly without duplicating rows."""
+    rows = [(a["id"], a.get("title"), a.get("summary"), a.get("source"), a.get("url"),
+             a.get("published_at"), json.dumps(a.get("tickers") or []), _now())
+            for a in (articles or [])]
+    if not rows:
+        return
+    with _lock, _connect() as conn:
+        conn.executemany(
+            "INSERT OR IGNORE INTO news_articles"
+            " (article_id, title, summary, source, url, published_at, tickers, ingested_at)"
+            " VALUES (?,?,?,?,?,?,?,?)", rows)
+
+
+def get_articles(article_ids: list[str]) -> dict[str, dict]:
+    """Raw articles by id → {title, summary, source, url, published_at, tickers}."""
+    if not article_ids:
+        return {}
+    ph = ",".join("?" * len(article_ids))
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT article_id, title, summary, source, url, published_at, tickers"
+            f" FROM news_articles WHERE article_id IN ({ph})", article_ids
+        ).fetchall()
+    out = {}
+    for r in rows:
+        d = dict(r)
+        d["tickers"] = json.loads(d["tickers"] or "[]")
+        out[d["article_id"]] = d
+    return out
+
+
+def recent_articles_by_ticker(since_iso: str, limit_per_symbol: int = 12) -> dict[str, list[dict]]:
+    """Recent articles grouped by ticker, newest first, capped per symbol so
+    one chatty name (dozens of press-release wires) can't crowd out everyone
+    else in the screener's context window."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT article_id, title, summary, source, url, published_at, tickers"
+            " FROM news_articles WHERE published_at >= ? ORDER BY published_at DESC",
+            (since_iso,)
+        ).fetchall()
+    out: dict[str, list[dict]] = {}
+    for r in rows:
+        d = dict(r)
+        for t in json.loads(d["tickers"] or "[]"):
+            bucket = out.setdefault(t.upper(), [])
+            if len(bucket) < limit_per_symbol:
+                bucket.append(d)
+    return out
+
+
+def get_digest(symbol: str, input_hash: str) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT digest, citations, model, generated_at FROM symbol_digests"
+            " WHERE symbol=? AND input_hash=?", (symbol.upper(), input_hash)
+        ).fetchone()
+    if not row:
+        return None
+    d = dict(row)
+    d["citations"] = json.loads(d["citations"] or "[]")
+    return d
+
+
+def save_digest(symbol: str, input_hash: str, digest: str, citations: list[dict], model: str) -> None:
+    with _lock, _connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO symbol_digests"
+            " (symbol, input_hash, digest, citations, model, generated_at)"
+            " VALUES (?,?,?,?,?,?)",
+            (symbol.upper(), input_hash, digest, json.dumps(citations), model, _now()))
 
 
 def save_enrichment(items: list[dict]) -> None:

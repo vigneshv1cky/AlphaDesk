@@ -384,10 +384,39 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return r.json() as Promise<T>
 }
 
+export interface ScreenerCitation {
+  claim: string
+  title: string
+  url: string
+  source: string
+}
+
+export interface ScreenerHeadline {
+  title: string
+  url: string
+  source: string
+  published_at: string | null
+}
+
+/** One row of the "look here" list. digest/citations are null when the AI
+ * call failed or hasn't run yet for this symbol — headlines still render,
+ * so a DeepSeek outage never means an empty page. */
+export interface ScreenerRow {
+  symbol: string
+  score: number
+  report_date: string | null
+  session: string | null
+  article_count: number
+  digest: string | null
+  citations: ScreenerCitation[]
+  headlines: ScreenerHeadline[]
+}
+
 export const api = {
   pick: (id: number) => get<Pick>(`/api/picks/${id}`),
   chart: (symbol: string, days = 2) =>
     get<ChartSeries>(`/api/chart/${encodeURIComponent(symbol)}?days=${days}`),
+  screener: () => get<{ symbols: ScreenerRow[] }>("/api/screener"),
   bookManual: (body: ManualPickBody) =>
     post<ManualPickResult>("/api/picks/manual", body),
   live: () => get<{ live: LivePick[]; market: string }>("/api/live"),

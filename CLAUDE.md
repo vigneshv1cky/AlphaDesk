@@ -3,7 +3,9 @@
 Guidance for AI coding agents working in this repo. **This describes a HUMAN-
 OPERATED terminal.** Two architectures were removed before it: the LLM
 multi-agent system (`11263ae`, 2026-08-07) and every trading bot
-(2026-08-16). There are currently zero LLM calls and zero autonomous trades.
+(2026-08-16). There are ZERO autonomous trades. There is now exactly ONE LLM
+call site (`ai/deepseek.py`, added 2026-08-16 evening) — it reads and
+summarizes news for a human, it never decides or books anything.
 
 ## What this is
 
@@ -13,10 +15,15 @@ are no trading bots.** Every autonomous decision path was deleted on
 `POST /api/picks/manual` when a person clicks Book.
 
 What the machine still does is the work a person can't: watch data
-continuously, manage exits on positions you opened, and keep an honest score.
+continuously, read more news than a human has time for, manage exits on
+positions you opened, and keep an honest score.
 
-- **You decide.** The `/trade` page gives you candles + RSI-9 + MACD(12,26,9),
-  a data-quality verdict, and a booking form that demands a written thesis.
+- **The Screener tells you where to look.** `/screener` (the default landing
+  page) ranks symbols by earnings proximity + news volume — CODE, not AI —
+  and DeepSeek writes a cited 2-3 sentence digest for the top of that list.
+- **You decide.** Click "Trade →" on a Screener row (or type a symbol
+  directly) to land on `/trade`: candles + RSI-9 + MACD(12,26,9), a
+  data-quality verdict, and a booking form that demands a written thesis.
 - **The machine executes and measures.** `quant/watcher.py` holds the
   target/stop/trail/session-close on whatever you booked;
   `ledger/grader.py` scores it forward vs SPY, tracks MFE/MAE, and charges
@@ -111,11 +118,55 @@ cd alphadesk/ui && pnpm build           # rebuild SPA → app/static/
 - **Scoring.** `/api/performance` splits `by_decider` (HUMAN vs MACHINE) so
   human decisions are scored on identical terms to the bot's historical rows.
 
+## The AI research layer (2026-08-16 evening) — the ONE LLM call site
+
+`ai/deepseek.py` — plain `deepseek-chat` via `/chat/completions` (OpenAI-
+compatible). No multi-provider abstraction, no rate-limit ladder, no tool-use
+loop: those existed in the deleted v1 system because a COMMITTEE decided
+trades and needed to survive provider outages. This summarizes text for a
+human; on failure the caller drops that item and logs why (`DeepSeekError`) —
+there is nothing to protect with a retry ladder.
+
+- **Hard rule, not a phase: no claim renders without a source.**
+  `desk/screener.py`'s digest prompt cites by ARTICLE INDEX; the citation is
+  resolved back to a real stored URL server-side (`_resolve_citations`) —
+  the model's own idea of a URL is never trusted, only its index into a list
+  we already control.
+- **Injection defense.** `wrap_data()` delimits untrusted article text in
+  `<data:*>` blocks; the system prompt is told those blocks are never
+  instructions. News text is attacker-reachable in principle (a press
+  release could contain text aimed at the summarizer) — this is why.
+- **Two-stage screener, deliberately.** `desk/screener.py`'s ranking (which
+  symbols are worth a look) is CODE — earnings proximity + news
+  volume/recency, same "informational, never gating" pattern as the retired
+  engine's score field. The AI narrates WHY only for the top
+  `SCREENER_TOP_N`. A DeepSeek outage degrades to raw headlines with real
+  URLs, never an empty page — verified 2026-08-16 with a dead API key.
+- **Pipeline:** `ingest/news.py` polls Polygon (`POLYGON_API_KEY`,
+  `list_ticker_news`) → persists raw articles to `news_articles` → enriches
+  (category/sentiment/relations) into the pre-existing `enrichment_cache`
+  table, unchanged from v1 → `desk/screener.py` ranks + generates digests,
+  cached in `symbol_digests` keyed on a hash of the exact article-id set (a
+  re-run with no new news for a symbol costs nothing). `main.py`'s
+  `_news_loop` runs this on `NEWS_REFRESH_MINUTES`, pre-warming the digest
+  cache so `/api/screener` is normally a fast cache read, not a live LLM
+  call.
+- **Token spend is honest.** Every call runs through `store.record_tokens()`
+  into the pre-existing `token_usage` table, visible at `/api/tokens`.
+- **Recovered, not reinvented.** The Polygon fetch, the enrichment prompt,
+  and `enrichment_cache`/`token_usage` are the SAME code/schema as v1 (git
+  `11263ae~1`) — only the LLM transport changed (the old multi-role
+  `call_role()` → this repo's single-purpose `chat_json()`).
+
 ## Architecture
 
 ```
+ai/deepseek.py       the ONE LLM call site — plain deepseek-chat, JSON mode,
+                     injection guard, token accounting. No decisions here.
 ingest/earnings.py   Nasdaq calendar → watchlist, UNFILTERED (-3 to +5 days
                      around the report). A human reading the terminal judges.
+ingest/news.py       Polygon ticker news poll → enrich (DeepSeek) → persist
+                     (news_articles + enrichment_cache)
 ingest/prices.py     price context (Alpaca live + yfinance), intraday RSI-9 +
                      MACD + _coverage_stats(), get_chart_series(), options IV,
                      sector ETFs, macro
@@ -125,18 +176,23 @@ quant/calibrate.py   online + batch weight learning from graded outcomes
 quant/watcher.py     tiered exits (TP/trail/give-back/stop/spike/stale/
                      RSI-reversal/session-close) — manages YOUR positions
 quant/stream.py      Alpaca WebSocket live prices (SPY registered)
+desk/screener.py     code ranking (earnings + news) + AI digest for the top N,
+                     cached in symbol_digests — the "where to look" page
 desk/plan.py         ATR-based entry/target/stop + level-crossing resolution
 desk/portfolio.py    position CLOSING + reconcile (entry routing deleted)
-ledger/store.py      SQLite/WAL ledger + funnel/skips + price_daily cache
+ledger/store.py      SQLite/WAL ledger + funnel/skips + price_daily +
+                     news_articles + symbol_digests + enrichment_cache
 ledger/grader.py     forward grading vs SPY (alpha_net/alpha_adj), MFE/MAE
 ledger/backtest.py   daily-bar drift research (uses the local price cache)
 ledger/rsi_backtest.py  intraday replay of the RETIRED entry engine
-app/dashboard.py     FastAPI: /api/* incl. /api/chart + /api/picks/manual + SPA
+app/dashboard.py     FastAPI: /api/* incl. /api/screener + /api/chart +
+                     /api/picks/manual + SPA
 app/alerts.py        webhook notifications (ALERTS_WEBHOOK_URL)
-main.py              CLI + 5 async loops (grader, earnings+arm, position watch,
-                     quant watch, daily summary) — NO entry loop
+main.py              CLI + 6 async loops (grader, earnings+arm, NEWS,
+                     position watch, quant watch, daily summary) — NO entry loop
 ui/                  React 19 + TS + Vite → app/static/
-                     (/live /trade /history /open /earnings /performance /system)
+                     (/screener /live /trade /history /open /earnings
+                     /performance /system) — / redirects to /screener
 ```
 
 **Deleted with the bots (2026-08-16)** — recover from git if ever needed:
@@ -153,6 +209,12 @@ Nothing new is written under them.
 
 ```ini
 ALPACA_API_KEY / ALPACA_SECRET_KEY   # market data + universe
+POLYGON_API_KEY                      # ingest/news.py's article source
+DEEPSEEK_API_KEY                     # ai/deepseek.py — the one LLM call site
+DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
+DEEPSEEK_MODEL=deepseek-chat         # not deepseek-reasoner: summarization, not multi-step reasoning
+NEWS_REFRESH_MINUTES=20 / NEWS_LOOKBACK_HOURS=36
+SCREENER_HORIZON_DAYS=5 / SCREENER_TOP_N=15
 ALPHADESK_DATA=~/.alphadesk          # ledger.db, universe.json, quant_weights.json
 
 # terminal behaviour (the live path)
@@ -187,17 +249,28 @@ gcloud compute ssh alphadesk --zone=us-east4-a \
 # static: sudo rm -rf the old static dir, then cp -r the new one (stale bundles)
 ```
 
-## Honest status (2026-08-16)
+## Honest status (2026-08-16, end of day)
 
 - **Nothing trades itself.** The terminal is the product; the operator is the
   strategy. There is no validated edge in this repo — two autonomous attempts
   were measured and both were flat-to-negative (numbers at the top).
 - **Phase 0 shipped:** charts, indicators, data-quality gating, manual booking,
   automated exits on human positions, human-vs-machine scoring.
+- **AI research layer shipped:** Screener (code-ranked + AI-digested news +
+  earnings) is now the default landing page, wired to `/trade` via
+  `?symbol=`. Recovered Polygon news + enrichment from the deleted v1 system
+  rather than rebuilding; DeepSeek transport is new and purpose-built.
+- **`DEEPSEEK_API_KEY` in `.env` is REJECTED** (`HTTP 401: invalid api key`,
+  confirmed live 2026-08-16). The screener runs and degrades correctly (raw
+  headlines with real URLs, no digest) — this was verified as the actual
+  failure mode, not assumed. Get a fresh key from DeepSeek's platform console
+  and update both `.env` (local) and `/opt/alphadesk/.env` (VM) — the VM's
+  copy was never touched by any deploy in this repo's history and may hold a
+  different value.
 - **Planned next** (not built): filings/document workspace over free EDGAR
-  full-text, with click-to-source attribution on every AI-produced claim, then
-  an agentic research layer, then news theme grouping. Attribution is a
-  cross-cutting rule, not a phase — no claim renders without its source.
+  full-text, then an agentic research layer, then news theme grouping.
+  Attribution (no claim without a source) is already enforced in the
+  screener, not deferred to a later phase.
 - **Known bug, unfixed:** `plan.atr_plan()` returns `None` for every call under
   the current multipliers (see top). The manual endpoint falls through to the
   same fallback the bot used.

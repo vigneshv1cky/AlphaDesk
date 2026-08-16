@@ -52,6 +52,18 @@ def api_pick(pick_id: int):
     return pick
 
 
+@app.get("/api/screener")
+def api_screener():
+    """Ranked "look here" list — code-computed ranking (earnings proximity +
+    news volume/recency), AI digest only for the top N. Reads
+    desk/screener.py's cache (warmed by main.py's _news_loop on a schedule),
+    so this is normally fast; on a cold cache or a fresh symbol it computes
+    inline. Never blocks on a DeepSeek outage — see screener.build()'s
+    fallback: raw headlines render even with digest=None."""
+    from alphadesk.desk import screener
+    return {"symbols": screener.build()}
+
+
 @app.get("/api/chart/{symbol}")
 def api_chart(symbol: str, days: int = 2):
     """OHLC + RSI-9 + MACD(12,26,9) series for the human decision chart.

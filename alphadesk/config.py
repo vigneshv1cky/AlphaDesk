@@ -123,6 +123,25 @@ CHART_MAX_MEDIAN_GAP_MIN = float(os.environ.get("CHART_MAX_MEDIAN_GAP_MIN", "2.0
 # catches a halted symbol during an otherwise-open session.
 MANUAL_MAX_QUOTE_AGE_S = float(os.environ.get("MANUAL_MAX_QUOTE_AGE_S", "900"))  # 15 min
 
+# ── AI research layer (ingest/news.py, desk/screener.py) ─────────────────────
+# The ONLY LLM calls in this repo — reads and compresses news for a human, never
+# decides a trade. DeepSeek was already configured here before the v1 multi-agent
+# system was removed (11263ae, 2026-08-07); DEEPSEEK_API_KEY / _BASE_URL are
+# reused as-is. deepseek-chat, not deepseek-reasoner: this is summarization and
+# extraction, not multi-step reasoning, and chat is ~2x cheaper per Mtok.
+DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+LLM_TIMEOUT_S = float(os.environ.get("LLM_TIMEOUT_S", "60"))
+LLM_MAX_INPUT_CHARS = int(os.environ.get("LLM_MAX_INPUT_CHARS", "24000"))
+
+# Background news→screener loop (main.py's _news_loop). Runs unattended, so its
+# cost is bounded by SCREENER_TOP_N (how many symbols get an AI digest per
+# cycle) rather than by how many symbols merely have news.
+NEWS_REFRESH_MINUTES = float(os.environ.get("NEWS_REFRESH_MINUTES", "20"))
+NEWS_LOOKBACK_HOURS = float(os.environ.get("NEWS_LOOKBACK_HOURS", "36"))
+SCREENER_HORIZON_DAYS = int(os.environ.get("SCREENER_HORIZON_DAYS", "5"))  # upcoming-earnings window
+SCREENER_TOP_N = int(os.environ.get("SCREENER_TOP_N", "15"))
+
 # ── Quant ────────────────────────────────────────────────────────────────────
 QUANT_STREAM_ENABLED = os.environ.get("QUANT_STREAM_ENABLED", "1") not in ("0", "", "false", "False", "no")
 QUANT_TIERED_EXITS = os.environ.get("QUANT_TIERED_EXITS", "1") not in ("0", "", "false", "False", "no")

@@ -16,6 +16,7 @@ const MarketPage = lazy(() => import("@/pages/MarketPage"))
 const SystemPage = lazy(() => import("@/pages/SystemPage"))
 const PerformancePage = lazy(() => import("@/pages/PerformancePage"))
 const TradePage = lazy(() => import("@/pages/TradePage"))
+const ScreenerPage = lazy(() => import("@/pages/ScreenerPage"))
 
 const TITLES: Record<string, string> = {
   "/live": "Live Positions · AlphaDesk",
@@ -25,6 +26,7 @@ const TITLES: Record<string, string> = {
   "/system": "System Health · AlphaDesk",
   "/performance": "Performance · AlphaDesk",
   "/trade": "Trade · AlphaDesk",
+  "/screener": "Screener · AlphaDesk",
 }
 
 function Shell() {
@@ -103,13 +105,14 @@ function Shell() {
         <div className="mx-auto max-w-[1200px] space-y-4 px-5 py-5">
           <Suspense fallback={<div className="text-sm text-muted-foreground">Loading…</div>}>
             <Routes>
-              <Route path="/" element={<Navigate to="/live" replace />} />
+              <Route path="/" element={<Navigate to="/screener" replace />} />
               <Route path="/live" element={<LivePage rows={liveRows} market={market} loading={!liveLoaded} />} />
               <Route path="/history" element={<HistoryPage symbols={symbols} stats={stats} loading={!historyLoaded} />} />
               <Route path="/open" element={<MarketPage session="OPEN" liveRows={liveRows} symbols={symbols} loading={!historyLoaded} />} />
               <Route path="/earnings" element={<EarningsPage earnings={earnings} />} />
               <Route path="/system" element={<SystemPage />} />
               <Route path="/performance" element={<PerformancePage />} />
+              <Route path="/screener" element={<ScreenerPage />} />
               <Route path="/trade" element={<TradePage />} />
               <Route path="*" element={<Navigate to="/live" replace />} />
             </Routes>

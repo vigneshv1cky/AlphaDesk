@@ -73,6 +73,40 @@ async def _serve() -> None:
                 log.error("earnings refresh error: %s", exc)
             await asyncio.sleep(6 * 3600)   # 4×/day keeps upcoming + recent fresh
 
+    async def _news_loop():
+        """Background news → screener refresh. This is the ONLY loop in the
+        process that makes an LLM call — it reads and summarizes text for a
+        human, never decides or books a trade (that boundary is enforced by
+        what this loop calls, not by anything here).
+
+        Ingests since the last successful poll (first run: NEWS_LOOKBACK_HOURS),
+        then rebuilds the screener so its digest cache is warm — /api/screener
+        reads that cache, so a page load doesn't wait on N synchronous DeepSeek
+        calls. A DeepSeek outage degrades the screener to raw headlines
+        (desk/screener.py's fallback), never an empty page."""
+        from datetime import timedelta
+
+        from alphadesk.config import NEWS_LOOKBACK_HOURS, NEWS_REFRESH_MINUTES, now_et
+        from alphadesk.desk import screener
+        from alphadesk.ingest import news
+        loop = asyncio.get_running_loop()
+        log = logging.getLogger("alphadesk.news")
+        last_poll = now_et() - timedelta(hours=NEWS_LOOKBACK_HOURS)
+        while True:
+            try:
+                since = last_poll
+                last_poll = now_et()
+                n = await loop.run_in_executor(None, news.poll, since)
+                if n:
+                    log.info("Ingested %d new articles", n)
+                await loop.run_in_executor(None, screener.build)
+            except Exception as exc:
+                log.error("news/screener refresh error: %s", exc)
+                last_poll = since   # don't advance the window past a failed poll
+            from alphadesk.app import scheduler
+            scheduler.beat()
+            await asyncio.sleep(NEWS_REFRESH_MINUTES * 60)
+
     async def _position_watch_loop():
         """Watch open picks between runs — the price-based exit (pure code):
         walk intraday minute bars, close at the first target/stop touched.
@@ -405,8 +439,10 @@ async def _serve() -> None:
 
     # No entry loop: nothing in this process decides or books a trade. The
     # remaining loops serve the human terminal — refresh data, manage the
-    # exits on positions the operator booked, and grade the outcomes.
-    await asyncio.gather(_grader_loop(), _earnings_loop(),
+    # exits on positions the operator booked, grade the outcomes, and (news
+    # loop) tell the operator where to look. _news_loop is the one place an
+    # LLM call happens; it reads and summarizes, it does not decide.
+    await asyncio.gather(_grader_loop(), _earnings_loop(), _news_loop(),
                          _position_watch_loop(), _quantity_watch_loop(),
                          _daily_summary_loop(), _web_server().serve())
 

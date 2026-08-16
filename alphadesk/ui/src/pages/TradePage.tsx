@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
+import { useSearchParams } from "react-router-dom"
 import { api, type ChartSeries, type ManualPickResult } from "@/lib/api"
 import { PriceChart } from "@/components/PriceChart"
 import { useIsDark } from "@/lib/theme"
@@ -9,11 +10,17 @@ import { Card } from "@/components/ui/card"
 /** Where a human decides. Chart + indicators on the left, the booking form on
  * the right. Booked trades go into the same ledger as the bot's with
  * trigger_src="HUMAN", pick up the same automated exit management, and get
- * graded forward against SPY on identical terms. */
+ * graded forward against SPY on identical terms.
+ *
+ * Accepts ?symbol=XYZ so the Screener page can hand off a candidate directly
+ * — "here's where to look" (Screener) → "now decide" (this page) is meant to
+ * be one click, not a re-typed ticker. */
 export default function TradePage() {
   const dark = useIsDark()
+  const [params] = useSearchParams()
+  const initial = (params.get("symbol") || "AAPL").toUpperCase()
   const [symbol, setSymbol] = useState("")
-  const [query, setQuery] = useState("AAPL")
+  const [query, setQuery] = useState(initial)
   const [data, setData] = useState<ChartSeries | null>(null)
   const [days, setDays] = useState(2)
   const [err, setErr] = useState<string | null>(null)
@@ -29,7 +36,9 @@ export default function TradePage() {
       .finally(() => setLoading(false))
   }, [])
 
-  useEffect(() => { load("AAPL", 2) }, [load])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-run when the URL's
+  // ?symbol= changes (a fresh handoff from Screener), not on every `load` identity change
+  useEffect(() => { load(initial, 2) }, [initial])
 
   return (
     <div className="space-y-4">
