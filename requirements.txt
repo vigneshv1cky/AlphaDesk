@@ -1,10 +1,11 @@
-# AlphaDesk — predictive multi-agent stock research engine
-claude-agent-sdk>=0.2.0     # all LLM calls, billed to the Claude Max subscription
+# AlphaDesk — human-operated research terminal. No autonomous trading, one
+# LLM call site (ai/deepseek.py, plain HTTP — no SDK dependency).
 alpaca-py>=0.14.0           # market data + tradable universe
 yfinance>=0.2.31            # grading, fundamentals, VIX/macro context
 pandas>=2.0.0               # price frames
-fastapi                     # dashboard JSON API + SSE
+polygon-api-client>=1.13.0  # ingest/news.py's article source
+beautifulsoup4>=4.12.0      # ingest/edgar.py's filing text extraction
+fastapi                     # dashboard JSON API
 uvicorn                     # ASGI server
 python-dotenv               # .env config
 python-multipart            # form parsing
-mcp[cli]>=1.0.0             # MCP server integration

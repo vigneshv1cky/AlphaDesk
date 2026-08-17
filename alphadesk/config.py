@@ -142,6 +142,15 @@ NEWS_LOOKBACK_HOURS = float(os.environ.get("NEWS_LOOKBACK_HOURS", "36"))
 SCREENER_HORIZON_DAYS = int(os.environ.get("SCREENER_HORIZON_DAYS", "5"))  # upcoming-earnings window
 SCREENER_TOP_N = int(os.environ.get("SCREENER_TOP_N", "15"))
 
+# ── Filings workspace (ingest/edgar.py, desk/filings.py) ─────────────────────
+# A 10-K's meaningful narrative (Business, Risk Factors, MD&A) commonly runs
+# 50-100k characters — the news path's LLM_MAX_INPUT_CHARS (24k, sized for a
+# batch of short headlines) would truncate before reaching most of it. This is
+# a per-call override (ai/deepseek.chat_json's max_input_chars), not a change
+# to the global default, so it doesn't raise the cost of every other call site.
+FILING_MAX_CHARS = int(os.environ.get("FILING_MAX_CHARS", "60000"))
+FILING_RECENT_LIMIT = int(os.environ.get("FILING_RECENT_LIMIT", "12"))
+
 # ── Quant ────────────────────────────────────────────────────────────────────
 QUANT_STREAM_ENABLED = os.environ.get("QUANT_STREAM_ENABLED", "1") not in ("0", "", "false", "False", "no")
 QUANT_TIERED_EXITS = os.environ.get("QUANT_TIERED_EXITS", "1") not in ("0", "", "false", "False", "no")

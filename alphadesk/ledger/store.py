@@ -254,6 +254,45 @@ CREATE TABLE IF NOT EXISTS symbol_digests (
     generated_at TEXT,
     PRIMARY KEY (symbol, input_hash)
 );
+
+-- SEC EDGAR filing metadata (ingest/edgar.py). accession is SEC's own globally
+-- unique id for one filing — the natural key, not an autoincrement.
+CREATE TABLE IF NOT EXISTS filings (
+    accession    TEXT PRIMARY KEY,
+    symbol       TEXT NOT NULL,
+    cik          TEXT NOT NULL,
+    form         TEXT,            -- 10-K, 10-Q, 8-K, ...
+    filing_date  TEXT,
+    report_date  TEXT,
+    primary_doc  TEXT,            -- filename within the accession's archive dir
+    url          TEXT,            -- resolved sec.gov/Archives/... document URL
+    ingested_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_filings_symbol ON filings (symbol, filing_date);
+
+-- Extracted plain text per filing — parsing a multi-MB iXBRL document is
+-- expensive (network + BeautifulSoup), so this is fetched once and reused for
+-- every question asked against that filing afterward.
+CREATE TABLE IF NOT EXISTS filing_text_cache (
+    accession    TEXT PRIMARY KEY,
+    text         TEXT,
+    char_count   INTEGER,
+    extracted_at TEXT
+);
+
+-- Cached AI answers, keyed on the exact (filing, question) pair — same
+-- amortization pattern as symbol_digests. A rephrased question is a cache
+-- miss on purpose: it may deserve a different answer.
+CREATE TABLE IF NOT EXISTS filing_qa_cache (
+    accession     TEXT NOT NULL,
+    question_hash TEXT NOT NULL,
+    question      TEXT,
+    answer        TEXT,
+    citations     TEXT,           -- JSON [{quote}] — verbatim snippets grep-able back into the source text
+    model         TEXT,
+    generated_at  TEXT,
+    PRIMARY KEY (accession, question_hash)
+);
 """
 
 
@@ -1240,6 +1279,86 @@ def save_digest(symbol: str, input_hash: str, digest: str, citations: list[dict]
             " (symbol, input_hash, digest, citations, model, generated_at)"
             " VALUES (?,?,?,?,?,?)",
             (symbol.upper(), input_hash, digest, json.dumps(citations), model, _now()))
+
+
+def save_filings(rows: list[dict]) -> None:
+    """Persist filing metadata. Each: {accession, symbol, cik, form,
+    filing_date, report_date, primary_doc, url}. INSERT OR IGNORE: a filing's
+    own facts never change once accepted by EDGAR."""
+    data = [(r["accession"], r["symbol"].upper(), r["cik"], r.get("form"),
+             r.get("filing_date"), r.get("report_date"), r.get("primary_doc"),
+             r.get("url"), _now()) for r in (rows or [])]
+    if not data:
+        return
+    with _lock, _connect() as conn:
+        conn.executemany(
+            "INSERT OR IGNORE INTO filings"
+            " (accession, symbol, cik, form, filing_date, report_date, primary_doc, url, ingested_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?)", data)
+
+
+def get_filings(symbol: str, forms: list[str] | None = None, limit: int = 20) -> list[dict]:
+    """A symbol's filings, newest first. forms=None returns every form type
+    ever ingested for it (ingest/edgar.py only ever ingests 10-K/10-Q/8-K,
+    so this is never actually unbounded in practice)."""
+    with _connect() as conn:
+        if forms:
+            ph = ",".join("?" * len(forms))
+            rows = conn.execute(
+                f"SELECT accession, symbol, cik, form, filing_date, report_date, primary_doc, url"
+                f" FROM filings WHERE symbol=? AND form IN ({ph})"
+                f" ORDER BY filing_date DESC LIMIT ?",
+                (symbol.upper(), *forms, limit)).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT accession, symbol, cik, form, filing_date, report_date, primary_doc, url"
+                " FROM filings WHERE symbol=? ORDER BY filing_date DESC LIMIT ?",
+                (symbol.upper(), limit)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_filing_meta(accession: str) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT accession, symbol, cik, form, filing_date, report_date, primary_doc, url"
+            " FROM filings WHERE accession=?", (accession,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_filing_text(accession: str) -> str | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT text FROM filing_text_cache WHERE accession=?", (accession,)).fetchone()
+    return row["text"] if row else None
+
+
+def save_filing_text(accession: str, text: str) -> None:
+    with _lock, _connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO filing_text_cache (accession, text, char_count, extracted_at)"
+            " VALUES (?,?,?,?)", (accession, text, len(text), _now()))
+
+
+def get_filing_qa(accession: str, question_hash: str) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT question, answer, citations, model, generated_at FROM filing_qa_cache"
+            " WHERE accession=? AND question_hash=?", (accession, question_hash)).fetchone()
+    if not row:
+        return None
+    d = dict(row)
+    d["citations"] = json.loads(d["citations"] or "[]")
+    return d
+
+
+def save_filing_qa(accession: str, question_hash: str, question: str, answer: str,
+                   citations: list[dict], model: str) -> None:
+    with _lock, _connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO filing_qa_cache"
+            " (accession, question_hash, question, answer, citations, model, generated_at)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (accession, question_hash, question, answer, json.dumps(citations), model, _now()))
 
 
 def save_enrichment(items: list[dict]) -> None:

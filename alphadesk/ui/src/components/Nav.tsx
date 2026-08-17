@@ -4,6 +4,7 @@ import { NavLink } from "react-router-dom"
 // — everything else is back-office (positions ledger, calendar, health).
 const PRIMARY = [
   { to: "/screener", label: "Screener" },
+  { to: "/filings", label: "Filings" },
   { to: "/trade", label: "Trade" },
   { to: "/performance", label: "Performance" },
 ]

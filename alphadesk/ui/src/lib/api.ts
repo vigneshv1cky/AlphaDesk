@@ -422,8 +422,35 @@ export interface ScreenerRow {
   headlines: ScreenerHeadline[]
 }
 
+export interface FilingRow {
+  accession: string
+  symbol: string
+  cik: string
+  form: string
+  filing_date: string
+  report_date: string | null
+  primary_doc: string
+  url: string
+}
+
+export interface FilingCitation {
+  quote: string
+}
+
+/** Answer to one question about one filing. Every citation is a VERBATIM
+ * quote checked as an actual substring of the SEC document text server-side
+ * — not the model's unverified say-so (see desk/filings.py). */
+export interface FilingAnswer {
+  answer: string
+  citations: FilingCitation[]
+}
+
 export const api = {
   pick: (id: number) => get<Pick>(`/api/picks/${id}`),
+  filings: (symbol: string) =>
+    get<{ symbol: string; filings: FilingRow[] }>(`/api/filings/${encodeURIComponent(symbol)}`),
+  askFiling: (accession: string, question: string) =>
+    post<FilingAnswer>("/api/filings/ask", { accession, question }),
   chart: (symbol: string, days = 2) =>
     get<ChartSeries>(`/api/chart/${encodeURIComponent(symbol)}?days=${days}`),
   screener: () => get<{ symbols: ScreenerRow[] }>("/api/screener"),

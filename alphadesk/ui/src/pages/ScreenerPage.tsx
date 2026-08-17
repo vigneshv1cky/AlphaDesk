@@ -73,9 +73,14 @@ function ScreenerCard({ row }: { row: ScreenerRow }) {
               </span>
             )}
           </div>
-          <Link to={`/trade?symbol=${encodeURIComponent(row.symbol)}`}>
-            <Button size="sm" variant="outline">Trade →</Button>
-          </Link>
+          <div className="flex gap-1.5">
+            <Link to={`/filings?symbol=${encodeURIComponent(row.symbol)}`}>
+              <Button size="sm" variant="ghost">Filings</Button>
+            </Link>
+            <Link to={`/trade?symbol=${encodeURIComponent(row.symbol)}`}>
+              <Button size="sm" variant="outline">Trade →</Button>
+            </Link>
+          </div>
         </div>
 
         {row.digest ? (

@@ -57,7 +57,8 @@ def _key() -> str:
 
 
 def chat_json(system: str, user: str, *, role: str, source: str | None = None,
-             decision_id: str | None = None, max_tokens: int = 2048) -> dict:
+             decision_id: str | None = None, max_tokens: int = 2048,
+             max_input_chars: int | None = None) -> dict:
     """One JSON-mode completion. Returns the parsed object. Records token spend
     to the ledger (store.record_tokens) regardless of success/failure path
     that got tokens billed — only a request that never reached the provider
@@ -65,9 +66,16 @@ def chat_json(system: str, user: str, *, role: str, source: str | None = None,
 
     `role` is a free-form label (e.g. "news-enrich", "screener-digest") — shows
     up in /api/tokens grouped by role, so cost is attributable to a feature.
+
+    `max_input_chars` overrides LLM_MAX_INPUT_CHARS for this call. News
+    summarization batches many short headlines and the global default suits
+    it; a single filing read (desk/filings.py) is one long document and needs
+    a much larger budget — a global bump would raise the cost of every other
+    call site along with it.
     """
-    if len(user) > LLM_MAX_INPUT_CHARS:
-        user = user[:LLM_MAX_INPUT_CHARS] + "\n[…truncated at input-size limit]"
+    limit = max_input_chars if max_input_chars is not None else LLM_MAX_INPUT_CHARS
+    if len(user) > limit:
+        user = user[:limit] + "\n[…truncated at input-size limit]"
 
     payload = {
         "model": DEEPSEEK_MODEL,

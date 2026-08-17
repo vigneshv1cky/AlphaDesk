@@ -18,8 +18,7 @@ def _setup_logging() -> None:
         format="%(asctime)s %(levelname).1s %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
-    for noisy in ("httpx", "claude_agent_sdk"):
-        logging.getLogger(noisy).setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     # yfinance logs BRK.A/.B-style "possibly delisted" at ERROR for tickers it
     # can't price; the app handles missing prices, so silence the spam.
     logging.getLogger("yfinance").setLevel(logging.CRITICAL)

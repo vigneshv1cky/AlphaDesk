@@ -167,6 +167,10 @@ ingest/earnings.py   Nasdaq calendar → watchlist, UNFILTERED (-3 to +5 days
                      around the report). A human reading the terminal judges.
 ingest/news.py       Polygon ticker news poll → enrich (DeepSeek) → persist
                      (news_articles + enrichment_cache)
+ingest/edgar.py      SEC EDGAR — free, no key. Ticker→CIK, filing list,
+                     document fetch + BeautifulSoup text extraction, full-text
+                     search. See its module docstring for 3 easy-to-get-wrong
+                     facts (User-Agent requirement, ciks= not tickers=, iXBRL).
 ingest/prices.py     price context (Alpaca live + yfinance), intraday RSI-9 +
                      MACD + _coverage_stats(), get_chart_series(), options IV,
                      sector ETFs, macro
@@ -178,26 +182,35 @@ quant/watcher.py     tiered exits (TP/trail/give-back/stop/spike/stale/
 quant/stream.py      Alpaca WebSocket live prices (SPY registered)
 desk/screener.py     code ranking (earnings + news) + AI digest for the top N,
                      cached in symbol_digests — the "where to look" page
+desk/filings.py      Q&A over ONE filing, answers backed ONLY by verbatim
+                     quotes verified as real substrings of the SEC document
+                     text server-side — stronger attribution than the
+                     screener's index-citations, since there's no numbered
+                     list to cite, just one long document
 desk/plan.py         ATR-based entry/target/stop + level-crossing resolution
 desk/portfolio.py    position CLOSING + reconcile (entry routing deleted)
 ledger/store.py      SQLite/WAL ledger + funnel/skips + price_daily +
-                     news_articles + symbol_digests + enrichment_cache
+                     news_articles + symbol_digests + enrichment_cache +
+                     filings + filing_text_cache + filing_qa_cache
 ledger/grader.py     forward grading vs SPY (alpha_net/alpha_adj), MFE/MAE
 ledger/backtest.py   daily-bar drift research (uses the local price cache)
 ledger/rsi_backtest.py  intraday replay of the RETIRED entry engine
 app/dashboard.py     FastAPI: /api/* incl. /api/screener + /api/chart +
+                     /api/filings/{symbol} + /api/filings/ask +
                      /api/picks/manual + SPA
 app/alerts.py        webhook notifications (ALERTS_WEBHOOK_URL)
 main.py              CLI + 6 async loops (grader, earnings+arm, NEWS,
                      position watch, quant watch, daily summary) — NO entry loop
 ui/                  React 19 + TS + Vite → app/static/. Nav is two-tier: the
-                     product loop (/screener /trade /performance) foregrounded,
-                     back-office (/live /history /earnings /system) demoted.
-                     / redirects to /screener; /open redirects to /live
-                     (MarketPage.tsx deleted 2026-08-17 — it was a near-
-                     duplicate of Live+History filtered to one session, a
-                     leftover of the old multi-session bot loop; both pages
-                     now carry an inline session filter instead).
+                     product loop (/screener /filings /trade /performance)
+                     foregrounded, back-office (/live /history /earnings
+                     /system) demoted. / redirects to /screener; /open
+                     redirects to /live (MarketPage.tsx deleted 2026-08-17 —
+                     it was a near-duplicate of Live+History filtered to one
+                     session, a leftover of the old multi-session bot loop;
+                     both pages now carry an inline session filter instead).
+                     Screener rows link to both /filings?symbol= and
+                     /trade?symbol=.
 ```
 
 **Deleted with the bots (2026-08-16)** — recover from git if ever needed:
@@ -220,6 +233,7 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 DEEPSEEK_MODEL=deepseek-chat         # not deepseek-reasoner: summarization, not multi-step reasoning
 NEWS_REFRESH_MINUTES=20 / NEWS_LOOKBACK_HOURS=36
 SCREENER_HORIZON_DAYS=5 / SCREENER_TOP_N=15
+FILING_MAX_CHARS=60000 / FILING_RECENT_LIMIT=12   # ingest/edgar.py — no API key needed, SEC is free
 ALPHADESK_DATA=~/.alphadesk          # ledger.db, universe.json, quant_weights.json
 
 # terminal behaviour (the live path)
@@ -265,16 +279,24 @@ gcloud compute ssh alphadesk --zone=us-east4-a \
   earnings) is now the default landing page, wired to `/trade` via
   `?symbol=`. Recovered Polygon news + enrichment from the deleted v1 system
   rather than rebuilding; DeepSeek transport is new and purpose-built.
-- **`DEEPSEEK_API_KEY` rotated and confirmed working** (2026-08-16 evening) —
-  the original key was rejected (`HTTP 401: invalid api key`, confirmed live);
-  a fresh key now authenticates and the screener produces real cited digests
-  end-to-end. Local `.env` updated; `/opt/alphadesk/.env` on the VM still
-  needs the same update on next deploy — its copy was never touched by any
-  deploy in this repo's history and may still hold the dead value.
-- **Planned next** (not built): filings/document workspace over free EDGAR
-  full-text, then an agentic research layer, then news theme grouping.
-  Attribution (no claim without a source) is already enforced in the
-  screener, not deferred to a later phase.
+- **`DEEPSEEK_API_KEY` rotated and confirmed working**, both locally and on
+  the VM (`/opt/alphadesk/.env` updated 2026-08-17 via the deploy that shipped
+  the frontend rewrite) — the original key was rejected (`HTTP 401`), the
+  fresh one authenticates and produces real cited digests end-to-end in
+  production.
+- **Phase 1 shipped (2026-08-17): the filings workspace.** `/filings` —
+  free SEC EDGAR, no vendor, no API key. Pick a symbol, browse its recent
+  10-K/10-Q/8-K filings, ask one a question; every answer is backed ONLY by
+  quotes verified as real substrings of the actual SEC document text
+  (`desk/filings._verify_quotes`) — a stronger guarantee than the screener's
+  index-based citations, since a filing is one long document, not a numbered
+  list. Verified end-to-end against real filings (AAPL, EHC) before shipping.
+  NOT built yet: cross-document Q&A (multiple filings at once), peer-
+  comparison matrices, user-uploaded document contrast — the original DSX-
+  analog scope, left as later increments on top of this ingestion layer.
+- **Planned next** (not built): an agentic research layer, then news theme
+  grouping. Attribution (no claim without a source) is enforced everywhere
+  built so far, not deferred to a later phase.
 - **Known bug, unfixed:** `plan.atr_plan()` returns `None` for every call under
   the current multipliers (see top). The manual endpoint falls through to the
   same fallback the bot used.

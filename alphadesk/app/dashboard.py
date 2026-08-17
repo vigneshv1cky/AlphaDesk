@@ -52,6 +52,43 @@ def api_pick(pick_id: int):
     return pick
 
 
+@app.get("/api/filings/{symbol}")
+def api_filings_list(symbol: str):
+    """A symbol's recent 10-K/10-Q/8-K filings, straight from EDGAR (cheap —
+    one JSON fetch, cached into the filings table). Never 500s on an unknown
+    symbol or an EDGAR hiccup — returns an empty list, which the UI renders
+    as 'no filings found', not an error."""
+    from alphadesk.desk import filings
+    sym = "".join(c for c in symbol.upper() if c.isalnum() or c in ".-")[:12]
+    if not sym:
+        raise HTTPException(400, "bad symbol")
+    return {"symbol": sym, "filings": filings.list_filings(sym)}
+
+
+class FilingQuestion(BaseModel):
+    accession: str
+    question: str
+
+
+@app.post("/api/filings/ask")
+def api_filings_ask(body: FilingQuestion):
+    """Answer a question about ONE filing, backed only by verbatim quotes
+    verified against the actual SEC document text — see desk/filings.py's
+    module docstring for why this is a stronger guarantee than the
+    screener's index-based citations. Cached per (accession, question); a
+    repeat ask is free."""
+    from alphadesk.desk import filings
+    accession = body.accession.strip()
+    question = body.question.strip()
+    if not accession or not question:
+        raise HTTPException(400, "accession and question are required")
+    result = filings.ask(accession, question)
+    if result is None:
+        raise HTTPException(
+            422, "couldn't answer — the filing text wasn't available or the AI call failed")
+    return result
+
+
 @app.get("/api/screener")
 def api_screener():
     """Ranked "look here" list — code-computed ranking (earnings proximity +
