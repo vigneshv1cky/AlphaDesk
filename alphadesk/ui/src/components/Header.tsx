@@ -2,9 +2,10 @@ import { useEffect, useState } from "react"
 import { api, type Stats } from "@/lib/api"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Separator } from "@/components/ui/separator"
+import { pnlClass } from "@/lib/pnl"
 
 function Stat({ label, value, tone, tip }: { label: string; value: string; tone?: number | null; tip?: string }) {
-  const color = tone == null ? "" : tone > 0 ? "text-emerald-500" : tone < 0 ? "text-red-500" : ""
+  const color = pnlClass(tone)
   const inner = (
     <div className="flex flex-col items-center gap-0.5">
       <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">{label}</div>

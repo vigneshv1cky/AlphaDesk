@@ -10,6 +10,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 
 function Panel({
   title,
@@ -157,8 +158,8 @@ function assess(e: EarningsRow): { label: string; cls: string; tip: string } | n
       return { label: "flat", cls: "text-muted-foreground/60", tip: "little drift so far" }
     const favorable = e.engagement_dir === "LONG" ? move > 0 : move < 0
     return favorable
-      ? { label: "on track", cls: "text-emerald-600 dark:text-emerald-400", tip: "interim drift is going our way (not the official grade)" }
-      : { label: "adverse", cls: "text-red-600 dark:text-red-400", tip: "interim drift is against our call (not the official grade)" }
+      ? { label: "on track", cls: "text-gain", tip: "interim drift is going our way (not the official grade)" }
+      : { label: "adverse", cls: "text-loss", tip: "interim drift is against our call (not the official grade)" }
   }
   // SKIPPED / UNSEEN
   if (Math.abs(move) < BIG_MOVE)
@@ -210,7 +211,7 @@ function CoverageSummary({ reported }: { reported: EarningsRow[] }) {
         {worst && (
           <span className="text-muted-foreground">
             worst: <span className="font-semibold text-foreground">{worst.symbol}</span>{" "}
-            <span className={capturable(worst) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}>
+            <span className={capturable(worst) >= 0 ? "text-gain" : "text-loss"}>
               {capturable(worst) >= 0 ? "+" : ""}
               {capturable(worst).toFixed(1)}% drift
             </span>
@@ -229,7 +230,9 @@ function whyText(e: EarningsRow): string {
 
 // A reporter row that expands to show WHY the desk acted as it did (its own
 // stored reasoning: judge summary / thesis for takes & debates, the scout's
-// reason for skips, or the coverage-gap note for unseen).
+// reason for skips, or the coverage-gap note for unseen). Two <TableRow>s per
+// reporter, not one <tr> with a nested toggle button — same reasoning as
+// PerformancePage's TradeRow: <button> isn't valid inside <tr>.
 function ReportedRow({ e }: { e: EarningsRow }) {
   const [open, setOpen] = useState(false)
   // Headline the CAPTURABLE drift (from the open); show the uncapturable gap as
@@ -240,27 +243,19 @@ function ReportedRow({ e }: { e: EarningsRow }) {
   const up = (drift ?? 0) >= 0
   const took = e.engagement === "TOOK" || e.engagement === "DEBATED"
   return (
-    <div className="text-sm">
-      <Button
-        variant="ghost"
-        onClick={() => setOpen((v) => !v)}
-        className="flex h-auto w-full items-center gap-2 py-1.5 text-left"
-      >
-        <span className="w-16 font-semibold">{e.symbol}</span>
-        <span className="w-14 text-xs text-muted-foreground">{fmtCap(e.market_cap)}</span>
-        <span className="w-10 text-xs text-muted-foreground">{e.session}</span>
-        <span className="w-20">
-          <EngBadge state={e.engagement} />
-        </span>
-        <span className="w-20">
-          <AssessTag e={e} />
-        </span>
-        <span className="ml-auto text-right font-mono text-xs tabular-nums">
+    <>
+      <TableRow onClick={() => setOpen((v) => !v)} aria-expanded={open} className="cursor-pointer">
+        <TableCell className="font-semibold">{e.symbol}</TableCell>
+        <TableCell className="text-xs text-muted-foreground">{fmtCap(e.market_cap)}</TableCell>
+        <TableCell className="text-xs text-muted-foreground">{e.session}</TableCell>
+        <TableCell><EngBadge state={e.engagement} /></TableCell>
+        <TableCell><AssessTag e={e} /></TableCell>
+        <TableCell className="text-right font-mono text-xs tabular-nums">
           {has ? (
             <>
               <InfoTip
                 tip="Capturable drift since the report — the move from the first post-report open (excludes the uncapturable overnight gap)"
-                className={`cursor-help ${up ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}
+                className={`cursor-help ${up ? "text-gain" : "text-loss"}`}
               >
                 {up ? "+" : ""}
                 {drift!.toFixed(1)}%
@@ -275,25 +270,31 @@ function ReportedRow({ e }: { e: EarningsRow }) {
           ) : (
             <span className="text-muted-foreground">—</span>
           )}
-        </span>
-        <ChevronDown
-          className={`h-3.5 w-3.5 shrink-0 text-muted-foreground/40 transition-transform ${
-            open ? "" : "-rotate-90"
-          }`}
-        />
-      </Button>
+        </TableCell>
+        <TableCell>
+          <ChevronDown
+            className={`h-3.5 w-3.5 shrink-0 text-muted-foreground/40 transition-transform ${
+              open ? "" : "-rotate-90"
+            }`}
+          />
+        </TableCell>
+      </TableRow>
       {open && (
-        <div className="mb-1.5 ml-16 mr-6 rounded-md bg-muted/40 px-2.5 py-2 text-xs leading-relaxed text-muted-foreground">
-          {took && e.engagement_dir && (
-            <span className="mr-1 font-medium text-foreground">
-              {e.engagement_dir === "LONG" ? "Long" : "Short"}
-              {e.engagement_verdict ? ` · ${e.engagement_verdict}` : ""}:
-            </span>
-          )}
-          {whyText(e)}
-        </div>
+        <TableRow className="hover:bg-transparent">
+          <TableCell colSpan={7} className="bg-muted/40">
+            <div className="py-1 text-xs leading-relaxed text-muted-foreground">
+              {took && e.engagement_dir && (
+                <span className="mr-1 font-medium text-foreground">
+                  {e.engagement_dir === "LONG" ? "Long" : "Short"}
+                  {e.engagement_verdict ? ` · ${e.engagement_verdict}` : ""}:
+                </span>
+              )}
+              {whyText(e)}
+            </div>
+          </TableCell>
+        </TableRow>
       )}
-    </div>
+    </>
   )
 }
 
@@ -335,17 +336,24 @@ function RunGroup({
       </Button>
       {open && (
         <>
-          <div className="divide-y divide-border">
-            {g.rows.map((e) => (
-              <div key={e.symbol + e.report_date} className="flex items-center gap-2 py-1.5 text-sm">
-                <span className="w-14 font-semibold">{e.symbol}</span>
-                <span className="w-14 text-xs text-muted-foreground">{fmtCap(e.market_cap)}</span>
-                <span className="ml-auto text-xs text-muted-foreground">
-                  {e.report_date.slice(5, 10)} {e.session}
-                </span>
-              </div>
-            ))}
-          </div>
+          <Table>
+            <TableHeader><TableRow>
+              <TableHead>Symbol</TableHead>
+              <TableHead>Cap</TableHead>
+              <TableHead className="text-right">Report</TableHead>
+            </TableRow></TableHeader>
+            <TableBody>
+              {g.rows.map((e) => (
+                <TableRow key={e.symbol + e.report_date}>
+                  <TableCell className="font-semibold">{e.symbol}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{fmtCap(e.market_cap)}</TableCell>
+                  <TableCell className="text-right text-xs text-muted-foreground">
+                    {e.report_date.slice(5, 10)} {e.session}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
           <Button
             variant="ghost"
             size="xs"
@@ -397,11 +405,22 @@ function ReportedDayBlock({
       </Button>
       {open && (
         <>
-          <div className="divide-y divide-border">
-            {g.rows.map((e) => (
-              <ReportedRow key={e.symbol + e.report_date} e={e} />
-            ))}
-          </div>
+          <Table>
+            <TableHeader><TableRow>
+              <TableHead>Symbol</TableHead>
+              <TableHead>Cap</TableHead>
+              <TableHead>Session</TableHead>
+              <TableHead>Desk</TableHead>
+              <TableHead>Verdict</TableHead>
+              <TableHead className="text-right">Drift · gap</TableHead>
+              <TableHead />
+            </TableRow></TableHeader>
+            <TableBody>
+              {g.rows.map((e) => (
+                <ReportedRow key={e.symbol + e.report_date} e={e} />
+              ))}
+            </TableBody>
+          </Table>
           <div className="py-2 text-center">
             <Button variant="ghost" size="sm" onClick={() => setOpen(false)} className="text-xs">
               − show less
@@ -479,14 +498,6 @@ export function Earnings({
           sub="capturable drift from the first post-report open — the uncapturable overnight gap is shown separately and excluded from the verdict"
         >
           <CoverageSummary reported={filteredReported} />
-          <div className="mb-2 flex items-center gap-2 border-b border-border pb-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-            <span className="w-16">Symbol</span>
-            <span className="w-14">Cap</span>
-            <span className="w-10">Session</span>
-            <span className="w-20">Desk</span>
-            <span className="w-20">Verdict</span>
-            <span className="ml-auto">Drift · gap</span>
-          </div>
           <div className="space-y-3">
             {groupByDay(filteredReported, (e) => e.report_date.slice(0, 10)).map((g) => (
               <ReportedDayBlock key={g.day} g={g} forceExpanded={searching} />
@@ -497,11 +508,6 @@ export function Earnings({
 
       {filteredUpcoming.length > 0 && (
         <Panel title="Reporting soon" sub="grouped by when to run the desk — biggest names first">
-          <div className="mb-2 flex items-center gap-2 border-b border-border pb-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-            <span className="w-14">Symbol</span>
-            <span className="w-14">Cap</span>
-            <span className="ml-auto">Report</span>
-          </div>
           <div className="space-y-3">
             {groupByDay(filteredUpcoming, (e) => (e.run_at ?? "").slice(0, 10) || "—").map((g) => (
               <RunGroup key={g.day} g={g} forceExpanded={searching} />

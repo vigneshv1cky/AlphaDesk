@@ -8,6 +8,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { RefreshCw, Target, ShieldAlert, TrendingUp, Activity } from "lucide-react"
 import { dirUp, dirWord } from "@/lib/plain"
 import type { LivePick } from "@/lib/api"
+import { pnlClass, fmtUsd } from "@/lib/pnl"
 
 const SESSIONS = [
   { value: "ALL", label: "All" },
@@ -84,17 +85,17 @@ export function LivePositions({ rows, market, loading }: { rows: LivePick[]; mar
           <div className="font-mono text-lg font-bold tabular-nums">{filtered.length}</div>
         </CardContent></Card>
         <Card><CardContent className="flex flex-col items-center gap-1 py-3">
-          <TrendingUp className={`h-4 w-4 ${(winRate ?? 50) >= 50 ? "text-emerald-500" : "text-red-500"}`} />
+          <TrendingUp className={`h-4 w-4 ${(winRate ?? 50) >= 50 ? "text-gain" : "text-loss"}`} />
           <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Win Rate</div>
-          <div className={`font-mono text-lg font-bold tabular-nums ${(winRate ?? 50) >= 50 ? "text-emerald-500" : "text-red-500"}`}>
+          <div className={`font-mono text-lg font-bold tabular-nums ${(winRate ?? 50) >= 50 ? "text-gain" : "text-loss"}`}>
             {winRate != null ? `${winRate}%` : "—"}
           </div>
           <div className="text-[10px] text-muted-foreground">{up}/{down} open</div>
         </CardContent></Card>
         <Card><CardContent className="flex flex-col items-center gap-1 py-3">
-          <TrendingUp className={`h-4 w-4 ${pnlUsd >= 0 ? "text-emerald-500" : "text-red-500"}`} />
+          <TrendingUp className={`h-4 w-4 ${pnlUsd >= 0 ? "text-gain" : "text-loss"}`} />
           <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Live P&amp;L</div>
-          <div className={`font-mono text-lg font-bold tabular-nums ${pnlUsd >= 0 ? "text-emerald-500" : "text-red-500"}`}>{pnlUsd >= 0 ? "+" : ""}${pnlUsd.toFixed(2)}</div>
+          <div className={`font-mono text-lg font-bold tabular-nums ${pnlUsd >= 0 ? "text-gain" : "text-loss"}`}>{fmtUsd(pnlUsd)}</div>
           <div className="text-[10px] text-muted-foreground">normalized $10/trade · {pnlCount} open</div>
         </CardContent></Card>
       </div>
@@ -133,8 +134,8 @@ export function LivePositions({ rows, market, loading }: { rows: LivePick[]; mar
                 {p.current != null && p.plan_entry != null ? (() => {
                   const pnl = positionPnlUsd(p)
                   return (
-                    <div className={`font-mono tabular-nums font-semibold ${(pnl ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}>
-                      {pnl != null ? `${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}` : "—"}
+                    <div className={`font-mono tabular-nums font-semibold ${pnlClass(pnl)}`}>
+                      {pnl != null ? fmtUsd(pnl) : "—"}
                     </div>
                   )
                 })() : <span className="text-muted-foreground">—</span>}

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api, type SystemInfo } from "@/lib/api"
+import { pnlClass } from "@/lib/pnl"
 
 function fmtAgo(ts: string | null): string {
   if (!ts) return "—"
@@ -15,7 +16,7 @@ function fmtAgo(ts: string | null): string {
 }
 
 function StatCard({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: number | null }) {
-  const color = tone == null ? "" : tone > 0 ? "text-emerald-500" : tone < 0 ? "text-red-500" : ""
+  const color = pnlClass(tone)
   return (
     <Card><CardContent className="flex flex-col items-center gap-1 py-3">
       <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">{label}</div>

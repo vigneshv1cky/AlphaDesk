@@ -162,8 +162,8 @@ function BookTrade({ symbol, last }: { symbol: string; last?: number }) {
               className={`h-9 rounded-md border text-sm font-medium transition-colors ${
                 direction === d
                   ? d === "LONG"
-                    ? "border-emerald-600 bg-emerald-600 text-white"
-                    : "border-red-600 bg-red-600 text-white"
+                    ? "border-gain bg-gain text-gain-foreground"
+                    : "border-loss bg-loss text-loss-foreground"
                   : "text-muted-foreground hover:bg-muted"
               }`}
             >
@@ -214,7 +214,7 @@ function BookTrade({ symbol, last }: { symbol: string; last?: number }) {
 
         {err && <p className="text-sm text-red-600">{err}</p>}
         {result && (
-          <div className="rounded-md border border-emerald-600/30 bg-emerald-600/5 p-2 text-xs">
+          <div className="rounded-md border border-gain/30 bg-gain/5 p-2 text-xs">
             <div className="font-medium">Booked #{result.id}</div>
             <div className="mt-0.5 font-mono text-muted-foreground">
               {result.direction} {result.symbol} @ {result.entry} · tgt {result.target} · stop{" "}

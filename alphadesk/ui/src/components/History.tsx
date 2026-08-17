@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Separator } from "@/components/ui/separator"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { TrendingUp, TrendingDown, Minus } from "lucide-react"
+import { pnlClass, fmtPct } from "@/lib/pnl"
 
 const SESSIONS = [
   { value: "ALL", label: "All" },
@@ -34,7 +35,7 @@ function EdgeTag({ edge }: { edge: string | null }) {
 
 function StatCard({ label, value, tone }: { label: string; value: string; tone?: number | null }) {
   const Icon = tone == null ? Minus : tone > 0 ? TrendingUp : TrendingDown
-  const color = tone == null ? "text-muted-foreground" : tone > 0 ? "text-emerald-500" : "text-red-500"
+  const color = pnlClass(tone) || "text-muted-foreground"
   return <Card><CardContent className="flex flex-col items-center gap-1 py-4"><Icon className={`h-4 w-4 ${color}`} /><div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">{label}</div><div className={`font-mono text-xl font-bold tabular-nums ${color}`}>{value}</div></CardContent></Card>
 }
 
@@ -92,7 +93,7 @@ export function History({ symbols, loading }: { symbols: SymbolTimeline[]; loadi
       </div>
       <div className="grid grid-cols-2 gap-2">
         <StatCard label="Win Rate" value={winRate != null ? `${winRate}%` : "—"} tone={winRate != null ? (winRate >= 50 ? 1 : -1) : null} />
-        <StatCard label="Total P&L" value={exitedEvents.length > 0 ? `${totalPnl >= 0 ? "+" : ""}${totalPnl.toFixed(2)}%` : "—"} tone={totalPnl} />
+        <StatCard label="Total P&L" value={exitedEvents.length > 0 ? fmtPct(totalPnl) : "—"} tone={totalPnl} />
       </div>
       <Separator />
       {exitedEvents.length === 0 ? (
@@ -117,7 +118,7 @@ export function History({ symbols, loading }: { symbols: SymbolTimeline[]; loadi
                   <TableCell><Badge variant={up ? "default" : "destructive"} className="font-medium">{dirWord(e.direction)}</Badge></TableCell>
                   <TableCell className="text-right text-xs font-mono text-muted-foreground">{fmtFill(e.entry_price, e.entry_ts)}</TableCell>
                   <TableCell className="text-right text-xs font-mono text-muted-foreground">{fmtFill(e.exit_price, e.exit_ts)}</TableCell>
-                  <TableCell className={`text-right font-mono tabular-nums font-semibold ${ret != null && ret > 0 ? "text-emerald-500" : ret != null && ret < 0 ? "text-red-500" : ""}`}>{ret != null ? `${ret >= 0 ? "+" : ""}${ret.toFixed(2)}%` : "—"}</TableCell>
+                  <TableCell className={`text-right font-mono tabular-nums font-semibold ${pnlClass(ret)}`}>{ret != null ? fmtPct(ret) : "—"}</TableCell>
                 </TableRow>)
               })}
             </TableBody></Table>

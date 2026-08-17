@@ -12,7 +12,9 @@ function applied(): Theme {
     const raw = localStorage.getItem("theme")
     if (raw === "light" || raw === "dark" || raw === "system") return raw
   } catch { /* ignore */ }
-  return "system"
+  // No stored preference yet — default new visitors into the terminal's
+  // native dark look rather than following the OS, which skews light.
+  return "dark"
 }
 
 function apply(t: Theme) {
