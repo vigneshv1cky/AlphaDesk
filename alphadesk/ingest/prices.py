@@ -18,6 +18,7 @@ from typing import Any, Optional
 from alphadesk.config import (
     LOW_LIQUIDITY_DOLLAR_VOL,
     MA_INTRADAY_HISTORY_DAYS,
+    OWNERSHIP_TTL_S,
     RSI_CROSS_OVERBOUGHT,
     RSI_CROSS_OVERSOLD,
     now_et,
@@ -229,6 +230,56 @@ def get_fundamentals(symbol: str) -> Optional[dict]:
         if len(_fund_cache) >= _CACHE_MAX_ENTRIES:
             _evict_expired(_fund_cache, _FUND_TTL_S)  # type: ignore[arg-type]
         _fund_cache[sym] = (time.time(), out)
+    return out
+
+
+_ownership_cache: dict[str, tuple[float, dict | None]] = {}
+
+
+def get_institutional_ownership(symbol: str) -> Optional[dict]:
+    """Who holds this stock (best-effort via yfinance; cached — 13F/major-
+    holder breakdowns move on a quarterly cadence, far slower than a quote).
+
+    Deliberately yfinance, not OpenBB/SEC: SEC's Form 13F is filed BY an
+    institutional manager and lists THEIR holdings across many companies —
+    querying it by a company's own symbol (e.g. AAPL) returns nothing,
+    because Apple isn't an institutional filer. There's no free reverse index
+    from "held company" back to "who holds it" in raw SEC data; yfinance
+    already aggregates that for free via Yahoo's own data pipeline."""
+    sym = symbol.upper()
+    with _cache_lock:
+        hit = _ownership_cache.get(sym)
+        if hit and time.time() - hit[0] < OWNERSHIP_TTL_S:
+            return hit[1]
+    out: dict | None = None
+    try:
+        import yfinance as yf
+        tk = yf.Ticker(sym)
+        major = tk.get_major_holders()
+        inst = tk.get_institutional_holders()
+        breakdown: dict = {}
+        if major is not None and not major.empty:
+            col = "Value" if "Value" in major.columns else major.columns[0]
+            for label, value in major[col].items():
+                breakdown[str(label)] = value
+        holders = []
+        if inst is not None and not inst.empty:
+            for _, row in inst.head(10).iterrows():
+                holders.append({
+                    "holder": row.get("Holder"),
+                    "shares": row.get("Shares"),
+                    "value": row.get("Value"),
+                    "pct_change": row.get("pctChange"),
+                    "date_reported": str(row.get("Date Reported")) if row.get("Date Reported") is not None else None,
+                })
+        if breakdown or holders:
+            out = {"breakdown": breakdown, "top_holders": holders}
+    except Exception as exc:
+        log.debug("institutional ownership failed %s: %s", sym, exc)
+    with _cache_lock:
+        if len(_ownership_cache) >= _CACHE_MAX_ENTRIES:
+            _evict_expired(_ownership_cache, OWNERSHIP_TTL_S)  # type: ignore[arg-type]
+        _ownership_cache[sym] = (time.time(), out)
     return out
 
 

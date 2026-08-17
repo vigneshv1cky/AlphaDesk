@@ -293,6 +293,23 @@ CREATE TABLE IF NOT EXISTS filing_qa_cache (
     generated_at  TEXT,
     PRIMARY KEY (accession, question_hash)
 );
+
+-- Cached answers from the autonomous research agent (desk/research.py),
+-- keyed on the question alone — unlike symbol_digests/filing_qa_cache, this
+-- has no natural input-set key (the model decides what to fetch at ask-time,
+-- not a caller-supplied document/article set), so a TTL is what keeps a
+-- re-asked question from returning quarter-old ownership data forever
+-- instead of re-running.
+CREATE TABLE IF NOT EXISTS research_cache (
+    question_hash TEXT PRIMARY KEY,
+    question      TEXT,
+    answer        TEXT,
+    citations     TEXT,        -- JSON [{tool_call_index, claim, tool, args}]
+    tool_trace    TEXT,        -- JSON [{tool, args, result}] — the real executed calls citations resolve against
+    model         TEXT,
+    generated_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_research_generated ON research_cache (generated_at);
 """
 
 
@@ -1359,6 +1376,33 @@ def save_filing_qa(accession: str, question_hash: str, question: str, answer: st
             " (accession, question_hash, question, answer, citations, model, generated_at)"
             " VALUES (?,?,?,?,?,?,?)",
             (accession, question_hash, question, answer, json.dumps(citations), model, _now()))
+
+
+def get_research(question_hash: str, ttl_hours: float) -> dict | None:
+    """Cache hit only within ttl_hours of generation — unlike filing_qa_cache
+    (whose key already encodes the exact input set), a research question has
+    no such key, so staleness has to be checked by wall-clock instead."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT question, answer, citations, tool_trace, model, generated_at FROM research_cache"
+            " WHERE question_hash=? AND datetime(generated_at) >= datetime('now', ?)",
+            (question_hash, f"-{ttl_hours} hours")).fetchone()
+    if not row:
+        return None
+    d = dict(row)
+    d["citations"] = json.loads(d["citations"] or "[]")
+    d["trace"] = json.loads(d.pop("tool_trace") or "[]")
+    return d
+
+
+def save_research(question_hash: str, question: str, answer: str,
+                  citations: list[dict], trace: list[dict], model: str) -> None:
+    with _lock, _connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO research_cache"
+            " (question_hash, question, answer, citations, tool_trace, model, generated_at)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (question_hash, question, answer, json.dumps(citations), json.dumps(trace), model, _now()))
 
 
 def save_enrichment(items: list[dict]) -> None:

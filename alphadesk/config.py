@@ -151,6 +151,27 @@ SCREENER_TOP_N = int(os.environ.get("SCREENER_TOP_N", "15"))
 FILING_MAX_CHARS = int(os.environ.get("FILING_MAX_CHARS", "60000"))
 FILING_RECENT_LIMIT = int(os.environ.get("FILING_RECENT_LIMIT", "12"))
 
+# ── Research agent (ai/deepseek.run_tool_loop, desk/research.py) ────────────
+# Autonomous tool-calling Q&A over fundamentals/ownership/insider/macro data —
+# unlike the other 3 DeepSeek call sites (single JSON-mode completion), this
+# is a genuine multi-turn loop where the model decides what to fetch. Spiked
+# live against DeepSeek before committing: deepseek-chat handles tool_calls
+# cleanly (no need for the pricier deepseek-reasoner), so RESEARCH_MODEL
+# defaults to the same model rather than raising cost by default.
+RESEARCH_MAX_TURNS = int(os.environ.get("RESEARCH_MAX_TURNS", "6"))
+# Tool results are structured JSON, not prose — a much smaller ceiling than
+# LLM_MAX_INPUT_CHARS/FILING_MAX_CHARS is appropriate here.
+TOOL_RESULT_MAX_CHARS = int(os.environ.get("TOOL_RESULT_MAX_CHARS", "4000"))
+# Unlike symbol_digests/filing_qa_cache, a research question has no input-set
+# key that naturally invalidates on new data (the model decides what to fetch
+# at ask-time) — so this cache needs an actual TTL, not just a hash key.
+RESEARCH_CACHE_TTL_HOURS = float(os.environ.get("RESEARCH_CACHE_TTL_HOURS", "4"))
+RESEARCH_MODEL = os.environ.get("RESEARCH_MODEL", DEEPSEEK_MODEL)
+# 13F is quarterly, Form 4 is event-driven — both move far slower than
+# options IV or a live quote, hence the much longer TTL than prices.py's
+# other in-memory caches.
+OWNERSHIP_TTL_S = int(os.environ.get("OWNERSHIP_TTL_S", str(6 * 3600)))
+
 # ── Quant ────────────────────────────────────────────────────────────────────
 QUANT_STREAM_ENABLED = os.environ.get("QUANT_STREAM_ENABLED", "1") not in ("0", "", "false", "False", "no")
 QUANT_TIERED_EXITS = os.environ.get("QUANT_TIERED_EXITS", "1") not in ("0", "", "false", "False", "no")

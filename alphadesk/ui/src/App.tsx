@@ -11,6 +11,7 @@ import { Moon, Monitor, Sun } from "lucide-react"
 // Lazy routes — each page is its own chunk, so it loads like a real page.
 const ScreenerPage = lazy(() => import("@/pages/ScreenerPage"))
 const FilingsPage = lazy(() => import("@/pages/FilingsPage"))
+const ResearchPage = lazy(() => import("@/pages/ResearchPage"))
 const TradePage = lazy(() => import("@/pages/TradePage"))
 const PerformancePage = lazy(() => import("@/pages/PerformancePage"))
 const LivePage = lazy(() => import("@/pages/LivePage"))
@@ -21,6 +22,7 @@ const SystemPage = lazy(() => import("@/pages/SystemPage"))
 const TITLES: Record<string, string> = {
   "/screener": "Screener · AlphaDesk",
   "/filings": "Filings · AlphaDesk",
+  "/research": "Research · AlphaDesk",
   "/trade": "Trade · AlphaDesk",
   "/performance": "Performance · AlphaDesk",
   "/live": "Live Positions · AlphaDesk",
@@ -103,6 +105,7 @@ function Shell() {
               <Route path="/" element={<Navigate to="/screener" replace />} />
               <Route path="/screener" element={<ScreenerPage />} />
               <Route path="/filings" element={<FilingsPage />} />
+              <Route path="/research" element={<ResearchPage />} />
               <Route path="/trade" element={<TradePage />} />
               <Route path="/performance" element={<PerformancePage />} />
               <Route path="/live" element={<LivePage rows={liveRows} market={market} loading={!liveLoaded} />} />

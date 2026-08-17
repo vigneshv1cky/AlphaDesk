@@ -1,0 +1,1 @@
+import{r as e}from"./utils-8p7XZvjF.js";import{c as t,o as n,s as r}from"./index-CNsZHr0_.js";var i=e();function a({tip:e,children:a,className:o}){return(0,i.jsxs)(n,{children:[(0,i.jsx)(t,{render:(0,i.jsx)(`span`,{className:o}),children:a}),(0,i.jsx)(r,{children:e})]})}export{a as t};

@@ -5,6 +5,7 @@ import { NavLink } from "react-router-dom"
 const PRIMARY = [
   { to: "/screener", label: "Screener" },
   { to: "/filings", label: "Filings" },
+  { to: "/research", label: "Research" },
   { to: "/trade", label: "Trade" },
   { to: "/performance", label: "Performance" },
 ]

@@ -89,6 +89,30 @@ def api_filings_ask(body: FilingQuestion):
     return result
 
 
+class ResearchQuestion(BaseModel):
+    question: str
+
+
+@app.post("/api/research/ask")
+def api_research_ask(body: ResearchQuestion):
+    """Free-form research question, answered by an autonomous tool-calling
+    agent over fundamentals/ownership/insider/earnings/macro/sector data —
+    the model decides what to fetch, not a fixed template. Every claim is
+    tied to a real, server-captured tool call, never the model's unverified
+    say-so — see desk/research.py's module docstring. Cached per question
+    text with a TTL (a rephrase, or the same question after the cache
+    expires, is a deliberate re-run)."""
+    from alphadesk.desk import research
+    question = body.question.strip()
+    if not question:
+        raise HTTPException(400, "question is required")
+    result = research.ask(question)
+    if result is None:
+        raise HTTPException(
+            422, "couldn't answer — the research agent failed or produced no verifiable answer")
+    return result
+
+
 @app.get("/api/screener")
 def api_screener():
     """Ranked "look here" list — code-computed ranking (earnings proximity +

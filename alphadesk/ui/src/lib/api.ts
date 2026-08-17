@@ -445,12 +445,39 @@ export interface FilingAnswer {
   citations: FilingCitation[]
 }
 
+/** One tool call the research agent actually made — the ground truth a
+ * citation resolves against, not the model's own claim about what it did. */
+export interface ResearchTraceEntry {
+  tool: string
+  args: Record<string, unknown>
+  result: unknown
+}
+
+export interface ResearchCitation {
+  tool_call_index: number
+  claim: string
+  tool: string
+  args: Record<string, unknown>
+}
+
+/** Answer from the autonomous research agent (desk/research.py). Every
+ * citation points at a real, server-executed entry in `trace` — the model
+ * decided what to fetch (fundamentals, ownership, insider trades, earnings,
+ * macro, sector), not a fixed template. */
+export interface ResearchAnswer {
+  answer: string
+  citations: ResearchCitation[]
+  trace: ResearchTraceEntry[]
+}
+
 export const api = {
   pick: (id: number) => get<Pick>(`/api/picks/${id}`),
   filings: (symbol: string) =>
     get<{ symbol: string; filings: FilingRow[] }>(`/api/filings/${encodeURIComponent(symbol)}`),
   askFiling: (accession: string, question: string) =>
     post<FilingAnswer>("/api/filings/ask", { accession, question }),
+  askResearch: (question: string) =>
+    post<ResearchAnswer>("/api/research/ask", { question }),
   chart: (symbol: string, days = 2) =>
     get<ChartSeries>(`/api/chart/${encodeURIComponent(symbol)}?days=${days}`),
   screener: () => get<{ symbols: ScreenerRow[] }>("/api/screener"),

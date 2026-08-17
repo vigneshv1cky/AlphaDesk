@@ -1,7 +1,8 @@
-# AlphaDesk — human-operated research terminal. No autonomous trading, one
-# LLM call site (ai/deepseek.py, plain HTTP — no SDK dependency).
+# AlphaDesk — human-operated research terminal. No autonomous trading, two
+# LLM call shapes (ai/deepseek.py, plain HTTP — no SDK dependency): chat_json
+# (summarize-and-cite) and run_tool_loop (the agentic research layer).
 alpaca-py>=0.14.0           # market data + tradable universe
-yfinance>=0.2.31            # grading, fundamentals, VIX/macro context
+yfinance>=0.2.31            # grading, fundamentals, VIX/macro context, institutional ownership
 pandas>=2.0.0               # price frames
 polygon-api-client>=1.13.0  # ingest/news.py's article source
 beautifulsoup4>=4.12.0      # ingest/edgar.py's filing text extraction
@@ -9,3 +10,12 @@ fastapi                     # dashboard JSON API
 uvicorn                     # ASGI server
 python-dotenv               # .env config
 python-multipart            # form parsing
+# ingest/openbb_ownership.py's insider-trades tool — calls SEC provider
+# Fetcher classes directly, bypassing OpenBB's obb router/extension layer and
+# every other provider package (NOT the full `openbb` metapackage, which
+# pulls 50 required sub-packages including paid providers). Institutional
+# ownership deliberately stays on yfinance above, not OpenBB's 13F — SEC's
+# Form 13F is filed BY an institutional manager, not BY the held company, so
+# it can't answer "who holds this stock" (verified live before choosing this).
+openbb-core>=1.6.10
+openbb-sec>=1.6.7
