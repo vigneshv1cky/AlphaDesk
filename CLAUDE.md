@@ -260,13 +260,12 @@ gcloud compute ssh alphadesk --zone=us-east4-a \
   earnings) is now the default landing page, wired to `/trade` via
   `?symbol=`. Recovered Polygon news + enrichment from the deleted v1 system
   rather than rebuilding; DeepSeek transport is new and purpose-built.
-- **`DEEPSEEK_API_KEY` in `.env` is REJECTED** (`HTTP 401: invalid api key`,
-  confirmed live 2026-08-16). The screener runs and degrades correctly (raw
-  headlines with real URLs, no digest) — this was verified as the actual
-  failure mode, not assumed. Get a fresh key from DeepSeek's platform console
-  and update both `.env` (local) and `/opt/alphadesk/.env` (VM) — the VM's
-  copy was never touched by any deploy in this repo's history and may hold a
-  different value.
+- **`DEEPSEEK_API_KEY` rotated and confirmed working** (2026-08-16 evening) —
+  the original key was rejected (`HTTP 401: invalid api key`, confirmed live);
+  a fresh key now authenticates and the screener produces real cited digests
+  end-to-end. Local `.env` updated; `/opt/alphadesk/.env` on the VM still
+  needs the same update on next deploy — its copy was never touched by any
+  deploy in this repo's history and may still hold the dead value.
 - **Planned next** (not built): filings/document workspace over free EDGAR
   full-text, then an agentic research layer, then news theme grouping.
   Attribution (no claim without a source) is already enforced in the
