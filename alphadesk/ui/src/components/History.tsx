@@ -1,4 +1,5 @@
-import { groupByDayKey, type SymbolTimeline, type TimelineEvent, type Stats } from "@/lib/api"
+import { useState } from "react"
+import { groupByDayKey, type SymbolTimeline, type TimelineEvent } from "@/lib/api"
 import { dirUp, dirWord } from "@/lib/plain"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
@@ -7,6 +8,13 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Separator } from "@/components/ui/separator"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { TrendingUp, TrendingDown, Minus } from "lucide-react"
+
+const SESSIONS = [
+  { value: "ALL", label: "All" },
+  { value: "PRE", label: "Pre-Market" },
+  { value: "OPEN", label: "Open Market" },
+  { value: "AFTER", label: "After Hours" },
+] as const
 
 // A pre-earnings pick bets momentum carries into a REPORT THAT HASN'T HAPPENED
 // YET — real earnings-surprise risk a post-earnings-drift pick (the common
@@ -48,7 +56,9 @@ function fmtFill(price: number | null, ts: string | null) {
 
 type ExitedEvent = TimelineEvent & { symbol: string }
 
-export function History({ symbols, stats, loading }: { symbols: SymbolTimeline[]; stats: Stats | null; loading: boolean }) {
+export function History({ symbols, loading }: { symbols: SymbolTimeline[]; loading: boolean }) {
+  const [session, setSession] = useState<(typeof SESSIONS)[number]["value"]>("ALL")
+
   if (loading) return (
     <div className="space-y-3">
       <div className="grid grid-cols-3 gap-2">{[1,2,3].map(i => <Skeleton key={i} className="h-24 w-full rounded-xl" />)}</div>
@@ -56,16 +66,30 @@ export function History({ symbols, stats, loading }: { symbols: SymbolTimeline[]
     </div>
   )
 
-  const exitedEvents: ExitedEvent[] = []
-  for (const s of symbols) for (const e of s.events) if (e.state === "exited" || e.state === "graded" || e.exit_ts) exitedEvents.push({ ...e, symbol: s.symbol })
-  const graded = stats?.total?.graded ?? 0
-  const gradedWins = stats?.total?.wins ?? 0
-  const winRate = graded > 0 ? Math.round((gradedWins / graded) * 100) : null
-  // Compute P&L from displayed events, not stats API
+  const allExited: ExitedEvent[] = []
+  for (const s of symbols) for (const e of s.events) if (e.state === "exited" || e.state === "graded" || e.exit_ts) allExited.push({ ...e, symbol: s.symbol })
+  const exitedEvents = session === "ALL" ? allExited : allExited.filter(e => e.session === session)
+  const wins = exitedEvents.filter(e => (e.exit_return_pct ?? 0) > 0).length
+  const winRate = exitedEvents.length > 0 ? Math.round((wins / exitedEvents.length) * 100) : null
   const totalPnl = exitedEvents.reduce((s, e) => s + (e.exit_return_pct ?? 0), 0)
 
   return (
     <div className="space-y-3">
+      <div className="flex flex-wrap gap-1">
+        {SESSIONS.map(s => (
+          <button
+            key={s.value}
+            onClick={() => setSession(s.value)}
+            className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+              session === s.value
+                ? "bg-indigo-600 text-white"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
       <div className="grid grid-cols-2 gap-2">
         <StatCard label="Win Rate" value={winRate != null ? `${winRate}%` : "—"} tone={winRate != null ? (winRate >= 50 ? 1 : -1) : null} />
         <StatCard label="Total P&L" value={exitedEvents.length > 0 ? `${totalPnl >= 0 ? "+" : ""}${totalPnl.toFixed(2)}%` : "—"} tone={totalPnl} />

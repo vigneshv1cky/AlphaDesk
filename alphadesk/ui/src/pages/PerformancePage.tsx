@@ -112,10 +112,12 @@ function DeciderSplit({ by }: { by: PerformanceInfo["by_decider"] }) {
   const rows = (["HUMAN", "MACHINE"] as const).map(k => [k, by?.[k]] as const).filter(([, v]) => v)
   if (!rows.length) return null
   return (
-    <Card><CardContent className="py-4">
-      <div className="mb-3 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-        Decision source
-      </div>
+    <Card className="border-indigo-500/30"><CardContent className="py-4">
+      <div className="mb-0.5 text-sm font-bold tracking-tight">You vs. the machine</div>
+      <p className="mb-3 text-[11px] text-muted-foreground">
+        Same ledger, same forward grading vs SPY. The autonomous engine keeps booking on
+        paper as a control arm — this is the answer to whether judgment beats it.
+      </p>
       <div className="grid gap-2 sm:grid-cols-2">
         {rows.map(([who, s]) => (
           <div key={who} className="rounded-lg border p-3">
@@ -165,7 +167,8 @@ export default function PerformancePage() {
       <div>
         <h1 className="text-lg font-bold tracking-tight">Performance</h1>
         <p className="text-xs text-muted-foreground">
-          Realized results over the last {data.days} days — equal-weight $10 book, every position exits at its session close.
+          Realized results over the last {data.days} days — normalized $10/trade for comparison,
+          every position exits at its session close.
         </p>
       </div>
 
@@ -176,11 +179,14 @@ export default function PerformancePage() {
         <StatCard label="Sharpe" value={data.trade_sharpe != null ? data.trade_sharpe.toFixed(2) : "—"} sub={data.daily_sharpe != null ? `daily ${data.daily_sharpe.toFixed(2)}` : "per trade"} tone={data.trade_sharpe} />
       </div>
 
+      {/* The actual open question this whole rebuild exists to answer — does a
+          human's judgment beat the machine's — goes first, not buried below
+          the equity curve as one more tile. */}
+      <DeciderSplit by={data.by_decider} />
+
       <Card><CardContent className="py-4">
         <EquityChart curve={data.curve} />
       </CardContent></Card>
-
-      <DeciderSplit by={data.by_decider} />
 
       <div className="grid grid-cols-3 gap-2">
         {Object.entries(data.per_market).map(([s, pm]) => (

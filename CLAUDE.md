@@ -190,9 +190,14 @@ app/dashboard.py     FastAPI: /api/* incl. /api/screener + /api/chart +
 app/alerts.py        webhook notifications (ALERTS_WEBHOOK_URL)
 main.py              CLI + 6 async loops (grader, earnings+arm, NEWS,
                      position watch, quant watch, daily summary) — NO entry loop
-ui/                  React 19 + TS + Vite → app/static/
-                     (/screener /live /trade /history /open /earnings
-                     /performance /system) — / redirects to /screener
+ui/                  React 19 + TS + Vite → app/static/. Nav is two-tier: the
+                     product loop (/screener /trade /performance) foregrounded,
+                     back-office (/live /history /earnings /system) demoted.
+                     / redirects to /screener; /open redirects to /live
+                     (MarketPage.tsx deleted 2026-08-17 — it was a near-
+                     duplicate of Live+History filtered to one session, a
+                     leftover of the old multi-session bot loop; both pages
+                     now carry an inline session filter instead).
 ```
 
 **Deleted with the bots (2026-08-16)** — recover from git if ever needed:

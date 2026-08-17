@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react"
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom"
-import { api, type LivePick, type SymbolTimeline, type Stats, type EarningsRow } from "@/lib/api"
+import { api, type LivePick, type SymbolTimeline, type EarningsRow } from "@/lib/api"
 import { useTheme } from "@/lib/theme"
 import { Header } from "@/components/Header"
 import { Nav } from "@/components/Nav"
@@ -9,24 +9,22 @@ import { Separator } from "@/components/ui/separator"
 import { Moon, Monitor, Sun } from "lucide-react"
 
 // Lazy routes — each page is its own chunk, so it loads like a real page.
+const ScreenerPage = lazy(() => import("@/pages/ScreenerPage"))
+const TradePage = lazy(() => import("@/pages/TradePage"))
+const PerformancePage = lazy(() => import("@/pages/PerformancePage"))
 const LivePage = lazy(() => import("@/pages/LivePage"))
 const HistoryPage = lazy(() => import("@/pages/HistoryPage"))
 const EarningsPage = lazy(() => import("@/pages/EarningsPage"))
-const MarketPage = lazy(() => import("@/pages/MarketPage"))
 const SystemPage = lazy(() => import("@/pages/SystemPage"))
-const PerformancePage = lazy(() => import("@/pages/PerformancePage"))
-const TradePage = lazy(() => import("@/pages/TradePage"))
-const ScreenerPage = lazy(() => import("@/pages/ScreenerPage"))
 
 const TITLES: Record<string, string> = {
+  "/screener": "Screener · AlphaDesk",
+  "/trade": "Trade · AlphaDesk",
+  "/performance": "Performance · AlphaDesk",
   "/live": "Live Positions · AlphaDesk",
   "/history": "History · AlphaDesk",
-  "/open": "Open Market · AlphaDesk",
   "/earnings": "Earnings · AlphaDesk",
   "/system": "System Health · AlphaDesk",
-  "/performance": "Performance · AlphaDesk",
-  "/trade": "Trade · AlphaDesk",
-  "/screener": "Screener · AlphaDesk",
 }
 
 function Shell() {
@@ -40,7 +38,6 @@ function Shell() {
   const [liveOpen, setLiveOpen] = useState(0)
 
   const [symbols, setSymbols] = useState<SymbolTimeline[]>([])
-  const [stats, setStats] = useState<Stats | null>(null)
   const [historyLoaded, setHistoryLoaded] = useState(false)
 
   const [earnings, setEarnings] = useState<{ upcoming: EarningsRow[]; reported: EarningsRow[] } | null>(null)
@@ -54,13 +51,10 @@ function Shell() {
     return () => { alive = false; clearInterval(t) }
   }, [])
 
-  // History + stats: 60s poll
+  // History: 60s poll
   useEffect(() => {
     let alive = true
-    const load = () => {
-      api.timelines().then(d => { if (alive) { setSymbols(d.symbols); setHistoryLoaded(true) } }).catch(() => {})
-      api.stats().then(s => { if (alive) setStats(s) }).catch(() => {})
-    }
+    const load = () => api.timelines().then(d => { if (alive) { setSymbols(d.symbols); setHistoryLoaded(true) } }).catch(() => {})
     load()
     const t = setInterval(load, 60_000)
     return () => { alive = false; clearInterval(t) }
@@ -88,12 +82,11 @@ function Shell() {
             <span className="h-3.5 w-3.5 rotate-45 rounded-[3px] bg-indigo-500" />
             <div className="leading-none">
               <div className="text-sm font-bold tracking-tight">AlphaDesk</div>
-              <div className="mt-0.5 text-[10px] text-muted-foreground">Research terminal</div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">You decide. The desk watches.</div>
             </div>
           </div>
           <Separator orientation="vertical" className="mx-1 h-8" />
           <Nav />
-          <Separator orientation="vertical" className="mx-1 h-8" />
           <div className="flex-1" />
           <Header liveOpenCount={liveOpen} />
           <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label="Toggle theme" className="h-8 w-8 shrink-0">
@@ -106,15 +99,18 @@ function Shell() {
           <Suspense fallback={<div className="text-sm text-muted-foreground">Loading…</div>}>
             <Routes>
               <Route path="/" element={<Navigate to="/screener" replace />} />
-              <Route path="/live" element={<LivePage rows={liveRows} market={market} loading={!liveLoaded} />} />
-              <Route path="/history" element={<HistoryPage symbols={symbols} stats={stats} loading={!historyLoaded} />} />
-              <Route path="/open" element={<MarketPage session="OPEN" liveRows={liveRows} symbols={symbols} loading={!historyLoaded} />} />
-              <Route path="/earnings" element={<EarningsPage earnings={earnings} />} />
-              <Route path="/system" element={<SystemPage />} />
-              <Route path="/performance" element={<PerformancePage />} />
               <Route path="/screener" element={<ScreenerPage />} />
               <Route path="/trade" element={<TradePage />} />
-              <Route path="*" element={<Navigate to="/live" replace />} />
+              <Route path="/performance" element={<PerformancePage />} />
+              <Route path="/live" element={<LivePage rows={liveRows} market={market} loading={!liveLoaded} />} />
+              <Route path="/history" element={<HistoryPage symbols={symbols} loading={!historyLoaded} />} />
+              <Route path="/earnings" element={<EarningsPage earnings={earnings} />} />
+              <Route path="/system" element={<SystemPage />} />
+              {/* /open merged into Live (session filter) — MarketPage.tsx deleted 2026-08-17,
+                  it was a near-duplicate of Live+History filtered to one session, a leftover
+                  of the old multi-session bot loop. */}
+              <Route path="/open" element={<Navigate to="/live" replace />} />
+              <Route path="*" element={<Navigate to="/screener" replace />} />
             </Routes>
           </Suspense>
         </div>

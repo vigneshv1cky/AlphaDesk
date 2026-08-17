@@ -15,8 +15,8 @@ export default function LivePage({
       <div>
         <h1 className="text-lg font-bold tracking-tight">Live Positions</h1>
         <p className="text-xs text-muted-foreground">
-          Open picks tracked against the current price — equal $10 fractional sizing,
-          session-scoped (each trade exits at its session close).
+          Positions you booked, tracked against the current price — automated
+          target/stop/trailing/session-close, no autonomous entries.
         </p>
       </div>
       <LivePositions rows={rows} market={market} loading={loading} />

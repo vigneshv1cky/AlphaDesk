@@ -254,6 +254,9 @@ export interface SessionsResponse {
 }
 
 export interface SystemInfo {
+  // last_run/runs_today/funnel_today are frozen dead fields — nothing has
+  // written to those tables since the autonomous entry engine was deleted
+  // 2026-08-16. Kept only so old API consumers don't break; not rendered.
   last_run: string | null
   runs_today: { total: number; with_picks: number; last_ts: string | null }
   funnel_today: { candidates: number; picked: number; skipped: number }
@@ -262,6 +265,13 @@ export interface SystemInfo {
   exited: number
   uptime_s: number
   market: string
+  news: {
+    last_article_at: string | null
+    articles_today: number
+    tokens_today_in: number
+    tokens_today_out: number
+    calls_today: number
+  }
 }
 
 export interface PerfTrade {

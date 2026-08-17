@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api, type SystemInfo } from "@/lib/api"
 
@@ -26,6 +25,11 @@ function StatCard({ label, value, sub, tone }: { label: string; value: string; s
   )
 }
 
+/** Is the terminal alive, and is the one thing that still runs unattended —
+ * the news/AI pipeline — actually working? Deliberately does NOT show
+ * "runs today" / "candidates scored" / risk rails: those described the
+ * autonomous entry engine, deleted 2026-08-16, and would now be permanently
+ * frozen numbers pretending to be live. */
 export default function SystemPage() {
   const [info, setInfo] = useState<SystemInfo | null>(null)
   useEffect(() => {
@@ -43,53 +47,68 @@ export default function SystemPage() {
     </div>
   )
 
-  const runs = info.runs_today
-  const success = runs.total > 0 ? Math.round((runs.with_picks / runs.total) * 100) : null
-  const funnel = info.funnel_today
   const uptimeH = Math.floor(info.uptime_s / 3600)
   const uptimeM = Math.floor((info.uptime_s % 3600) / 60)
-  const skippedRate = funnel.candidates > 0 ? Math.round((funnel.skipped / funnel.candidates) * 100) : null
+  const news = info.news
+  const newsStale = !news.last_article_at
+    || (Date.now() - new Date(news.last_article_at).getTime()) > 2 * 3600_000
 
   return (
     <div className="space-y-4">
       <div>
         <h1 className="text-lg font-bold tracking-tight">System Health</h1>
         <p className="text-xs text-muted-foreground">
-          Is the desk alive and covering? Runs, coverage funnel, risk-rail state.
+          Nothing here trades. This checks the terminal's own pulse: is the operator's
+          book being watched, and is the news pipeline still feeding the Screener.
         </p>
       </div>
 
       <div className="grid grid-cols-4 gap-2">
-        <StatCard label="Last Run" value={fmtAgo(runs.last_ts)} sub={runs.last_ts ? "Find Trades" : "never"} />
-        <StatCard label="Runs Today" value={String(runs.total)} sub={success != null ? `${success}% booked picks` : "no runs yet"} tone={success != null ? (success >= 50 ? 1 : -1) : null} />
         <StatCard label="Open" value={String(info.open_positions)} sub="positions now" tone={info.open_positions > 0 ? 1 : null} />
-        <StatCard label="Uptime" value={`${uptimeH}h ${uptimeM}m`} sub="since last deploy" />
-      </div>
-
-      <div className="grid grid-cols-4 gap-2">
-        <StatCard label="Candidates" value={String(funnel.candidates)} sub="scored today" />
-        <StatCard label="Picked" value={String(funnel.picked)} sub="booked today" tone={funnel.picked > 0 ? 1 : null} />
-        <StatCard label="Dropped" value={String(funnel.skipped)} sub={skippedRate != null ? `${skippedRate}% of candidates` : ""} tone={skippedRate != null && skippedRate > 80 ? -1 : null} />
         <StatCard label="Graded" value={String(info.graded)} sub={`${info.exited} exited`} />
+        <StatCard label="Uptime" value={`${uptimeH}h ${uptimeM}m`} sub="since last deploy" />
+        <StatCard label="Market" value={info.market} sub="current session" />
       </div>
 
-      <Card><CardContent className="space-y-2 py-4 text-xs text-muted-foreground">
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-foreground">Risk rails</span>
-          <Badge variant="secondary">max 20 open</Badge>
-          <Badge variant="secondary">2/sector·dir</Badge>
-          <Badge variant="secondary">−10% daily stop</Badge>
-        </div>
-        <p>
-          Circuit breakers gate new entries when enforced: at max open positions, concentration per
-          sector+direction, or a daily realized loss past the stop. Each trigger is logged in the funnel
-          with a reason and (if configured) sends an alert.
-        </p>
-        <p className="text-[11px]">
-          Market: <span className="font-semibold text-foreground">{info.market}</span>. Sessions are
-          self-contained — every position exits at its session close.
-        </p>
-      </CardContent></Card>
+      <Card>
+        <CardContent className="space-y-3 py-4">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              News → Screener pipeline
+            </span>
+            <span className={`text-[11px] font-medium ${newsStale ? "text-amber-600 dark:text-amber-400" : "text-emerald-500"}`}>
+              {newsStale ? "stale" : "healthy"}
+            </span>
+          </div>
+          <div className="grid grid-cols-4 gap-2">
+            <StatCard label="Last Article" value={fmtAgo(news.last_article_at)} />
+            <StatCard label="Articles Today" value={String(news.articles_today)} />
+            <StatCard label="AI Calls Today" value={String(news.calls_today)} />
+            <StatCard label="Tokens Today" value={`${((news.tokens_today_in + news.tokens_today_out) / 1000).toFixed(1)}k`} />
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Polls Polygon for ticker news, summarizes with DeepSeek, caches the digest per
+            symbol. A DeepSeek outage degrades the Screener to raw headlines with real source
+            links — never an empty page. See <code className="text-foreground">/api/tokens</code> for
+            the full spend breakdown.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="space-y-1.5 py-4 text-[11px] text-muted-foreground">
+          <p>
+            Trades enter this system exactly one way: a human clicking Book on{" "}
+            <code className="text-foreground">/trade</code>. There is no autonomous entry path,
+            no position cap, no daily-loss circuit breaker enforced against a manual decision —
+            those existed for the unattended bot and were removed with it (2026-08-16).
+          </p>
+          <p>
+            Sessions are self-contained — every position exits at its session close, never
+            carrying into another market.
+          </p>
+        </CardContent>
+      </Card>
     </div>
   )
 }

@@ -316,9 +316,13 @@ def api_performance(days: int = 30):
 
 @app.get("/api/system")
 def api_system():
-    """System-health panel: is the desk alive and covering? Last run, run cadence
-    today (how many actually booked), the coverage funnel, open positions, and
-    process uptime."""
+    """System-health panel: is the terminal alive? Open positions, grading
+    progress, process uptime, and news/AI pipeline health.
+
+    runs_today/funnel_today/last_run are kept for API back-compat but are
+    permanently frozen at whatever they were on 2026-08-16 — nothing writes
+    to the runs/funnel tables since the autonomous entry engine (their only
+    writer) was deleted that day. The frontend no longer displays them."""
     from alphadesk.config import session as market_session
     s = store.stats()["total"]
     return {
@@ -330,6 +334,7 @@ def api_system():
         "exited": s.get("exited"),
         "uptime_s": round(_process_age_s()),
         "market": market_session(),
+        "news": store.news_health(),
     }
 
 

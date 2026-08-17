@@ -1546,4 +1546,24 @@ def funnel_today() -> dict:
     return dict(row) if row else {"candidates": 0, "picked": 0, "skipped": 0}
 
 
+def news_health() -> dict:
+    """Is the news/screener pipeline alive? Last article ingested, how many
+    today, and today's AI spend — the one thing on the terminal that still
+    runs unattended and can silently fail (Polygon or DeepSeek outage)."""
+    with _connect() as conn:
+        last_at = conn.execute(
+            "SELECT max(ingested_at) FROM news_articles").fetchone()[0]
+        today = int(conn.execute(
+            "SELECT count(*) FROM news_articles WHERE ingested_at >= ?",
+            (_et_day_start_utc(),)).fetchone()[0])
+    tok = token_summary(days=1)
+    return {
+        "last_article_at": last_at,
+        "articles_today": today,
+        "tokens_today_in": sum(t["input_tok"] or 0 for t in tok),
+        "tokens_today_out": sum(t["output_tok"] or 0 for t in tok),
+        "calls_today": sum(t["calls"] or 0 for t in tok),
+    }
+
+
 init()

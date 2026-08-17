@@ -11,7 +11,7 @@ export default function EarningsPage({
       <div>
         <h1 className="text-lg font-bold tracking-tight">Earnings Calendar</h1>
         <p className="text-xs text-muted-foreground">
-          Who reports next and who just reported — the post-earnings-drift candidate pool.
+          Who reports next and who just reported — the candidate source the Screener ranks against.
         </p>
       </div>
       <Earnings earnings={earnings} />

@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
@@ -7,6 +8,13 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { RefreshCw, Target, ShieldAlert, TrendingUp, Activity } from "lucide-react"
 import { dirUp, dirWord } from "@/lib/plain"
 import type { LivePick } from "@/lib/api"
+
+const SESSIONS = [
+  { value: "ALL", label: "All" },
+  { value: "PRE", label: "Pre-Market" },
+  { value: "OPEN", label: "Open Market" },
+  { value: "AFTER", label: "After Hours" },
+] as const
 
 function timeSince(ts: string): string {
   const d = new Date(ts)
@@ -31,15 +39,19 @@ function positionPnlUsd(p: LivePick): number | null {
 }
 
 export function LivePositions({ rows, market, loading }: { rows: LivePick[]; market: string; loading: boolean }) {
-  const up = rows.filter(p => (p.pnl_pct ?? 0) > 0).length
-  const down = rows.filter(p => (p.pnl_pct ?? 0) < 0).length
+  const [session, setSession] = useState<(typeof SESSIONS)[number]["value"]>("ALL")
+  const filtered = session === "ALL" ? rows : rows.filter(p => p.session === session)
+
+  const up = filtered.filter(p => (p.pnl_pct ?? 0) > 0).length
+  const down = filtered.filter(p => (p.pnl_pct ?? 0) < 0).length
   const total = up + down
   const winRate = total > 0 ? Math.round((up / total) * 100) : null
-  // Dollar P&L assumes a FRACTIONAL $10 per trade: each position holds $10 of the
-  // name, so its $ P&L = $10 × the return % (POSITION_USD / entry shares × move).
-  // Same math as the P&L cell, so the card total always matches the column.
-  const pnlUsd = rows.reduce((s, p) => s + (positionPnlUsd(p) ?? 0), 0)
-  const pnlCount = rows.filter(p => positionPnlUsd(p) != null).length
+  // Dollar P&L is a NORMALIZED convention, not real position sizing: every
+  // trade is treated as $10 of notional purely so trades of different prices
+  // compare on the same $ scale here. It does not reflect actual order size —
+  // manual bookings fill at whatever price the market gives, whole-share.
+  const pnlUsd = filtered.reduce((s, p) => s + (positionPnlUsd(p) ?? 0), 0)
+  const pnlCount = filtered.filter(p => positionPnlUsd(p) != null).length
 
   if (loading) return (
     <div className="space-y-2">
@@ -50,11 +62,26 @@ export function LivePositions({ rows, market, loading }: { rows: LivePick[]; mar
 
   return (
     <div className="space-y-3">
+      <div className="flex flex-wrap gap-1">
+        {SESSIONS.map(s => (
+          <button
+            key={s.value}
+            onClick={() => setSession(s.value)}
+            className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+              session === s.value
+                ? "bg-indigo-600 text-white"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
       <div className="grid grid-cols-3 gap-2">
         <Card><CardContent className="flex flex-col items-center gap-1 py-3">
           <Activity className="h-4 w-4 text-muted-foreground" />
           <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Positions</div>
-          <div className="font-mono text-lg font-bold tabular-nums">{rows.length}</div>
+          <div className="font-mono text-lg font-bold tabular-nums">{filtered.length}</div>
         </CardContent></Card>
         <Card><CardContent className="flex flex-col items-center gap-1 py-3">
           <TrendingUp className={`h-4 w-4 ${(winRate ?? 50) >= 50 ? "text-emerald-500" : "text-red-500"}`} />
@@ -68,7 +95,7 @@ export function LivePositions({ rows, market, loading }: { rows: LivePick[]; mar
           <TrendingUp className={`h-4 w-4 ${pnlUsd >= 0 ? "text-emerald-500" : "text-red-500"}`} />
           <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Live P&amp;L</div>
           <div className={`font-mono text-lg font-bold tabular-nums ${pnlUsd >= 0 ? "text-emerald-500" : "text-red-500"}`}>{pnlUsd >= 0 ? "+" : ""}${pnlUsd.toFixed(2)}</div>
-          <div className="text-[10px] text-muted-foreground">$10/trade · {pnlCount} open</div>
+          <div className="text-[10px] text-muted-foreground">normalized $10/trade · {pnlCount} open</div>
         </CardContent></Card>
       </div>
       <Separator />
@@ -78,8 +105,14 @@ export function LivePositions({ rows, market, loading }: { rows: LivePick[]; mar
         <Separator orientation="vertical" className="h-3" />
         <Badge variant={market === "OPEN" ? "default" : "secondary"} className={market === "OPEN" ? "bg-emerald-500/15 text-emerald-500" : ""}>{market}</Badge>
       </div>
-      {rows.length === 0 ? (
-        <Card className="border-dashed"><CardContent className="flex flex-col items-center py-10"><p className="text-sm font-semibold">No open positions</p><p className="mt-1 text-xs text-muted-foreground">Waiting for next auto-run.</p></CardContent></Card>
+      {filtered.length === 0 ? (
+        <Card className="border-dashed"><CardContent className="flex flex-col items-center py-10">
+          <p className="text-sm font-semibold">No open positions{session !== "ALL" ? ` in ${session}` : ""}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Nothing books itself — head to <a href="/screener" className="underline hover:text-foreground">Screener</a> to
+            find something worth trading.
+          </p>
+        </CardContent></Card>
       ) : (
         <Table>
           <TableHeader><TableRow>
@@ -88,7 +121,7 @@ export function LivePositions({ rows, market, loading }: { rows: LivePick[]; mar
             <TableHead className="text-right"><Tooltip><TooltipTrigger><span className="inline-flex items-center gap-1"><ShieldAlert className="h-3 w-3" />Stop</span></TooltipTrigger><TooltipContent>ATR-based stop</TooltipContent></Tooltip></TableHead>
             <TableHead className="text-right">Age</TableHead>
           </TableRow></TableHeader>
-          <TableBody>{rows.map(p => {
+          <TableBody>{filtered.map(p => {
             const up = dirUp(p.direction)
             return (<TableRow key={p.id}>
               <TableCell className="font-bold">{p.symbol}</TableCell>
