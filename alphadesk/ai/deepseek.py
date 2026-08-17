@@ -56,32 +56,6 @@ def _key() -> str:
     return key
 
 
-def _post(payload: dict) -> dict:
-    """One HTTP round-trip to /chat/completions. Returns the raw parsed
-    response body — callers own everything response-shape-specific (token
-    recording, message/content extraction); this only owns the transport, so
-    chat_json and run_tool_loop can diverge in payload shape without
-    duplicating error handling."""
-    req = urllib.request.Request(
-        f"{DEEPSEEK_BASE_URL.rstrip('/')}/chat/completions",
-        data=json.dumps(payload).encode(),
-        headers={"Authorization": f"Bearer {_key()}", "Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_S) as resp:
-            return json.loads(resp.read().decode("utf-8", "replace"))
-    except urllib.error.HTTPError as exc:
-        body = ""
-        try:
-            body = exc.read().decode("utf-8", "replace")[:300]
-        except Exception:
-            pass
-        raise DeepSeekError(f"HTTP {exc.code} from deepseek: {body}") from exc
-    except (urllib.error.URLError, TimeoutError) as exc:
-        raise DeepSeekError(f"deepseek request failed: {exc}") from exc
-
-
 def chat_json(system: str, user: str, *, role: str, source: str | None = None,
              decision_id: str | None = None, max_tokens: int = 2048,
              max_input_chars: int | None = None) -> dict:
@@ -113,7 +87,24 @@ def chat_json(system: str, user: str, *, role: str, source: str | None = None,
         "stream": False,
         "response_format": {"type": "json_object"},
     }
-    data = _post(payload)
+    req = urllib.request.Request(
+        f"{DEEPSEEK_BASE_URL.rstrip('/')}/chat/completions",
+        data=json.dumps(payload).encode(),
+        headers={"Authorization": f"Bearer {_key()}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_S) as resp:
+            data = json.loads(resp.read().decode("utf-8", "replace"))
+    except urllib.error.HTTPError as exc:
+        body = ""
+        try:
+            body = exc.read().decode("utf-8", "replace")[:300]
+        except Exception:
+            pass
+        raise DeepSeekError(f"HTTP {exc.code} from deepseek: {body}") from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise DeepSeekError(f"deepseek request failed: {exc}") from exc
 
     usage = data.get("usage") or {}
     tin, tout = int(usage.get("prompt_tokens") or 0), int(usage.get("completion_tokens") or 0)
