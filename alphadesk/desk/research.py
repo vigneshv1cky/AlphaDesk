@@ -1,40 +1,39 @@
-"""Autonomous tool-calling research agent — the model decides what to fetch
-(fundamentals, institutional ownership, insider trades, earnings history,
-macro conditions, sector performance) across multiple turns to answer a
-free-form question.
+"""Research over one symbol — pre-fetches fundamentals, institutional
+ownership, insider trades, earnings history, macro conditions, and sector
+performance, then a SINGLE DeepSeek call synthesizes an answer (and a brief
+suggestion) from exactly that data.
 
-Every claim in the answer cites a REAL tool call captured server-side
-(ai.deepseek.run_tool_loop's `trace`) — the model's own say-so is never
-trusted, same "no claim without a source" discipline as desk/filings.py
-(verbatim-quote verification) and desk/screener.py (index-into-a-controlled-
-list resolution), generalized here to "index into a controlled list of real
-tool calls" instead of article citations or document quotes.
-
-Question-only, not (symbol, question) like filings.ask() — unlike a filing
-(naturally document-scoped), a research question may be pure macro ("is the
-Fed likely to cut") or span symbols the model itself has to identify from the
-question text, the same way a human reading it would.
+Same shape as desk/filings.py: the server decides what data is relevant
+(here, a fixed set of sections for the given symbol, not a caller-supplied
+document) and hands it all to one chat_json() call — no tool-calling loop.
+Citations resolve by SECTION INDEX against the real sections this module
+fetched, generalizing desk/screener.py's index-into-a-controlled-list
+pattern from articles to data sections — the model's own claim about what a
+section contains is never trusted past that check.
 """
 
 import hashlib
+import json
 import logging
 
-from alphadesk.ai.deepseek import DeepSeekError, run_tool_loop, wrap_data
-from alphadesk.config import RESEARCH_CACHE_TTL_HOURS, RESEARCH_MODEL
+from alphadesk.ai.deepseek import DeepSeekError, chat_json, wrap_data
+from alphadesk.config import RESEARCH_CACHE_TTL_HOURS, RESEARCH_MAX_CHARS
 from alphadesk.ingest import openbb_ownership, prices
 from alphadesk.ledger import store
 
 log = logging.getLogger("alphadesk.research")
 
 _SYSTEM = (
-    "You are a research assistant answering questions about stocks and "
-    "markets using ONLY the tools provided. Never guess or use outside/"
-    "training knowledge — if the tools can't answer the question, say so "
-    "plainly rather than filling the gap from memory (this matters most for "
-    "macro/rate questions, where a stale training-data answer is worse than "
-    "no answer). Call a tool for every fact you use; call provide_answer "
-    "only once you have enough, and cite the tool_call_index of a real call "
-    "for every claim."
+    "You are a research assistant. Answer the question about the given "
+    "symbol using ONLY the data sections provided below — never guess or "
+    "use outside/training knowledge (this matters most for macro/rate "
+    "claims, where a stale training-data answer is worse than none). If the "
+    "provided data can't answer the question, say so plainly. End with a "
+    "short, clearly-labeled suggestion or takeaway, still grounded only in "
+    "the data given.\n"
+    "Every factual claim must cite which section backed it.\n"
+    "Return ONLY JSON: {\"answer\": \"...\", "
+    "\"citations\": [{\"section\": <1-based section number>, \"claim\": \"...\"}]}"
 )
 
 
@@ -45,29 +44,7 @@ def _clean_symbol(raw: object) -> str | None:
     return sym or None
 
 
-def _exec_get_fundamentals(args: dict) -> dict:
-    sym = _clean_symbol(args.get("symbol"))
-    if not sym:
-        return {"error": "symbol required"}
-    data = prices.get_fundamentals(sym)
-    return data if data else {"available": False, "symbol": sym}
-
-
-def _exec_get_institutional_ownership(args: dict) -> dict:
-    sym = _clean_symbol(args.get("symbol"))
-    if not sym:
-        return {"error": "symbol required"}
-    data = prices.get_institutional_ownership(sym)
-    return data if data else {"available": False, "symbol": sym}
-
-
-def _exec_get_insider_trades(args: dict) -> dict:
-    sym = _clean_symbol(args.get("symbol"))
-    if not sym:
-        return {"error": "symbol required"}
-    rows = openbb_ownership.get_insider_trades(sym)
-    if not rows:
-        return {"available": False, "symbol": sym}
+def _wrap_insider_trades(rows: list[dict]) -> list[dict]:
     wrapped = []
     for row in rows:
         row = dict(row)
@@ -78,136 +55,100 @@ def _exec_get_insider_trades(args: dict) -> dict:
         if isinstance(footnote, str) and footnote:
             row["footnote"] = wrap_data("insider_footnote", footnote)
         wrapped.append(row)
-    return {"symbol": sym, "trades": wrapped}
+    return wrapped
 
 
-def _exec_get_earnings_context(args: dict) -> dict:
-    sym = _clean_symbol(args.get("symbol"))
-    if not sym:
-        return {"error": "symbol required"}
-    data = prices.get_earnings_context(sym)
-    return data if data else {"available": False, "symbol": sym}
+def _fetch_sections(symbol: str) -> list[dict]:
+    """Every section a symbol question might need, fetched up front. Each:
+    {title, data} — data is None/unavailable-shaped when that source failed,
+    never an exception the caller has to handle."""
+    fundamentals = prices.get_fundamentals(symbol)
+    sector = fundamentals.get("sector") if fundamentals else None
 
+    insider = openbb_ownership.get_insider_trades(symbol)
+    sector_perf = prices.sector_change_pct(sector) if sector else None
 
-def _exec_get_macro_snapshot(_args: dict) -> dict:
-    data = prices.macro_snapshot()
-    return data if data else {"available": False}
-
-
-def _exec_get_sector_performance(args: dict) -> dict:
-    sector = args.get("sector")
-    if not isinstance(sector, str) or not sector:
-        return {"error": "sector required"}
-    pct = prices.sector_change_pct(sector)
-    if pct is None:
-        return {"available": False, "sector": sector}
-    return {"sector": sector, "change_pct": pct}
-
-
-_EXECUTORS = {
-    "get_fundamentals": _exec_get_fundamentals,
-    "get_institutional_ownership": _exec_get_institutional_ownership,
-    "get_insider_trades": _exec_get_insider_trades,
-    "get_earnings_context": _exec_get_earnings_context,
-    "get_macro_snapshot": _exec_get_macro_snapshot,
-    "get_sector_performance": _exec_get_sector_performance,
-}
-
-
-def _tool(name: str, description: str, properties: dict, required: list[str]) -> dict:
-    return {"type": "function", "function": {
-        "name": name, "description": description,
-        "parameters": {"type": "object", "properties": properties, "required": required},
-    }}
-
-
-_TOOLS = [
-    _tool("get_fundamentals",
-         "Valuation/quality facts: market cap, trailing/forward P/E, profit "
-         "margin, revenue growth, sector, industry, short interest.",
-         {"symbol": {"type": "string"}}, ["symbol"]),
-    _tool("get_institutional_ownership",
-         "Institutional/major-holder breakdown: top holders (e.g. BlackRock, "
-         "Vanguard) and % of shares held by institutions/insiders.",
-         {"symbol": {"type": "string"}}, ["symbol"]),
-    _tool("get_insider_trades",
-         "Recent SEC Form 4 insider buy/sell transactions — officer/director "
-         "name, transaction type, price, shares, filing URL.",
-         {"symbol": {"type": "string"}}, ["symbol"]),
-    _tool("get_earnings_context",
-         "Beat/miss track record (last 4 quarters), revenue/income trend, "
-         "analyst estimate revisions.",
-         {"symbol": {"type": "string"}}, ["symbol"]),
-    _tool("get_macro_snapshot",
-         "10-year Treasury yield, VIX, and a Fed-funds proxy, each with a "
-         "1-month-ago comparison. Takes no arguments.",
-         {}, []),
-    _tool("get_sector_performance",
-         "Today's % change for a GICS sector's tracking ETF (pass the exact "
-         "sector name from get_fundamentals' result, e.g. \"Technology\").",
-         {"sector": {"type": "string"}}, ["sector"]),
-]
-
-
-def _dispatch(name: str, args: dict) -> dict:
-    executor = _EXECUTORS.get(name)
-    if executor is None:
-        return {"error": f"unknown tool {name!r}"}
-    return executor(args)
+    return [
+        {"title": "Fundamentals", "data": fundamentals or {"available": False}},
+        {"title": "Institutional ownership",
+         "data": prices.get_institutional_ownership(symbol) or {"available": False}},
+        {"title": "Insider trades (SEC Form 4)",
+         "data": {"trades": _wrap_insider_trades(insider)} if insider else {"available": False}},
+        {"title": "Earnings history",
+         "data": prices.get_earnings_context(symbol) or {"available": False}},
+        {"title": "Macro snapshot",
+         "data": prices.macro_snapshot() or {"available": False}},
+        {"title": "Sector performance",
+         "data": {"sector": sector, "change_pct": sector_perf} if sector_perf is not None
+                 else {"available": False}},
+    ]
 
 
 def _qhash(question: str) -> str:
     return hashlib.sha1(question.strip().lower().encode()).hexdigest()[:16]
 
 
-def _resolve_citations(citations: list[dict], trace: list[dict]) -> list[dict]:
-    """Keep only citations pointing at a real, successfully-executed tool
-    call — the model's own tool_call_index is never trusted past this check,
-    same discipline as filings._verify_quotes/screener._resolve_citations. A
-    citation whose call errored or came back unavailable is dropped, not
-    shown as "unverified"."""
+def _resolve_citations(citations: list[dict], sections: list[dict]) -> list[dict]:
+    """Keep only citations pointing at a real section that actually has data
+    — the model's own section number is never trusted past this check, same
+    discipline as filings._verify_quotes/screener._resolve_citations. A
+    citation pointing at an unavailable section is dropped, not shown."""
     out = []
     for c in citations:
-        idx = c.get("tool_call_index")
+        n = c.get("section")
         claim = c.get("claim")
-        if not isinstance(idx, int) or not isinstance(claim, str) or not claim.strip():
+        if not isinstance(n, int) or not isinstance(claim, str) or not claim.strip():
             continue
-        if idx < 0 or idx >= len(trace):
+        i = n - 1
+        if i < 0 or i >= len(sections):
             continue
-        call = trace[idx]
-        result = call.get("result")
-        if isinstance(result, dict) and (result.get("error") or result.get("available") is False):
+        data = sections[i]["data"]
+        if isinstance(data, dict) and data.get("available") is False:
             continue
-        out.append({"tool_call_index": idx, "claim": claim.strip(),
-                    "tool": call.get("tool"), "args": call.get("args")})
+        out.append({"section": n, "title": sections[i]["title"], "claim": claim.strip()})
     return out
 
 
-def ask(question: str) -> dict | None:
-    """{answer, citations: [{tool_call_index, claim, tool, args}], trace}
-    or None if the loop fails, times out, or never grounds an answer in a
-    real tool call — the caller shows 'try again', never a fabricated
-    answer. Cached on the question text alone with a TTL (not a hash-of-
-    inputs cache like symbol_digests/filing_qa_cache — see research_cache's
-    schema comment for why: the model decides what to fetch at ask-time, so
-    there's no input set to hash)."""
+def ask(symbol: str, question: str) -> dict | None:
+    """{answer, citations: [{section, title, claim}], sections} or None if
+    the symbol/question is invalid, nothing usable could be fetched, or the
+    model call fails — the caller shows 'try again', never a fabricated
+    answer. Cached per (symbol, question) with a TTL (the underlying data
+    can go stale even when the question hasn't changed)."""
+    sym = _clean_symbol(symbol)
     question = question.strip()
-    if not question:
+    if not sym or not question:
         return None
+
     qh = _qhash(question)
-    cached = store.get_research(qh, RESEARCH_CACHE_TTL_HOURS)
+    cached = store.get_research(sym, qh, RESEARCH_CACHE_TTL_HOURS)
     if cached:
-        return {"answer": cached["answer"], "citations": cached["citations"], "trace": cached["trace"]}
+        return {"answer": cached["answer"], "citations": cached["citations"], "sections": cached["sections"]}
+
+    sections = _fetch_sections(sym)
+    if not any(not (isinstance(s["data"], dict) and s["data"].get("available") is False) for s in sections):
+        log.warning("no usable research data for %s", sym)
+        return None
+
+    user_parts = [f"Symbol: {sym}", f"Question: {question}", ""]
+    for i, s in enumerate(sections, start=1):
+        user_parts.append(wrap_data(f"section_{i}", f"Section {i} — {s['title']}:\n{json.dumps(s['data'], default=str)}"))
+    user = "\n\n".join(user_parts)
 
     try:
-        result = run_tool_loop(
-            _SYSTEM, question, _TOOLS, _dispatch,
-            role="research-agent", source=None, decision_id=qh, model=RESEARCH_MODEL,
+        out = chat_json(
+            _SYSTEM, user, role="research-agent", source=None, decision_id=f"{sym}:{qh}",
+            max_input_chars=RESEARCH_MAX_CHARS, max_tokens=1024,
         )
     except DeepSeekError as exc:
-        log.warning("research agent failed for %r: %s", question, exc)
+        log.warning("research agent failed for %s %r: %s", sym, question, exc)
         return None
 
-    citations = _resolve_citations(result["citations"], result["trace"])
-    store.save_research(qh, question, result["answer"], citations, result["trace"], RESEARCH_MODEL)
-    return {"answer": result["answer"], "citations": citations, "trace": result["trace"]}
+    answer = (out.get("answer") or "").strip()
+    if not answer:
+        return None
+    raw_citations = [c for c in (out.get("citations") or []) if isinstance(c, dict)]
+    citations = _resolve_citations(raw_citations, sections)
+
+    store.save_research(sym, qh, question, answer, citations, sections, "deepseek-chat")
+    return {"answer": answer, "citations": citations, "sections": sections}

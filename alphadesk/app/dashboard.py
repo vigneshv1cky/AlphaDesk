@@ -90,26 +90,27 @@ def api_filings_ask(body: FilingQuestion):
 
 
 class ResearchQuestion(BaseModel):
+    symbol: str
     question: str
 
 
 @app.post("/api/research/ask")
 def api_research_ask(body: ResearchQuestion):
-    """Free-form research question, answered by an autonomous tool-calling
-    agent over fundamentals/ownership/insider/earnings/macro/sector data —
-    the model decides what to fetch, not a fixed template. Every claim is
-    tied to a real, server-captured tool call, never the model's unverified
-    say-so — see desk/research.py's module docstring. Cached per question
-    text with a TTL (a rephrase, or the same question after the cache
-    expires, is a deliberate re-run)."""
+    """Ask a question about one symbol, answered from its pre-fetched
+    fundamentals/ownership/insider/earnings/macro/sector data in a single AI
+    call — every claim is tied to a real, server-fetched data section, never
+    the model's unverified say-so — see desk/research.py's module docstring.
+    Cached per (symbol, question) with a TTL (the underlying data can go
+    stale even when the question hasn't changed)."""
     from alphadesk.desk import research
+    sym = "".join(c for c in body.symbol.upper() if c.isalnum() or c in ".-")[:12]
     question = body.question.strip()
-    if not question:
-        raise HTTPException(400, "question is required")
-    result = research.ask(question)
+    if not sym or not question:
+        raise HTTPException(400, "symbol and question are required")
+    result = research.ask(sym, question)
     if result is None:
         raise HTTPException(
-            422, "couldn't answer — the research agent failed or produced no verifiable answer")
+            422, "couldn't answer — no usable data for this symbol or the AI call failed")
     return result
 
 

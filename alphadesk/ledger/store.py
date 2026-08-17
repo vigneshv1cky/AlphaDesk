@@ -294,20 +294,24 @@ CREATE TABLE IF NOT EXISTS filing_qa_cache (
     PRIMARY KEY (accession, question_hash)
 );
 
--- Cached answers from the autonomous research agent (desk/research.py),
--- keyed on the question alone — unlike symbol_digests/filing_qa_cache, this
--- has no natural input-set key (the model decides what to fetch at ask-time,
--- not a caller-supplied document/article set), so a TTL is what keeps a
--- re-asked question from returning quarter-old ownership data forever
--- instead of re-running.
+-- Cached answers from the research agent (desk/research.py): all of one
+-- symbol's fundamentals/ownership/insider/earnings/macro/sector data is
+-- fetched server-side, then one DeepSeek call answers from exactly that —
+-- same "no claim without a source" shape as filing_qa_cache, keyed the same
+-- way ((symbol, question) composite PK), but WITH a TTL that filing_qa_cache
+-- doesn't need: a filing's text never changes, but a live quote or a recent
+-- insider filing can go stale between two identical asks even though the
+-- question text hasn't.
 CREATE TABLE IF NOT EXISTS research_cache (
-    question_hash TEXT PRIMARY KEY,
+    symbol        TEXT NOT NULL,
+    question_hash TEXT NOT NULL,
     question      TEXT,
     answer        TEXT,
-    citations     TEXT,        -- JSON [{tool_call_index, claim, tool, args}]
-    tool_trace    TEXT,        -- JSON [{tool, args, result}] — the real executed calls citations resolve against
+    citations     TEXT,        -- JSON [{section, title, claim}]
+    sections      TEXT,        -- JSON [{title, data}] — the real fetched data citations resolve against
     model         TEXT,
-    generated_at  TEXT
+    generated_at  TEXT,
+    PRIMARY KEY (symbol, question_hash)
 );
 CREATE INDEX IF NOT EXISTS idx_research_generated ON research_cache (generated_at);
 """
@@ -322,6 +326,15 @@ def _connect() -> sqlite3.Connection:
 
 def init() -> None:
     with _lock, _connect() as conn:
+        # research_cache's primary key changed shape (question_hash alone ->
+        # (symbol, question_hash)) when desk/research.py moved from a tool-
+        # calling loop to per-symbol pre-fetched context — SQLite can't ALTER
+        # a primary key, and this is purely a cache (a dropped row just means
+        # the next identical ask re-runs instead of hitting a cache hit), so
+        # drop-and-recreate is the correct migration, not an ADD COLUMN.
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(research_cache)")}
+        if cols and "symbol" not in cols:
+            conn.execute("DROP TABLE research_cache")
         conn.executescript(_SCHEMA)
         # idempotent migrations for pre-existing DBs (no-op once the column exists)
         for col, decl in (("taken", "INTEGER NOT NULL DEFAULT 0"),
@@ -1378,31 +1391,33 @@ def save_filing_qa(accession: str, question_hash: str, question: str, answer: st
             (accession, question_hash, question, answer, json.dumps(citations), model, _now()))
 
 
-def get_research(question_hash: str, ttl_hours: float) -> dict | None:
+def get_research(symbol: str, question_hash: str, ttl_hours: float) -> dict | None:
     """Cache hit only within ttl_hours of generation — unlike filing_qa_cache
-    (whose key already encodes the exact input set), a research question has
-    no such key, so staleness has to be checked by wall-clock instead."""
+    (whose key already encodes the exact input set, a filing's text that
+    never changes), the underlying data here (a live quote, a recent insider
+    filing) can go stale between two identical asks, so staleness has to be
+    checked by wall-clock too."""
     with _connect() as conn:
         row = conn.execute(
-            "SELECT question, answer, citations, tool_trace, model, generated_at FROM research_cache"
-            " WHERE question_hash=? AND datetime(generated_at) >= datetime('now', ?)",
-            (question_hash, f"-{ttl_hours} hours")).fetchone()
+            "SELECT question, answer, citations, sections, model, generated_at FROM research_cache"
+            " WHERE symbol=? AND question_hash=? AND datetime(generated_at) >= datetime('now', ?)",
+            (symbol, question_hash, f"-{ttl_hours} hours")).fetchone()
     if not row:
         return None
     d = dict(row)
     d["citations"] = json.loads(d["citations"] or "[]")
-    d["trace"] = json.loads(d.pop("tool_trace") or "[]")
+    d["sections"] = json.loads(d["sections"] or "[]")
     return d
 
 
-def save_research(question_hash: str, question: str, answer: str,
-                  citations: list[dict], trace: list[dict], model: str) -> None:
+def save_research(symbol: str, question_hash: str, question: str, answer: str,
+                  citations: list[dict], sections: list[dict], model: str) -> None:
     with _lock, _connect() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO research_cache"
-            " (question_hash, question, answer, citations, tool_trace, model, generated_at)"
-            " VALUES (?,?,?,?,?,?,?)",
-            (question_hash, question, answer, json.dumps(citations), json.dumps(trace), model, _now()))
+            " (symbol, question_hash, question, answer, citations, sections, model, generated_at)"
+            " VALUES (?,?,?,?,?,?,?,?)",
+            (symbol, question_hash, question, answer, json.dumps(citations), json.dumps(sections), model, _now()))
 
 
 def save_enrichment(items: list[dict]) -> None:
