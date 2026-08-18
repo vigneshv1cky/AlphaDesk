@@ -119,3 +119,41 @@ class TestLLMPlumbing:
         # exactly one real closing delimiter: the one we wrote
         assert out.count("</data:articles>") == 1
         assert out.endswith("</data:articles>")
+
+
+class TestMarketData:
+    """The quote and movers surfaces added for the AlphaSpace-style board."""
+
+    def test_movers_filters_out_untradeable_instruments(self):
+        from alphadesk.ingest.prices import _is_tradeable_symbol
+        # warrants / rights / units print huge percentage moves and cannot be
+        # traded in any normal sense — they must never reach the board
+        for junk in ("XOSWW", "NTWOW", "AACBR", "BGLWW", "RNWWW"):
+            assert not _is_tradeable_symbol(junk), junk
+        for real in ("NVDA", "INTC", "AAPL", "SPCX", "F"):
+            assert _is_tradeable_symbol(real), real
+
+    def test_bad_symbol_rejected(self, client):
+        assert client.get("/api/quote/%20").status_code in (400, 404)
+
+    def test_movers_top_is_clamped(self, client, monkeypatch):
+        """A caller asking for 10000 must not turn into a 10000-row upstream
+        request; the endpoint clamps before the provider sees it."""
+        seen = {}
+
+        class FakePrices:
+            name = "fake"
+
+            def movers(self, top=20):
+                seen["top"] = top
+                return {"most_active": [], "gainers": [], "losers": []}
+
+        from alphadesk.providers import registry
+        registry.register("prices", "fake", FakePrices)
+        monkeypatch.setenv("PRICE_PROVIDER", "fake")
+        registry.reset_cache()
+
+        assert client.get("/api/movers?top=10000").status_code == 200
+        assert seen["top"] == 50
+        assert client.get("/api/movers?top=-5").status_code == 200
+        assert seen["top"] == 1

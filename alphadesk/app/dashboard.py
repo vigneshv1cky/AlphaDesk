@@ -166,6 +166,26 @@ def api_chart(symbol: str, days: int = 2):
     return series
 
 
+@app.get("/api/quote/{symbol}")
+def api_quote(symbol: str):
+    """The equity-overview block for one symbol."""
+    from alphadesk.providers import get_prices
+    sym = "".join(c for c in symbol.upper() if c.isalnum() or c in ".-")[:12]
+    if not sym:
+        raise HTTPException(400, "bad symbol")
+    q = get_prices().quote(sym)
+    if not q:
+        raise HTTPException(404, f"no quote for {sym}")
+    return q
+
+
+@app.get("/api/movers")
+def api_movers(top: int = 20):
+    """Most active / gainers / losers, filtered for tradeability."""
+    from alphadesk.providers import get_prices
+    return get_prices().movers(top=max(1, min(top, 50)))
+
+
 @app.get("/api/tape")
 def api_tape():
     """The market strip pinned across the top of the terminal. Cached upstream

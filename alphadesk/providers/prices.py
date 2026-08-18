@@ -48,6 +48,14 @@ class BuiltinPrices:
         from alphadesk.ingest import prices
         return prices.sector_change_pct(sector)
 
+    def quote(self, symbol: str) -> dict | None:
+        from alphadesk.ingest import prices
+        return prices.quote(symbol)
+
+    def movers(self, top: int = 20) -> dict:
+        from alphadesk.ingest import prices
+        return prices.movers(top=top)
+
     def market_tape(self) -> list[dict]:
         from alphadesk.ingest import prices
         return prices.market_tape()

@@ -132,6 +132,17 @@ class PriceProvider(Protocol):
     def macro(self) -> dict | None: ...
     def sector_change_pct(self, sector: str | None) -> float | None: ...
 
+    def quote(self, symbol: str) -> dict | None:
+        """The equity-overview readout — price, bid/ask, ranges, valuation
+        multiples, analyst targets. None if the source cannot price it."""
+        ...
+
+    def movers(self, top: int = 20) -> dict:
+        """{most_active, gainers, losers}. Implementations should filter out
+        instruments that are arithmetically large movers but informationally
+        empty (sub-dollar tickers, warrants, near-zero turnover)."""
+        ...
+
     def market_tape(self) -> list[dict]:
         """The index/commodity/crypto strip: [{symbol, label, price, change_pct}].
         Omit a symbol you cannot price rather than reporting it as zero — a tape

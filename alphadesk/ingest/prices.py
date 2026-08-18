@@ -11,6 +11,7 @@ Plus one movers() call per scout window — a fact ranking, not a filter.
 
 import logging
 import math
+import os
 import threading
 import time
 from typing import Any, Optional
@@ -910,3 +911,219 @@ def market_tape() -> list[dict]:
     if out:
         _tape_cache = (time.time(), out)
     return out
+
+
+_quote_cache: dict[str, tuple[float, dict | None]] = {}
+_QUOTE_TTL_S = 60
+
+
+def quote(symbol: str) -> Optional[dict]:
+    """The equity-overview readout: the numbers a quote page pins next to a
+    price. One yfinance .info call, cached a minute.
+
+    bid_size/ask_size are returned in SHARES. yfinance reports them in round
+    lots, so they are multiplied by 100 — quoting "219.00 x 1" when the book
+    shows 100 shares would be wrong by two orders of magnitude.
+    """
+    sym = symbol.upper()
+    with _cache_lock:
+        hit = _quote_cache.get(sym)
+        if hit and time.time() - hit[0] < _QUOTE_TTL_S:
+            return hit[1]
+
+    out: dict | None = None
+    try:
+        import yfinance as yf
+        info = yf.Ticker(sym).info or {}
+        if not info.get("previousClose"):
+            raise ValueError("no quote data")
+
+        rt = _live_last_trade(sym)
+        prev = float(info["previousClose"])
+        last = rt[0] if rt else info.get("regularMarketPrice") or prev
+        out = {
+            "symbol": sym,
+            "name": info.get("longName") or info.get("shortName") or sym,
+            "exchange": info.get("exchange"),
+            "currency": info.get("currency") or "USD",
+            "price": round(float(last), 2),
+            "change": round(float(last) - prev, 2),
+            "change_pct": round(100.0 * (float(last) - prev) / prev, 2) if prev else None,
+            "previous_close": prev,
+            "open": info.get("open"),
+            "bid": info.get("bid"),
+            "ask": info.get("ask"),
+            "bid_size": (info.get("bidSize") or 0) * 100,
+            "ask_size": (info.get("askSize") or 0) * 100,
+            "day_low": info.get("dayLow"),
+            "day_high": info.get("dayHigh"),
+            "week52_low": info.get("fiftyTwoWeekLow"),
+            "week52_high": info.get("fiftyTwoWeekHigh"),
+            "volume": info.get("volume"),
+            "avg_volume": info.get("averageVolume"),
+            "market_cap": info.get("marketCap"),
+            "enterprise_value": info.get("enterpriseValue"),
+            "pe_forward": info.get("forwardPE"),
+            "pe_trailing": info.get("trailingPE"),
+            "peg": info.get("pegRatio"),
+            "price_to_sales": info.get("priceToSalesTrailing12Months"),
+            "price_to_book": info.get("priceToBook"),
+            "beta": info.get("beta"),
+            "eps_ttm": info.get("trailingEps"),
+            "dividend_yield": info.get("dividendYield"),
+            "target_mean": info.get("targetMeanPrice"),
+            "target_low": info.get("targetLowPrice"),
+            "target_high": info.get("targetHighPrice"),
+            "analyst_rating": (info.get("recommendationKey") or "").replace("_", " ") or None,
+            "analyst_count": info.get("numberOfAnalystOpinions"),
+        }
+    except Exception as exc:
+        log.debug("quote failed %s: %s", sym, exc)
+
+    with _cache_lock:
+        if len(_quote_cache) >= _CACHE_MAX_ENTRIES:
+            _evict_expired(_quote_cache, _QUOTE_TTL_S)
+        _quote_cache[sym] = (time.time(), out)
+    return out
+
+
+_movers_cache: tuple[float, dict] = (0.0, {})
+_MOVERS_TTL_S = 120
+
+# Raw screener output is dominated by sub-dollar warrants and rights: a $0.01
+# ticker printing +900% is arithmetically a "gainer" and informationally
+# nothing. These two filters are what make the list resemble a mover board
+# rather than a list of broken instruments.
+_MOVERS_MIN_PRICE = float(os.environ.get("MOVERS_MIN_PRICE", "5"))
+# A price floor alone does not clean up gainers/losers: a $25 microcap can
+# still print +500% on almost no turnover. Dollar volume is what separates "the
+# market repriced this" from "someone bought a thousand shares of it".
+# $1M measured against the real distribution: on a typical day the biggest
+# percentage gainer turns over ~$20M and the tail falls off fast, so a $10M
+# floor left a single name. Note that gainers/losers are inherently small-cap
+# heavy — a percentage screen over the whole market always is. Large names
+# live on the most-active tab, which ranks by volume instead.
+_MOVERS_MIN_DOLLAR_VOL = float(os.environ.get("MOVERS_MIN_DOLLAR_VOL", "1000000"))
+
+
+def _is_tradeable_symbol(sym: str) -> bool:
+    """Exclude warrants, rights and units — they carry suffixes that make them
+    look like enormous movers while being untradeable in any normal sense."""
+    s = sym.upper()
+    return not (s.endswith("W") and len(s) > 4) and not s.endswith(("WW", "R", "U"))
+
+
+def _snapshot_prices(symbols: list[str]) -> dict[str, dict]:
+    """Batch latest price + previous close for a list of symbols.
+
+    Needed because Alpaca's most-actives response carries only symbol, volume
+    and trade_count — no price at all. Without this the price filter below has
+    nothing to filter ON, and the board fills with sub-dollar tickers.
+    """
+    if not symbols:
+        return {}
+    client = _alpaca_data_client()
+    if client is None:
+        return {}
+    try:
+        from alpaca.data.requests import StockSnapshotRequest
+        snaps = client.get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=symbols))
+    except Exception as exc:
+        log.debug("snapshot batch failed: %s", exc)
+        return {}
+    out: dict[str, dict] = {}
+    for sym, snap in (snaps or {}).items():
+        try:
+            trade = getattr(snap, "latest_trade", None)
+            daily = getattr(snap, "previous_daily_bar", None)
+            px = float(getattr(trade, "price", 0) or 0)
+            prev = float(getattr(daily, "close", 0) or 0)
+            if not px:
+                continue
+            today = getattr(snap, "daily_bar", None)
+            vol = float(getattr(today, "volume", 0) or 0) or float(getattr(daily, "volume", 0) or 0)
+            out[sym] = {
+                "price": round(px, 2),
+                "change_pct": round(100.0 * (px - prev) / prev, 2) if prev else None,
+                "volume": int(vol),
+                "dollar_volume": px * vol,
+            }
+        except Exception:
+            continue
+    return out
+
+
+def movers(top: int = 20) -> dict:
+    """{most_active, gainers, losers}, each [{symbol, price, change_pct, volume}].
+
+    Alpaca's screener, then filtered and priced. Cached 2 minutes: this is a
+    board you glance at, and the list barely moves minute to minute.
+    """
+    global _movers_cache
+    ts, cached = _movers_cache
+    if cached and time.time() - ts < _MOVERS_TTL_S:
+        return cached
+
+    try:
+        from alpaca.data.historical.screener import ScreenerClient
+        from alpaca.data.requests import MarketMoversRequest, MostActivesRequest
+        client = ScreenerClient(os.environ["ALPACA_API_KEY"], os.environ["ALPACA_SECRET_KEY"])
+    except Exception as exc:
+        log.debug("screener unavailable: %s", exc)
+        return cached
+
+    raw: dict[str, list] = {"most_active": [], "gainers": [], "losers": []}
+    try:
+        # Over-fetch: the instrument and price filters discard most of it, so
+        # asking for exactly `top` would come back short.
+        act = client.get_most_actives(MostActivesRequest(top=100))
+        raw["most_active"] = list(getattr(act, "most_actives", []))
+        # The movers endpoint caps `top` at 50 and 400s above it — actives
+        # allows 100. Different limits on two calls in the same API.
+        mv = client.get_market_movers(MarketMoversRequest(top=50))
+        raw["gainers"] = list(getattr(mv, "gainers", []))
+        raw["losers"] = list(getattr(mv, "losers", []))
+    except Exception as exc:
+        log.warning("movers fetch failed: %s", exc)
+        return cached
+
+    # One snapshot call covers every candidate across all three lists.
+    candidates = sorted({getattr(r, "symbol", "") for rows in raw.values() for r in rows
+                         if getattr(r, "symbol", "") and _is_tradeable_symbol(r.symbol)})
+    priced = _snapshot_prices(candidates)
+
+    def _build(rows) -> list[dict]:
+        out = []
+        for r in rows:
+            sym = getattr(r, "symbol", "")
+            if not sym or not _is_tradeable_symbol(sym):
+                continue
+            snap = priced.get(sym)
+            # No price means no filter is possible, and an unpriced row would
+            # render as a blank cell — drop it rather than show a hole.
+            if not snap or not snap.get("price"):
+                continue
+            if snap["price"] < _MOVERS_MIN_PRICE:
+                continue
+            if snap.get("dollar_volume", 0) < _MOVERS_MIN_DOLLAR_VOL:
+                continue
+            out.append({
+                "symbol": sym,
+                "price": snap["price"],
+                # Prefer the screener's own change when it supplies one (it is
+                # the field the ranking was computed on); fall back to the
+                # snapshot, which is all most-actives rows have.
+                "change_pct": round(float(getattr(r, "percent_change", 0) or 0), 2)
+                              or snap.get("change_pct"),
+                # Screener rows for gainers/losers carry no volume at all —
+                # fall back to the snapshot so every row can show turnover.
+                "volume": int(getattr(r, "volume", 0) or 0) or snap.get("volume", 0),
+            })
+            if len(out) >= top:
+                break
+        return out
+
+    result = {k: _build(v) for k, v in raw.items()}
+    if any(result.values()):
+        _movers_cache = (time.time(), result)
+    return result

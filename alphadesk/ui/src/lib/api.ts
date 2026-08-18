@@ -104,6 +104,56 @@ export interface SessionAgg {
   avg_alpha: number | null
 }
 
+export interface Quote {
+  symbol: string
+  name: string
+  exchange: string | null
+  currency: string
+  price: number
+  change: number
+  change_pct: number | null
+  previous_close: number | null
+  open: number | null
+  bid: number | null
+  ask: number | null
+  bid_size: number | null
+  ask_size: number | null
+  day_low: number | null
+  day_high: number | null
+  week52_low: number | null
+  week52_high: number | null
+  volume: number | null
+  avg_volume: number | null
+  market_cap: number | null
+  enterprise_value: number | null
+  pe_forward: number | null
+  pe_trailing: number | null
+  peg: number | null
+  price_to_sales: number | null
+  price_to_book: number | null
+  beta: number | null
+  eps_ttm: number | null
+  dividend_yield: number | null
+  target_mean: number | null
+  target_low: number | null
+  target_high: number | null
+  analyst_rating: string | null
+  analyst_count: number | null
+}
+
+export interface MoverRow {
+  symbol: string
+  price: number | null
+  change_pct: number | null
+  volume: number
+}
+
+export interface Movers {
+  most_active: MoverRow[]
+  gainers: MoverRow[]
+  losers: MoverRow[]
+}
+
 export interface TapeEntry {
   symbol: string
   label: string
@@ -282,6 +332,8 @@ export const api = {
     post<ScreenerAnswer>("/api/screener/ask", { question }),
   system: () => get<SystemInfo>("/api/system"),
   tape: () => get<{ tape: TapeEntry[] }>("/api/tape"),
+  quote: (symbol: string) => get<Quote>(`/api/quote/${encodeURIComponent(symbol)}`),
+  movers: (top = 20) => get<Movers>(`/api/movers?top=${top}`),
   tokens: (days = 1) => get<{ usage: TokenRow[] }>(`/api/tokens?days=${days}`),
   earnings: () =>
     get<{ upcoming: EarningsRow[]; reported: EarningsRow[] }>("/api/earnings"),
