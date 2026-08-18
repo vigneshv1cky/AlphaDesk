@@ -7,7 +7,6 @@ const LINKS = [
   { to: "/dashboard", label: "Dashboard" },
   { to: "/screener", label: "Screener" },
   { to: "/filings", label: "Filings" },
-  { to: "/research", label: "Research" },
   { to: "/trade", label: "Trade" },
   { to: "/performance", label: "Performance" },
   { to: "/live", label: "Live" },

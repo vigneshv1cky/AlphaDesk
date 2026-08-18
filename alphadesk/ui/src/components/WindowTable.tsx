@@ -89,9 +89,6 @@ export function WindowTable({ rows }: { rows: ScreenerRow[] }) {
       header: "",
       cell: c => (
         <div className="flex justify-end gap-1">
-          <Link to={`/research?symbol=${encodeURIComponent(c.row.original.symbol)}`} onClick={e => e.stopPropagation()}>
-            <Btn variant="ghost">research</Btn>
-          </Link>
           <Link to={`/filings?symbol=${encodeURIComponent(c.row.original.symbol)}`} onClick={e => e.stopPropagation()}>
             <Btn variant="ghost">filings</Btn>
           </Link>
@@ -100,7 +97,7 @@ export function WindowTable({ rows }: { rows: ScreenerRow[] }) {
           </Link>
         </div>
       ),
-      size: 200,
+      size: 150,
     }),
   ], [])
 

@@ -5,13 +5,13 @@ import { useEarnings, useLive, useTimelines } from "@/lib/queries"
 import { useTheme } from "@/lib/theme"
 import { Header } from "@/components/Header"
 import { Nav } from "@/components/Nav"
+import { AiRail } from "@/components/AiRail"
 import { Moon, Monitor, Sun } from "lucide-react"
 
 // Lazy routes — each page is its own chunk, so it loads like a real page.
 const DashboardPage = lazy(() => import("@/pages/DashboardPage"))
 const ScreenerPage = lazy(() => import("@/pages/ScreenerPage"))
 const FilingsPage = lazy(() => import("@/pages/FilingsPage"))
-const ResearchPage = lazy(() => import("@/pages/ResearchPage"))
 const TradePage = lazy(() => import("@/pages/TradePage"))
 const PerformancePage = lazy(() => import("@/pages/PerformancePage"))
 const LivePage = lazy(() => import("@/pages/LivePage"))
@@ -23,7 +23,6 @@ const TITLES: Record<string, string> = {
   "/dashboard": "Dashboard · AlphaDesk",
   "/screener": "Screener · AlphaDesk",
   "/filings": "Filings · AlphaDesk",
-  "/research": "Research · AlphaDesk",
   "/trade": "Trade · AlphaDesk",
   "/performance": "Performance · AlphaDesk",
   "/live": "Live Positions · AlphaDesk",
@@ -81,6 +80,11 @@ function Shell() {
           {theme === "dark" ? <Moon className="h-3 w-3" /> : theme === "light" ? <Sun className="h-3 w-3" /> : <Monitor className="h-3 w-3" />}
         </button>
       </header>
+      {/* Content and rail are siblings in a flex row: the rail is a real column
+          that the grid reflows around, not an overlay floating on top of the
+          data. On a dense terminal an overlay would cover the thing you are
+          asking about. */}
+      <div className="flex min-h-0 flex-1">
       <main className="min-h-0 flex-1 overflow-y-auto">
         <div className="p-1">
           <Suspense fallback={<div className="p-2 text-[11px] text-muted-foreground">loading…</div>}>
@@ -89,7 +93,10 @@ function Shell() {
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/screener" element={<ScreenerPage />} />
               <Route path="/filings" element={<FilingsPage />} />
-              <Route path="/research" element={<ResearchPage />} />
+              {/* /research was nothing but an ask form; the AI rail's Symbol
+                  mode is that same call, available from every route. Kept as a
+                  redirect so old links and bookmarks still land somewhere. */}
+              <Route path="/research" element={<Navigate to="/dashboard" replace />} />
               <Route path="/trade" element={<TradePage />} />
               <Route path="/performance" element={<PerformancePage />} />
               <Route path="/live" element={<LivePage rows={liveRows} market={market} loading={live.isPending} />} />
@@ -105,6 +112,8 @@ function Shell() {
           </Suspense>
         </div>
       </main>
+      <AiRail />
+      </div>
     </div>
   )
 }
