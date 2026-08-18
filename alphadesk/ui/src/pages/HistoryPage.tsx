@@ -1,5 +1,6 @@
 import { History } from "@/components/History"
 import type { SymbolTimeline } from "@/lib/api"
+import { Widget } from "@/components/terminal"
 
 export default function HistoryPage({
   symbols,
@@ -9,14 +10,14 @@ export default function HistoryPage({
   loading: boolean
 }) {
   return (
-    <div className="space-y-3">
-      <div>
-        <h1 className="text-lg font-bold tracking-tight">History</h1>
-        <p className="text-xs text-muted-foreground">
-          Every exited pick, grouped by day and market session. P&L is the realized return.
-        </p>
-      </div>
-      <History symbols={symbols} loading={loading} />
+    <div className="collage">
+      <Widget
+        span={12}
+        title="History"
+        subtitle="every exited pick, grouped by day and session · P&L is the realized return"
+      >
+        <History symbols={symbols} loading={loading} />
+      </Widget>
     </div>
   )
 }

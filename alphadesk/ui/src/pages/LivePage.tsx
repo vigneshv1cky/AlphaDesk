@@ -1,5 +1,6 @@
 import { LivePositions } from "@/components/LivePositions"
 import type { LivePick } from "@/lib/api"
+import { Widget } from "@/components/terminal"
 
 export default function LivePage({
   rows,
@@ -11,15 +12,14 @@ export default function LivePage({
   loading: boolean
 }) {
   return (
-    <div className="space-y-3">
-      <div>
-        <h1 className="text-lg font-bold tracking-tight">Live Positions</h1>
-        <p className="text-xs text-muted-foreground">
-          Positions you booked, tracked against the current price — automated
-          target/stop/trailing/session-close, no autonomous entries.
-        </p>
-      </div>
-      <LivePositions rows={rows} market={market} loading={loading} />
+    <div className="collage">
+      <Widget
+        span={12}
+        title="Live positions"
+        subtitle="booked by you · automated target/stop/trailing/session-close · no autonomous entries"
+      >
+        <LivePositions rows={rows} market={market} loading={loading} />
+      </Widget>
     </div>
   )
 }

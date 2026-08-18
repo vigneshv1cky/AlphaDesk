@@ -1,6 +1,5 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
 
@@ -27,6 +26,9 @@
     --color-input: var(--input);
     --color-border: var(--border);
     --color-destructive: var(--destructive);
+    --color-panel: var(--panel);
+    --color-panel-header: var(--panel-header);
+    --color-grid-line: var(--grid-line);
     --color-gain: var(--gain);
     --color-gain-foreground: var(--gain-foreground);
     --color-loss: var(--loss);
@@ -55,11 +57,16 @@
 }
 
 :root {
-    /* softened base: off-white PAGE, but white cards so they still elevate above it */
-    --background: oklch(0.975 0 0);
+    /* Light stays available, but the density/geometry match dark: flat panels,
+       hairline rules, no elevation. OpenBB is a dark-first look; a "soft" light
+       theme with lifted white cards would undo it. */
+    --background: oklch(0.985 0 0);
     --foreground: oklch(0.22 0 0);
     --card: oklch(1 0 0);
     --card-foreground: oklch(0.22 0 0);
+    --panel: oklch(1 0 0);
+    --panel-header: oklch(0.965 0 0);
+    --grid-line: oklch(0.93 0 0);
     --popover: oklch(1 0 0);
     --popover-foreground: oklch(0.22 0 0);
     --primary: oklch(0.205 0 0);
@@ -75,15 +82,15 @@
     --gain-foreground: oklch(0.98 0 0);
     --loss: oklch(0.58 0.19 25);
     --loss-foreground: oklch(0.98 0 0);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
+    --border: oklch(0.90 0 0);
+    --input: oklch(0.90 0 0);
+    --ring: oklch(0.62 0.16 250);
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
-    --radius: 0.375rem;
+    --radius: 0.125rem;   /* terminal geometry: near-square, not rounded UI */
     --sidebar: oklch(0.985 0 0);
     --sidebar-foreground: oklch(0.145 0 0);
     --sidebar-primary: oklch(0.205 0 0);
@@ -95,30 +102,36 @@
 }
 
 .dark {
-    /* near-black terminal surface: page and card both pulled down from the
-       old "lifted, glare-cutting" #232323 toward a real dark-terminal black */
-    --background: oklch(0.13 0 0);
-    --foreground: oklch(0.92 0 0);
-    --card: oklch(0.18 0 0);
-    --card-foreground: oklch(0.92 0 0);
-    --popover: oklch(0.18 0 0);
-    --popover-foreground: oklch(0.92 0 0);
+    /* OpenBB-style canvas: the PAGE is the darkest surface and panels sit a
+       hair above it, separated by hairline rules rather than elevation or
+       radius. Panels are only ~2% lighter than the canvas — at this density
+       the border does the separating, and a lifted card would read as a
+       consumer dashboard. */
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.93 0 0);
+    --card: oklch(0.168 0 0);
+    --card-foreground: oklch(0.93 0 0);
+    --panel: oklch(0.168 0 0);
+    --panel-header: oklch(0.196 0 0);
+    --grid-line: oklch(1 0 0 / 8%);
+    --popover: oklch(0.185 0 0);
+    --popover-foreground: oklch(0.93 0 0);
     --primary: oklch(0.922 0 0);
     --primary-foreground: oklch(0.205 0 0);
     --secondary: oklch(0.22 0 0);
     --secondary-foreground: oklch(0.985 0 0);
     --muted: oklch(0.22 0 0);
     --muted-foreground: oklch(0.65 0 0);
-    --accent: oklch(0.22 0 0);
-    --accent-foreground: oklch(0.985 0 0);
+    --accent: oklch(0.62 0.17 250);
+    --accent-foreground: oklch(0.99 0 0);
     --destructive: oklch(0.7 0.16 22);
     --gain: oklch(0.72 0.19 145);
     --gain-foreground: oklch(0.15 0 0);
     --loss: oklch(0.68 0.21 25);
     --loss-foreground: oklch(0.15 0 0);
-    --border: oklch(1 0 0 / 12%);
-    --input: oklch(1 0 0 / 16%);
-    --ring: oklch(0.556 0 0);
+    --border: oklch(1 0 0 / 11%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.62 0.17 250);
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
@@ -140,9 +153,49 @@
     }
   body {
     @apply bg-background text-foreground;
+    /* Kill the ligature/proportional defaults that make numeric columns wobble. */
+    font-variant-numeric: tabular-nums;
     }
   html {
     @apply font-sans;
-    font-size: 15px;
+    /* 13px, down from 15px. The single highest-leverage density lever: every
+       rem-based size in the app scales off it, so the whole terminal tightens
+       without touching a component. */
+    font-size: 13px;
     }
+  /* Numeric cells are monospace + tabular so digits align down a column and a
+     changing price doesn't reflow its neighbours. */
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+    }
+  /* Thin, unobtrusive scrollbars — a widget grid has many scroll areas and
+     default chrome bars eat real estate and add visual noise. */
+  *::-webkit-scrollbar { width: 9px; height: 9px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb {
+    background: var(--grid-line);
+    border-radius: 0;
+    }
+  *::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); }
+}
+
+@layer components {
+  /* The collage canvas: a fixed 12-column grid the widgets span. Dense by
+     construction — tiles butt against each other with a hairline gutter
+     rather than floating in whitespace. */
+  .collage {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--grid-line);
+    border: 1px solid var(--grid-line);
+    }
+  /* Below tablet the 12-col grid collapses to one column — a widget grid that
+     keeps 12 columns on a phone is unreadable, not dense. */
+  @media (max-width: 900px) {
+    .collage { grid-template-columns: minmax(0, 1fr); }
+    .collage > * { grid-column: 1 / -1 !important; }
+  }
 }

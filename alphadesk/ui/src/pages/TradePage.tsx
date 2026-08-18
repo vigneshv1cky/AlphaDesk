@@ -3,9 +3,7 @@ import { useSearchParams } from "react-router-dom"
 import { api, type ChartSeries, type ManualPickResult } from "@/lib/api"
 import { PriceChart } from "@/components/PriceChart"
 import { useIsDark } from "@/lib/theme"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
+import { Badge, Btn, Widget, fieldCls } from "@/components/terminal"
 
 /** Where a human decides. Chart + indicators on the left, the booking form on
  * the right. Booked trades go into the same ledger as the bot's with
@@ -41,44 +39,52 @@ export default function TradePage() {
   useEffect(() => { load(initial, 2) }, [initial])
 
   return (
-    <div className="space-y-4">
+    <div className="collage">
+      <Widget
+        span={12}
+        title="Trade"
+        subtitle="candles + RSI-9 + MACD · indicators hide themselves when the feed is too sparse to trust · booking demands a written thesis"
+      >
       <form
-        className="flex flex-wrap items-center gap-2"
+        className="flex flex-wrap items-center gap-1.5 border-b border-border p-1"
         onSubmit={e => { e.preventDefault(); load(query.trim().toUpperCase(), days) }}
       >
         <input
           value={query}
           onChange={e => setQuery(e.target.value)}
           placeholder="Symbol"
-          className="h-9 w-32 rounded-md border bg-background px-3 text-sm font-mono uppercase"
+          className={`${fieldCls} w-24 font-mono uppercase`}
         />
         <select
           value={days}
           onChange={e => { const d = Number(e.target.value); setDays(d); load(symbol || query, d) }}
-          className="h-9 rounded-md border bg-background px-2 text-sm"
+          className={`${fieldCls} w-auto`}
         >
           <option value={1}>1 day</option>
           <option value={2}>2 days</option>
           <option value={5}>5 days</option>
           <option value={10}>10 days</option>
         </select>
-        <Button type="submit" size="sm" disabled={loading}>
+        <Btn type="submit" variant="accent" disabled={loading}>
           {loading ? "Loading…" : "Load"}
-        </Button>
-        {err && <span className="text-sm text-red-600">{err}</span>}
+        </Btn>
+        {err && <span className="text-[11px] text-loss">{err}</span>}
       </form>
 
       {data && (
         <>
           <DataQuality data={data} />
-          <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-            <Card className="p-3">
+          <div className="grid lg:grid-cols-[1fr_300px]">
+            <div className="min-w-0 p-1">
               <PriceChart data={data} dark={dark} />
-            </Card>
-            <BookTrade symbol={data.symbol} last={data.bars.at(-1)?.c} />
+            </div>
+            <div className="border-l border-border">
+              <BookTrade symbol={data.symbol} last={data.bars.at(-1)?.c} />
+            </div>
           </div>
         </>
       )}
+      </Widget>
     </div>
   )
 }
@@ -90,9 +96,9 @@ function DataQuality({ data }: { data: ChartSeries }) {
   const ok = data.indicators_reliable
   return (
     <div
-      className={`rounded-lg border px-3 py-2 text-sm ${
+      className={`border-b px-2 py-1 text-[11px] ${
         ok
-          ? "border-emerald-600/30 bg-emerald-600/5"
+          ? "border-border bg-gain/5"
           : "border-amber-600/40 bg-amber-600/10"
       }`}
     >
@@ -146,7 +152,7 @@ function BookTrade({ symbol, last }: { symbol: string; last?: number }) {
   }
 
   return (
-    <Card className="h-fit p-4">
+    <div className="p-2">
       <h3 className="text-sm font-semibold">Book {symbol}</h3>
       <p className="mt-0.5 text-xs text-muted-foreground">
         Paper only. Exits are managed automatically and graded vs SPY.
@@ -159,7 +165,7 @@ function BookTrade({ symbol, last }: { symbol: string; last?: number }) {
               key={d}
               type="button"
               onClick={() => setDirection(d)}
-              className={`h-9 rounded-md border text-sm font-medium transition-colors ${
+              className={`h-[22px] border text-sm font-medium transition-colors ${
                 direction === d
                   ? d === "LONG"
                     ? "border-gain bg-gain text-gain-foreground"
@@ -182,7 +188,7 @@ function BookTrade({ symbol, last }: { symbol: string; last?: number }) {
             required
             rows={4}
             placeholder="The reason gets stored with the trade and shown back to you when it's graded."
-            className="mt-1 w-full rounded-md border bg-background p-2 text-sm"
+            className="mt-1 w-full border bg-background p-2 text-sm"
           />
         </div>
 
@@ -192,7 +198,7 @@ function BookTrade({ symbol, last }: { symbol: string; last?: number }) {
             <input
               value={target} onChange={e => setTarget(e.target.value)}
               inputMode="decimal" placeholder="auto"
-              className="mt-1 h-9 w-full rounded-md border bg-background px-2 text-sm font-mono"
+              className="mt-1 h-[22px] w-full border bg-background px-2 text-sm font-mono"
             />
           </div>
           <div>
@@ -200,7 +206,7 @@ function BookTrade({ symbol, last }: { symbol: string; last?: number }) {
             <input
               value={stop} onChange={e => setStop(e.target.value)}
               inputMode="decimal" placeholder="auto"
-              className="mt-1 h-9 w-full rounded-md border bg-background px-2 text-sm font-mono"
+              className="mt-1 h-[22px] w-full border bg-background px-2 text-sm font-mono"
             />
           </div>
         </div>
@@ -208,13 +214,13 @@ function BookTrade({ symbol, last }: { symbol: string; last?: number }) {
           Blank uses the ATR plan{last ? ` from ${last}` : ""}.
         </p>
 
-        <Button type="submit" className="w-full" disabled={busy || !thesis.trim()}>
+        <Btn type="submit" variant="accent" className="w-full" disabled={busy || !thesis.trim()}>
           {busy ? "Booking…" : `Book ${direction} ${symbol}`}
-        </Button>
+        </Btn>
 
         {err && <p className="text-sm text-red-600">{err}</p>}
         {result && (
-          <div className="rounded-md border border-gain/30 bg-gain/5 p-2 text-xs">
+          <div className="border border-gain/30 bg-gain/5 p-2 text-xs">
             <div className="font-medium">Booked #{result.id}</div>
             <div className="mt-0.5 font-mono text-muted-foreground">
               {result.direction} {result.symbol} @ {result.entry} · tgt {result.target} · stop{" "}
@@ -226,6 +232,6 @@ function BookTrade({ symbol, last }: { symbol: string; last?: number }) {
           </div>
         )}
       </form>
-    </Card>
+    </div>
   )
 }

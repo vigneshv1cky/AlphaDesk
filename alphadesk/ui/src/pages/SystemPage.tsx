@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react"
-import { Card, CardContent } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
 import { api, type SystemInfo } from "@/lib/api"
-import { pnlClass } from "@/lib/pnl"
+import { Shimmer, Stat, Widget } from "@/components/terminal"
 
 function fmtAgo(ts: string | null): string {
   if (!ts) return "—"
@@ -16,14 +14,7 @@ function fmtAgo(ts: string | null): string {
 }
 
 function StatCard({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: number | null }) {
-  const color = pnlClass(tone)
-  return (
-    <Card><CardContent className="flex flex-col items-center gap-1 py-3">
-      <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">{label}</div>
-      <div className={`font-mono text-lg font-bold tabular-nums ${color}`}>{value}</div>
-      {sub && <div className="text-[10px] text-muted-foreground">{sub}</div>}
-    </CardContent></Card>
-  )
+  return <Stat label={label} value={value} sub={sub} tone={tone == null || tone === 0 ? undefined : tone > 0 ? "gain" : "loss"} />
 }
 
 /** Is the terminal alive, and is the one thing that still runs unattended —
@@ -42,9 +33,10 @@ export default function SystemPage() {
   }, [])
 
   if (!info) return (
-    <div className="space-y-3">
-      <Skeleton className="h-8 w-48" />
-      <div className="grid grid-cols-4 gap-2">{[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-24 w-full rounded-xl" />)}</div>
+    <div className="collage">
+      <Widget span={12} bodyClassName="grid grid-cols-4">
+        {[1, 2, 3, 4].map(i => <Shimmer key={i} className="m-2 h-9" />)}
+      </Widget>
     </div>
   )
 
@@ -55,24 +47,21 @@ export default function SystemPage() {
     || (Date.now() - new Date(news.last_article_at).getTime()) > 2 * 3600_000
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-lg font-bold tracking-tight">System Health</h1>
-        <p className="text-xs text-muted-foreground">
-          Nothing here trades. This checks the terminal's own pulse: is the operator's
-          book being watched, and is the news pipeline still feeding the Screener.
-        </p>
-      </div>
-
-      <div className="grid grid-cols-4 gap-2">
+    <div className="collage">
+      <Widget
+        span={12}
+        title="System health"
+        subtitle="nothing here trades — this is the terminal's own pulse: is your book watched, is news still feeding the Screener"
+        bodyClassName="grid grid-cols-4"
+      >
         <StatCard label="Open" value={String(info.open_positions)} sub="positions now" tone={info.open_positions > 0 ? 1 : null} />
         <StatCard label="Graded" value={String(info.graded)} sub={`${info.exited} exited`} />
         <StatCard label="Uptime" value={`${uptimeH}h ${uptimeM}m`} sub="since last deploy" />
         <StatCard label="Market" value={info.market} sub="current session" />
-      </div>
+      </Widget>
 
-      <Card>
-        <CardContent className="space-y-3 py-4">
+      <Widget span={12} title="News / AI pipeline">
+        <div className="space-y-2 p-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
               News → Screener pipeline
@@ -88,16 +77,17 @@ export default function SystemPage() {
             <StatCard label="Tokens Today" value={`${((news.tokens_today_in + news.tokens_today_out) / 1000).toFixed(1)}k`} />
           </div>
           <p className="text-[11px] text-muted-foreground">
-            Polls Polygon for ticker news, summarizes with DeepSeek, caches the digest per
-            symbol. A DeepSeek outage degrades the Screener to raw headlines with real source
-            links — never an empty page. See <code className="text-foreground">/api/tokens</code> for
-            the full spend breakdown.
+            Polls Polygon for ticker news and enriches it with DeepSeek. Nothing is
+            summarized in the background any more — the Screener asks only when you do, so
+            an idle terminal spends nothing. A DeepSeek outage leaves the window and its
+            real source links intact and fails only the ask. See{" "}
+            <code className="text-foreground">/api/tokens</code> for the full spend breakdown.
           </p>
-        </CardContent>
-      </Card>
+        </div>
+      </Widget>
 
-      <Card>
-        <CardContent className="space-y-1.5 py-4 text-[11px] text-muted-foreground">
+      <Widget span={12} title="Ground rules">
+        <div className="space-y-1.5 p-2 text-[11px] text-muted-foreground">
           <p>
             Trades enter this system exactly one way: a human clicking Book on{" "}
             <code className="text-foreground">/trade</code>. There is no autonomous entry path,
@@ -108,8 +98,8 @@ export default function SystemPage() {
             Sessions are self-contained — every position exits at its session close, never
             carrying into another market.
           </p>
-        </CardContent>
-      </Card>
+        </div>
+      </Widget>
     </div>
   )
 }

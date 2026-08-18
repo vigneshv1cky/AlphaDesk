@@ -1,9 +1,7 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { api, type ScreenerAnswer, type ScreenerRow } from "@/lib/api"
-import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Btn, Empty, Tag, Widget, areaCls } from "@/components/terminal"
 
 /** The front door — an inventory of what's in the window, and an AI you ask.
  *
@@ -31,36 +29,25 @@ export default function ScreenerPage() {
   const reporting = rows?.filter(r => r.report_date).length ?? 0
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-lg font-semibold">Screener</h1>
-        <p className="text-sm text-muted-foreground">
-          Everything in the window — symbols with fresh news or a report coming up,
-          listed alphabetically. Nothing is ranked or scored. Ask a question below and
-          the AI reads all of it at once.
-        </p>
-      </div>
-
+    <div className="collage">
       <AskBox />
 
-      {err && <p className="text-sm text-red-600">{err}</p>}
-      {rows === null && !err && <p className="text-sm text-muted-foreground">Loading…</p>}
-      {rows !== null && rows.length === 0 && (
-        <p className="text-sm text-muted-foreground">
-          Nothing in the window yet — no upcoming earnings and no fresh news.
-        </p>
-      )}
-
-      {rows !== null && rows.length > 0 && (
-        <p className="text-xs text-muted-foreground">
-          {rows.length} symbol{rows.length === 1 ? "" : "s"} · {withNews} with news ·{" "}
-          {reporting} reporting soon
-        </p>
-      )}
-
-      <div className="space-y-3">
-        {rows?.map(r => <ScreenerCard key={r.symbol} row={r} />)}
-      </div>
+      <Widget
+        span={12}
+        title="Window"
+        subtitle={
+          rows === null
+            ? "loading…"
+            : `${rows.length} symbols · ${withNews} with news · ${reporting} reporting soon — alphabetical, nothing ranked`
+        }
+      >
+        {err && <Empty>{err}</Empty>}
+        {rows === null && !err && <Empty>loading…</Empty>}
+        {rows !== null && rows.length === 0 && (
+          <Empty>nothing in the window — no upcoming earnings and no fresh news</Empty>
+        )}
+        {rows?.map(r => <ScreenerRowItem key={r.symbol} row={r} />)}
+      </Widget>
     </div>
   )
 }
@@ -84,26 +71,26 @@ function AskBox() {
   }
 
   return (
-    <Card>
-      <CardContent className="space-y-3 py-4">
-        <form onSubmit={ask} className="flex flex-col gap-2 sm:flex-row sm:items-start">
+    <Widget span={12} title="Ask the window" subtitle="one call over every article and upcoming report at once">
+      <div className="space-y-2 p-2">
+        <form onSubmit={ask} className="flex flex-col gap-1.5 sm:flex-row sm:items-start">
           <textarea
             value={question}
             onChange={e => setQuestion(e.target.value)}
             placeholder="e.g. What's the biggest news in the window? Anything unusual before earnings this week?"
             rows={2}
-            className="flex-1 rounded-md border bg-background px-3 py-2 text-sm"
+            className={`flex-1 ${areaCls}`}
           />
-          <Button type="submit" disabled={asking || !question.trim()} className="shrink-0">
+          <Btn type="submit" variant="accent" disabled={asking || !question.trim()} className="shrink-0">
             {asking ? "Reading…" : "Ask"}
-          </Button>
+          </Btn>
         </form>
 
-        {err && <p className="text-sm text-red-600">{err}</p>}
+        {err && <p className="text-[11px] text-loss">{err}</p>}
 
         {answer && (
-          <div className="space-y-2 border-t pt-3">
-            <p className="whitespace-pre-wrap text-sm">{answer.answer}</p>
+          <div className="space-y-1.5 border-t border-border pt-2">
+            <p className="whitespace-pre-wrap text-[12px] leading-snug">{answer.answer}</p>
             <p className="text-[11px] text-muted-foreground">
               Read {answer.considered.articles} article
               {answer.considered.articles === 1 ? "" : "s"} and{" "}
@@ -135,8 +122,8 @@ function AskBox() {
             )}
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </Widget>
   )
 }
 
@@ -149,50 +136,32 @@ function daysUntil(dateStr: string | null): string | null {
   return `reports in ${d}d`
 }
 
-function ScreenerCard({ row }: { row: ScreenerRow }) {
+function ScreenerRowItem({ row }: { row: ScreenerRow }) {
   const due = daysUntil(row.report_date)
   return (
-    <Card>
-      <CardContent className="py-4">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-base font-bold">{row.symbol}</span>
-            {due && <Badge variant="secondary">{due}</Badge>}
-            {row.article_count > 0 && (
-              <span className="text-xs text-muted-foreground">
-                {row.article_count} article{row.article_count === 1 ? "" : "s"}
-              </span>
-            )}
-          </div>
-          <div className="flex gap-1.5">
-            <Link to={`/research?symbol=${encodeURIComponent(row.symbol)}`}>
-              <Button size="sm" variant="ghost">Research</Button>
-            </Link>
-            <Link to={`/filings?symbol=${encodeURIComponent(row.symbol)}`}>
-              <Button size="sm" variant="ghost">Filings</Button>
-            </Link>
-            <Link to={`/trade?symbol=${encodeURIComponent(row.symbol)}`}>
-              <Button size="sm" variant="outline">Trade →</Button>
-            </Link>
-          </div>
-        </div>
-
-        {row.headlines.length > 0 ? (
-          <div className="mt-2 space-y-1">
-            {row.headlines.slice(0, 3).map((h, i) => (
-              <a key={i} href={h.url} target="_blank" rel="noreferrer"
-                className="block text-sm text-muted-foreground hover:text-foreground hover:underline">
-                {h.title}
-                <span className="ml-1.5 text-[11px] text-muted-foreground/70">— {h.source}</span>
-              </a>
-            ))}
-          </div>
-        ) : (
-          <p className="mt-2 text-sm text-muted-foreground">
-            No recent news — in the window purely on its upcoming report.
-          </p>
+    <div className="border-b border-grid-line px-2 py-1 last:border-b-0 hover:bg-muted/40">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="num text-[12px] font-bold">{row.symbol}</span>
+        {due && <Tag tone="accent">{due}</Tag>}
+        {row.article_count > 0 && (
+          <span className="num text-[10px] text-muted-foreground">{row.article_count} art</span>
         )}
-      </CardContent>
-    </Card>
+        <div className="flex-1" />
+        <Link to={`/research?symbol=${encodeURIComponent(row.symbol)}`}><Btn variant="ghost">research</Btn></Link>
+        <Link to={`/filings?symbol=${encodeURIComponent(row.symbol)}`}><Btn variant="ghost">filings</Btn></Link>
+        <Link to={`/trade?symbol=${encodeURIComponent(row.symbol)}`}><Btn>trade →</Btn></Link>
+      </div>
+      {row.headlines.length > 0 && (
+        <div className="mt-0.5 space-y-0.5">
+          {row.headlines.slice(0, 3).map((h, i) => (
+            <a key={i} href={h.url} target="_blank" rel="noreferrer"
+              className="block truncate text-[11px] text-muted-foreground hover:text-foreground hover:underline">
+              {h.title}
+              <span className="ml-1.5 text-[10px] text-muted-foreground/70">— {h.source}</span>
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }

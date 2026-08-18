@@ -1,14 +1,9 @@
 import { useState } from "react"
 import { groupByDayKey, type SymbolTimeline, type TimelineEvent } from "@/lib/api"
 import { dirUp, dirWord } from "@/lib/plain"
-import { Badge } from "@/components/ui/badge"
-import { Card, CardContent } from "@/components/ui/card"
 import { InfoTip } from "@/components/InfoTip"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Separator } from "@/components/ui/separator"
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
-import { TrendingUp, TrendingDown, Minus } from "lucide-react"
 import { pnlClass, fmtPct } from "@/lib/pnl"
+import { Badge, Empty, Shimmer, Stat, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/terminal"
 
 const SESSIONS = [
   { value: "ALL", label: "All" },
@@ -34,9 +29,7 @@ function EdgeTag({ edge }: { edge: string | null }) {
 }
 
 function StatCard({ label, value, tone }: { label: string; value: string; tone?: number | null }) {
-  const Icon = tone == null ? Minus : tone > 0 ? TrendingUp : TrendingDown
-  const color = pnlClass(tone) || "text-muted-foreground"
-  return <Card><CardContent className="flex flex-col items-center gap-1 py-4"><Icon className={`h-4 w-4 ${color}`} /><div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">{label}</div><div className={`font-mono text-xl font-bold tabular-nums ${color}`}>{value}</div></CardContent></Card>
+  return <Stat label={label} value={value} tone={tone == null || tone === 0 ? undefined : tone > 0 ? "gain" : "loss"} />
 }
 
 function fmtTs(ts: string | null) {
@@ -61,9 +54,9 @@ export function History({ symbols, loading }: { symbols: SymbolTimeline[]; loadi
   const [session, setSession] = useState<(typeof SESSIONS)[number]["value"]>("ALL")
 
   if (loading) return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-3 gap-2">{[1,2,3].map(i => <Skeleton key={i} className="h-24 w-full rounded-xl" />)}</div>
-      <Skeleton className="h-8 w-48" />{[1,2,3].map(i => <Skeleton key={i} className="h-10 w-full" />)}
+    <div className="space-y-1">
+      <div className="grid grid-cols-3 gap-2">{[1,2,3].map(i => <Shimmer key={i} className="h-24 w-full" />)}</div>
+      <Shimmer className="h-8 w-48" />{[1,2,3].map(i => <Shimmer key={i} className="h-[24px] w-full" />)}
     </div>
   )
 
@@ -75,29 +68,28 @@ export function History({ symbols, loading }: { symbols: SymbolTimeline[]; loadi
   const totalPnl = exitedEvents.reduce((s, e) => s + (e.exit_return_pct ?? 0), 0)
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap gap-1">
+    <div>
+      <div className="flex flex-wrap items-stretch border-b border-border">
         {SESSIONS.map(s => (
           <button
             key={s.value}
             onClick={() => setSession(s.value)}
-            className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+            className={`border-b-2 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.06em] transition-colors ${
               session === s.value
-                ? "bg-indigo-600 text-white"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                ? "border-accent text-foreground"
+                : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
             }`}
           >
             {s.label}
           </button>
         ))}
       </div>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-2 border-b border-border">
         <StatCard label="Win Rate" value={winRate != null ? `${winRate}%` : "—"} tone={winRate != null ? (winRate >= 50 ? 1 : -1) : null} />
         <StatCard label="Total P&L" value={exitedEvents.length > 0 ? fmtPct(totalPnl) : "—"} tone={totalPnl} />
       </div>
-      <Separator />
       {exitedEvents.length === 0 ? (
-        <Card className="border-dashed"><CardContent className="flex flex-col items-center py-10"><p className="text-sm font-semibold">No closed positions yet</p><p className="mt-1 text-xs text-muted-foreground">Positions are graded at their 1-day horizon.</p></CardContent></Card>
+        <Empty>No closed positions yet — positions are graded at their 1-day horizon.</Empty>
       ) : (
         groupByDayKey(exitedEvents, e => e.ts).map(g => (
           <div key={g.key} className="space-y-2">

@@ -1,9 +1,7 @@
 import { useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { api, type FilingAnswer, type FilingRow } from "@/lib/api"
-import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Badge, Btn, Empty, Widget, fieldCls } from "@/components/terminal"
 
 /** SEC filings, straight from EDGAR — free, no vendor, no API key. Pick a
  * filing, ask it a question. Every answer is backed only by verbatim quotes
@@ -32,68 +30,59 @@ export default function FilingsPage() {
   useEffect(() => { load(query) }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-lg font-bold tracking-tight">Filings</h1>
-        <p className="text-xs text-muted-foreground">
-          SEC EDGAR, straight from the source — free, complete, no vendor. Ask a
-          filing a question; every answer is a verbatim quote from the actual document,
-          never the model's paraphrase passed off as fact.
-        </p>
-      </div>
-
+    <div className="collage">
+      <Widget
+        span={12}
+        title="Filings"
+        subtitle="SEC EDGAR direct — every answer is a verbatim quote from the document, never a paraphrase passed off as fact"
+      >
       <form
-        className="flex flex-wrap items-center gap-2"
+        className="flex flex-wrap items-center gap-1.5 border-b border-border p-1"
         onSubmit={e => { e.preventDefault(); load(query.trim().toUpperCase()) }}
       >
         <input
           value={query}
           onChange={e => setQuery(e.target.value)}
           placeholder="Symbol"
-          className="h-9 w-32 rounded-md border bg-background px-3 text-sm font-mono uppercase"
+          className={`${fieldCls} w-24 font-mono uppercase`}
         />
-        <Button type="submit" size="sm" disabled={loading}>
+        <Btn type="submit" variant="accent" disabled={loading}>
           {loading ? "Loading…" : "Load"}
-        </Button>
-        {err && <span className="text-sm text-red-600">{err}</span>}
+        </Btn>
+        {err && <span className="text-[11px] text-loss">{err}</span>}
       </form>
 
       {filings && (
-        <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
-          <div className="space-y-1.5">
+        <div className="grid lg:grid-cols-[220px_1fr]">
+          <div className="border-r border-border">
             {filings.length === 0 ? (
-              <Card className="border-dashed"><CardContent className="py-6 text-center text-sm text-muted-foreground">
-                No filings found for {symbol}.
-              </CardContent></Card>
+              <Empty>No filings found for {symbol}.</Empty>
             ) : filings.map(f => (
               <button
                 key={f.accession}
                 onClick={() => setSelected(f)}
-                className={`block w-full rounded-lg border p-2.5 text-left text-sm transition-colors ${
+                className={`flex w-full items-center justify-between gap-2 border-b border-grid-line px-2 py-1 text-left transition-colors ${
                   selected?.accession === f.accession
-                    ? "border-indigo-500 bg-indigo-500/5"
+                    ? "bg-accent/15 text-foreground"
                     : "hover:bg-muted"
                 }`}
               >
-                <div className="flex items-center justify-between">
-                  <Badge variant="secondary">{f.form}</Badge>
-                  <span className="text-xs text-muted-foreground">{f.filing_date}</span>
-                </div>
+                <Badge variant={selected?.accession === f.accession ? "default" : "secondary"}>{f.form}</Badge>
+                <span className="num text-[10px] text-muted-foreground">{f.filing_date}</span>
               </button>
             ))}
           </div>
 
-          <div>
+          <div className="min-w-0">
             {selected ? (
               <FilingReader filing={selected} />
             ) : (
-              <Card className="border-dashed"><CardContent className="py-10 text-center text-sm text-muted-foreground">
-                Pick a filing on the left to read it or ask it something.
-              </CardContent></Card>
+              <Empty>Pick a filing on the left to read it or ask it something.</Empty>
             )}
           </div>
         </div>
       )}
+      </Widget>
     </div>
   )
 }
@@ -118,7 +107,7 @@ function FilingReader({ filing }: { filing: FilingRow }) {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-1">
       <div className="flex items-center justify-between">
         <div>
           <span className="text-sm font-semibold">{filing.symbol} {filing.form}</span>
@@ -130,30 +119,30 @@ function FilingReader({ filing }: { filing: FilingRow }) {
         </a>
       </div>
 
-      <form onSubmit={ask} className="flex gap-2">
+      <form onSubmit={ask} className="flex gap-1.5 px-2 pb-1">
         <input
           value={question}
           onChange={e => setQuestion(e.target.value)}
           placeholder="What did they say about margins, buybacks, litigation…?"
-          className="h-9 flex-1 rounded-md border bg-background px-3 text-sm"
+          className={`${fieldCls} flex-1`}
         />
-        <Button type="submit" size="sm" disabled={asking || !question.trim()}>
+        <Btn type="submit" variant="accent" disabled={asking || !question.trim()}>
           {asking ? "Asking…" : "Ask"}
-        </Button>
+        </Btn>
       </form>
 
-      {err && <p className="text-sm text-red-600">{err}</p>}
+      {err && <p className="px-2 text-[11px] text-loss">{err}</p>}
 
       {answer && (
-        <Card><CardContent className="space-y-2 py-4">
-          <p className="text-sm">{answer.answer}</p>
+        <div className="space-y-1.5 border-t border-border p-2">
+          <p className="text-[12px] leading-snug">{answer.answer}</p>
           {answer.citations.length > 0 ? (
             <div className="space-y-1.5 border-t border-border pt-2">
               <p className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
                 Verbatim, from the filing
               </p>
               {answer.citations.map((c, i) => (
-                <blockquote key={i} className="border-l-2 border-indigo-500/40 pl-2 text-xs text-muted-foreground">
+                <blockquote key={i} className="border-l-2 border-accent/50 pl-2 text-[11px] text-muted-foreground">
                   “{c.quote}”
                 </blockquote>
               ))}
@@ -164,7 +153,7 @@ function FilingReader({ filing }: { filing: FilingRow }) {
               treat it with caution.
             </p>
           )}
-        </CardContent></Card>
+        </div>
       )}
     </div>
   )

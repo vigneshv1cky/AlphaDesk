@@ -1,13 +1,9 @@
 import { useEffect, useState } from "react"
-import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Separator } from "@/components/ui/separator"
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { ChevronDown } from "lucide-react"
 import { api, type PerformanceInfo, type PerfTrade } from "@/lib/api"
 import { dirUp, dirWord } from "@/lib/plain"
 import { pnlClass, fmtPct } from "@/lib/pnl"
+import { Badge, Shimmer, Stat, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Widget } from "@/components/terminal"
 
 function fmtTs(ts: string | null): string {
   if (!ts) return "—"
@@ -18,14 +14,7 @@ function fmtTs(ts: string | null): string {
 }
 
 function StatCard({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: number | null }) {
-  const color = pnlClass(tone)
-  return (
-    <Card><CardContent className="flex flex-col items-center gap-1 py-3">
-      <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">{label}</div>
-      <div className={`font-mono text-lg font-bold tabular-nums ${color}`}>{value}</div>
-      {sub && <div className="text-[10px] text-muted-foreground">{sub}</div>}
-    </CardContent></Card>
-  )
+  return <Stat label={label} value={value} sub={sub} tone={tone == null || tone === 0 ? undefined : tone > 0 ? "gain" : "loss"} />
 }
 
 // Simple SVG equity curve — cumulative realized return (equal-weight book) and
@@ -132,35 +121,28 @@ function DeciderSplit({ by }: { by: PerformanceInfo["by_decider"] }) {
   const rows = (["HUMAN", "MACHINE"] as const).map(k => [k, by?.[k]] as const).filter(([, v]) => v)
   if (!rows.length) return null
   return (
-    <Card className="border-indigo-500/30"><CardContent className="py-4">
-      <div className="mb-0.5 text-sm font-bold tracking-tight">You vs. the machine</div>
-      <p className="mb-3 text-[11px] text-muted-foreground">
-        Same ledger, same forward grading vs SPY. The autonomous engine keeps booking on
-        paper as a control arm — this is the answer to whether judgment beats it.
-      </p>
-      <div className="grid gap-2 sm:grid-cols-2">
-        {rows.map(([who, s]) => (
-          <div key={who} className="rounded-lg border p-3">
-            <div className="flex items-baseline justify-between">
-              <span className="text-sm font-semibold">{who === "HUMAN" ? "You" : "Machine"}</span>
-              <span className="text-[11px] text-muted-foreground">{s!.n} trades</span>
-            </div>
-            <div className={`mt-1 font-mono text-xl font-bold tabular-nums ${pnlClass(s!.mean_alpha)}`}>
-              {s!.mean_alpha != null ? fmtPct(s!.mean_alpha, 3) : "—"}
-            </div>
-            <div className="text-[10px] text-muted-foreground">mean alpha vs SPY per trade</div>
-            <div className="mt-2 font-mono text-[11px] text-muted-foreground tabular-nums">
-              total {fmtPct(s!.pnl)} · win {s!.win_rate?.toFixed(0) ?? "—"}%
-            </div>
-          </div>
+    <Widget
+      title="You vs. the machine"
+      subtitle="mean alpha vs SPY per trade — same ledger, same forward grading"
+      span={12}
+    >
+      <div className="grid grid-cols-2">
+        {rows.map(([who, st]) => (
+          <Stat
+            key={who}
+            label={who === "HUMAN" ? "You" : "Machine"}
+            value={st!.mean_alpha != null ? fmtPct(st!.mean_alpha, 3) : "—"}
+            tone={st!.mean_alpha == null ? undefined : st!.mean_alpha >= 0 ? "gain" : "loss"}
+            sub={`${st!.n} trades · total ${fmtPct(st!.pnl)} · win ${st!.win_rate?.toFixed(0) ?? "—"}%`}
+          />
         ))}
       </div>
       {rows.length < 2 && (
-        <p className="mt-2 text-[11px] text-muted-foreground">
+        <div className="border-t border-grid-line px-2 py-1 text-[10px] text-muted-foreground">
           Only one arm has closed trades so far — the comparison needs both.
-        </p>
+        </div>
       )}
-    </CardContent></Card>
+    </Widget>
   )
 }
 
@@ -175,57 +157,48 @@ export default function PerformancePage() {
   }, [])
 
   if (!data) return (
-    <div className="space-y-3">
-      <Skeleton className="h-8 w-56" />
-      <div className="grid grid-cols-4 gap-2">{[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-24 w-full rounded-xl" />)}</div>
-      <Skeleton className="h-48 w-full rounded-xl" />
+    <div className="collage">
+      <Widget span={12} bodyClassName="grid grid-cols-4">{[1, 2, 3, 4].map(i => <Shimmer key={i} className="m-2 h-9" />)}</Widget>
+      <Widget span={12}><Shimmer className="m-2 h-40" /></Widget>
     </div>
   )
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-lg font-bold tracking-tight">Performance</h1>
-        <p className="text-xs text-muted-foreground">
-          Realized results over the last {data.days} days — normalized $10/trade for comparison,
-          every position exits at its session close.
-        </p>
-      </div>
-
-      <div className="grid grid-cols-4 gap-2">
+    <div className="collage">
+      <Widget
+        span={12}
+        title="Performance"
+        subtitle={`last ${data.days}d · normalized $10/trade · every position exits at its session close`}
+        bodyClassName="grid grid-cols-4"
+      >
         <StatCard label="Total P&L" value={fmtPct(data.total_return)} sub={`${data.n} exits`} tone={data.total_return} />
         <StatCard label="Win Rate" value={data.win_rate != null ? `${data.win_rate.toFixed(0)}%` : "—"} tone={data.win_rate != null ? (data.win_rate >= 50 ? 1 : -1) : null} />
         <StatCard label="Max Drawdown" value={`−${data.max_drawdown.toFixed(2)}%`} sub="peak-to-trough" tone={data.max_drawdown > 0 ? -1 : null} />
         <StatCard label="Sharpe" value={data.trade_sharpe != null ? data.trade_sharpe.toFixed(2) : "—"} sub={data.daily_sharpe != null ? `daily ${data.daily_sharpe.toFixed(2)}` : "per trade"} tone={data.trade_sharpe} />
-      </div>
+      </Widget>
 
       {/* The actual open question this whole rebuild exists to answer — does a
           human's judgment beat the machine's — goes first, not buried below
           the equity curve as one more tile. */}
       <DeciderSplit by={data.by_decider} />
 
-      <Card><CardContent className="py-4">
+      <Widget span={7} title="Equity curve" bodyClassName="p-2">
         <EquityChart curve={data.curve} />
-      </CardContent></Card>
+      </Widget>
 
-      <div className="grid grid-cols-3 gap-2">
+      <Widget span={5} title="By session" bodyClassName="grid grid-cols-3">
         {Object.entries(data.per_market).map(([s, pm]) => (
-          <Card key={s}><CardContent className="flex flex-col items-center gap-1 py-3">
-            <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-              {s === "PRE" ? "Pre-Market" : s === "OPEN" ? "Open Market" : s === "AFTER" ? "After Hours" : s}
-            </div>
-            <div className={`font-mono text-lg font-bold tabular-nums ${pnlClass(pm.pnl)}`}>
-              {fmtPct(pm.pnl)}
-            </div>
-            <div className="text-[10px] text-muted-foreground">{pm.n} trades · {pm.wins} wins</div>
-          </CardContent></Card>
+          <Stat
+            key={s}
+            label={s === "PRE" ? "Pre" : s === "OPEN" ? "Open" : s === "AFTER" ? "After" : s}
+            value={fmtPct(pm.pnl)}
+            tone={pm.pnl >= 0 ? "gain" : "loss"}
+            sub={`${pm.n} trades · ${pm.wins} wins`}
+          />
         ))}
-      </div>
+      </Widget>
 
-      <Separator />
-
-      <div>
-        <h2 className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">All exits — click for the drill-down</h2>
+      <Widget span={12} title="All exits" subtitle="click a row for the drill-down">
         <Table>
           <TableHeader><TableRow>
             <TableHead>Symbol</TableHead>
@@ -240,7 +213,7 @@ export default function PerformancePage() {
             {data.trades.map(t => <TradeRow key={String(t.id)} t={t} />)}
           </TableBody>
         </Table>
-      </div>
+      </Widget>
     </div>
   )
 }

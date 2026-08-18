@@ -4,11 +4,10 @@ import { api, type LivePick, type SymbolTimeline, type EarningsRow } from "@/lib
 import { useTheme } from "@/lib/theme"
 import { Header } from "@/components/Header"
 import { Nav } from "@/components/Nav"
-import { Button } from "@/components/ui/button"
-import { Separator } from "@/components/ui/separator"
 import { Moon, Monitor, Sun } from "lucide-react"
 
 // Lazy routes — each page is its own chunk, so it loads like a real page.
+const DashboardPage = lazy(() => import("@/pages/DashboardPage"))
 const ScreenerPage = lazy(() => import("@/pages/ScreenerPage"))
 const FilingsPage = lazy(() => import("@/pages/FilingsPage"))
 const ResearchPage = lazy(() => import("@/pages/ResearchPage"))
@@ -20,6 +19,7 @@ const EarningsPage = lazy(() => import("@/pages/EarningsPage"))
 const SystemPage = lazy(() => import("@/pages/SystemPage"))
 
 const TITLES: Record<string, string> = {
+  "/dashboard": "Dashboard · AlphaDesk",
   "/screener": "Screener · AlphaDesk",
   "/filings": "Filings · AlphaDesk",
   "/research": "Research · AlphaDesk",
@@ -80,29 +80,32 @@ function Shell() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
-      <header className="z-30 shrink-0 border-b border-border bg-background/85 backdrop-blur">
-        <div className="mx-auto flex max-w-[1440px] items-center gap-3 px-5 py-2.5">
-          <div className="flex items-center gap-2.5">
-            <span className="h-3.5 w-3.5 rotate-45 rounded-[3px] bg-indigo-500" />
-            <div className="leading-none">
-              <div className="text-sm font-bold tracking-tight">AlphaDesk</div>
-              <div className="mt-0.5 text-[10px] text-muted-foreground">You decide. The desk watches.</div>
-            </div>
-          </div>
-          <Separator orientation="vertical" className="mx-1 h-8" />
-          <Nav />
-          <div className="flex-1" />
-          <Header liveOpenCount={liveOpen} />
-          <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label="Toggle theme" className="h-8 w-8 shrink-0">
-            {theme === "dark" ? <Moon className="h-4 w-4" /> : theme === "light" ? <Sun className="h-4 w-4" /> : <Monitor className="h-4 w-4" />}
-          </Button>
+      {/* Single 30px header bar. No max-width container anywhere in the shell:
+          a data-dense terminal uses the full width of the display, and a
+          centred 1200px column would waste half a monitor. */}
+      <header className="z-30 flex h-[30px] shrink-0 items-stretch border-b border-border bg-panel-header">
+        <div className="flex shrink-0 items-center gap-1.5 px-2">
+          <span className="h-2 w-2 bg-accent" />
+          <span className="text-[11px] font-bold tracking-[0.06em]">ALPHADESK</span>
         </div>
+        <div className="w-px shrink-0 bg-border" />
+        <Nav />
+        <div className="min-w-0 flex-1" />
+        <Header liveOpenCount={liveOpen} />
+        <button
+          onClick={toggleTheme}
+          aria-label="Toggle theme"
+          className="flex w-8 shrink-0 items-center justify-center border-l border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          {theme === "dark" ? <Moon className="h-3 w-3" /> : theme === "light" ? <Sun className="h-3 w-3" /> : <Monitor className="h-3 w-3" />}
+        </button>
       </header>
       <main className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-[1200px] space-y-4 px-5 py-5">
-          <Suspense fallback={<div className="text-sm text-muted-foreground">Loading…</div>}>
+        <div className="p-1">
+          <Suspense fallback={<div className="p-2 text-[11px] text-muted-foreground">loading…</div>}>
             <Routes>
-              <Route path="/" element={<Navigate to="/screener" replace />} />
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/screener" element={<ScreenerPage />} />
               <Route path="/filings" element={<FilingsPage />} />
               <Route path="/research" element={<ResearchPage />} />
@@ -116,7 +119,7 @@ function Shell() {
                   it was a near-duplicate of Live+History filtered to one session, a leftover
                   of the old multi-session bot loop. */}
               <Route path="/open" element={<Navigate to="/live" replace />} />
-              <Route path="*" element={<Navigate to="/screener" replace />} />
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
           </Suspense>
         </div>

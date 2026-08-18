@@ -1,14 +1,10 @@
 import { useState } from "react"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Badge } from "@/components/ui/badge"
-import { Card, CardContent } from "@/components/ui/card"
-import { Separator } from "@/components/ui/separator"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
-import { RefreshCw, Target, ShieldAlert, TrendingUp, Activity } from "lucide-react"
+import { RefreshCw, Target, ShieldAlert } from "lucide-react"
 import { dirUp, dirWord } from "@/lib/plain"
 import type { LivePick } from "@/lib/api"
 import { pnlClass, fmtUsd } from "@/lib/pnl"
+import { Badge, Empty, Shimmer, Stat, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Tag } from "@/components/terminal"
+import { InfoTip } from "@/components/InfoTip"
 
 const SESSIONS = [
   { value: "ALL", label: "All" },
@@ -56,70 +52,59 @@ export function LivePositions({ rows, market, loading }: { rows: LivePick[]; mar
 
   if (loading) return (
     <div className="space-y-2">
-      <Skeleton className="h-8 w-48" />
-      {[1,2,3].map(i => <Skeleton key={i} className="h-10 w-full" />)}
+      <Shimmer className="h-8 w-48" />
+      {[1,2,3].map(i => <Shimmer key={i} className="h-[24px] w-full" />)}
     </div>
   )
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap gap-1">
+    <div>
+      <div className="flex flex-wrap items-stretch border-b border-border">
         {SESSIONS.map(s => (
           <button
             key={s.value}
             onClick={() => setSession(s.value)}
-            className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+            className={`border-b-2 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.06em] transition-colors ${
               session === s.value
-                ? "bg-indigo-600 text-white"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                ? "border-accent text-foreground"
+                : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
             }`}
           >
             {s.label}
           </button>
         ))}
       </div>
-      <div className="grid grid-cols-3 gap-2">
-        <Card><CardContent className="flex flex-col items-center gap-1 py-3">
-          <Activity className="h-4 w-4 text-muted-foreground" />
-          <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Positions</div>
-          <div className="font-mono text-lg font-bold tabular-nums">{filtered.length}</div>
-        </CardContent></Card>
-        <Card><CardContent className="flex flex-col items-center gap-1 py-3">
-          <TrendingUp className={`h-4 w-4 ${(winRate ?? 50) >= 50 ? "text-gain" : "text-loss"}`} />
-          <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Win Rate</div>
-          <div className={`font-mono text-lg font-bold tabular-nums ${(winRate ?? 50) >= 50 ? "text-gain" : "text-loss"}`}>
-            {winRate != null ? `${winRate}%` : "—"}
-          </div>
-          <div className="text-[10px] text-muted-foreground">{up}/{down} open</div>
-        </CardContent></Card>
-        <Card><CardContent className="flex flex-col items-center gap-1 py-3">
-          <TrendingUp className={`h-4 w-4 ${pnlUsd >= 0 ? "text-gain" : "text-loss"}`} />
-          <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Live P&amp;L</div>
-          <div className={`font-mono text-lg font-bold tabular-nums ${pnlUsd >= 0 ? "text-gain" : "text-loss"}`}>{fmtUsd(pnlUsd)}</div>
-          <div className="text-[10px] text-muted-foreground">normalized $10/trade · {pnlCount} open</div>
-        </CardContent></Card>
+      <div className="grid grid-cols-3 border-b border-border">
+        <Stat label="Positions" value={filtered.length} />
+        <Stat
+          label="Win rate"
+          value={winRate != null ? `${winRate}%` : "—"}
+          tone={(winRate ?? 50) >= 50 ? "gain" : "loss"}
+          sub={`${up}/${down} open`}
+        />
+        <Stat
+          label="Live P&L"
+          value={fmtUsd(pnlUsd)}
+          tone={pnlUsd >= 0 ? "gain" : "loss"}
+          sub={`normalized $10/trade · ${pnlCount} open`}
+        />
       </div>
-      <Separator />
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+      <div className="flex items-center gap-1.5 border-b border-border px-2 py-1 text-[10px] text-muted-foreground">
         <RefreshCw className="h-3 w-3" />
-        <span>Live · 15s</span>
-        <Separator orientation="vertical" className="h-3" />
-        <Badge variant={market === "OPEN" ? "default" : "secondary"} className={market === "OPEN" ? "bg-emerald-500/15 text-emerald-500" : ""}>{market}</Badge>
+        <span>live · 15s</span>
+        <Tag tone={market === "OPEN" ? "gain" : "neutral"}>{market}</Tag>
       </div>
       {filtered.length === 0 ? (
-        <Card className="border-dashed"><CardContent className="flex flex-col items-center py-10">
-          <p className="text-sm font-semibold">No open positions{session !== "ALL" ? ` in ${session}` : ""}</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Nothing books itself — head to <a href="/screener" className="underline hover:text-foreground">Screener</a> to
-            find something worth trading.
-          </p>
-        </CardContent></Card>
+        <Empty>
+          No open positions{session !== "ALL" ? ` in ${session}` : ""} — nothing books itself.{" "}
+          <a href="/screener" className="underline hover:text-foreground">Screener</a> to find something worth trading.
+        </Empty>
       ) : (
         <Table>
           <TableHeader><TableRow>
             <TableHead>Symbol</TableHead><TableHead>Dir</TableHead><TableHead className="text-right">Score</TableHead><TableHead className="text-right">Entry</TableHead><TableHead className="text-right">Now</TableHead><TableHead className="text-right">P&L</TableHead>
-            <TableHead className="text-right"><Tooltip><TooltipTrigger><span className="inline-flex items-center gap-1"><Target className="h-3 w-3" />Tgt</span></TooltipTrigger><TooltipContent>ATR-based target</TooltipContent></Tooltip></TableHead>
-            <TableHead className="text-right"><Tooltip><TooltipTrigger><span className="inline-flex items-center gap-1"><ShieldAlert className="h-3 w-3" />Stop</span></TooltipTrigger><TooltipContent>ATR-based stop</TooltipContent></Tooltip></TableHead>
+            <TableHead className="text-right"><InfoTip tip="ATR-based target"><span className="inline-flex items-center gap-1"><Target className="h-3 w-3" />Tgt</span></InfoTip></TableHead>
+            <TableHead className="text-right"><InfoTip tip="ATR-based stop"><span className="inline-flex items-center gap-1"><ShieldAlert className="h-3 w-3" />Stop</span></InfoTip></TableHead>
             <TableHead className="text-right">Age</TableHead>
           </TableRow></TableHeader>
           <TableBody>{filtered.map(p => {

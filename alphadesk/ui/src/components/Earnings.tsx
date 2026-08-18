@@ -1,16 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react"
 import { ChevronDown, Search } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import { type EarningsRow } from "@/lib/api"
 import { InfoTip } from "@/components/InfoTip"
-import { Badge } from "@/components/ui/badge"
-import { Card } from "@/components/ui/card"
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
+import { Badge, Button, Empty, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Widget, fieldCls } from "@/components/terminal"
 
 function Panel({
   title,
@@ -37,49 +29,40 @@ function Panel({
     // controlled Collapsible: keeps the exact chevron/count/sub look while adding
     // the animated height reveal + aria-expanded/controls for free.
     return (
-      <Collapsible
-        open={open}
-        onOpenChange={setOpen}
-        className="rounded-lg border border-border bg-card p-4"
-      >
-        <CollapsibleTrigger
-          render={
-            <Button variant="ghost" className="group -mx-1 h-auto w-full justify-start gap-2 rounded-md px-1 py-0.5 text-left" />
-          }
+      // Plain button + conditional render, replacing the Base UI Collapsible.
+      // The animated height reveal it provided is not worth a dependency here:
+      // these sections hold long tables, and animating their height on every
+      // toggle is exactly the motion a dense grid should not have.
+      <div className="border border-border bg-panel">
+        <button
+          type="button"
+          onClick={() => setOpen(o => !o)}
+          aria-expanded={open}
+          className="group flex h-[26px] w-full items-center gap-2 border-b border-border bg-panel-header px-2 text-left hover:bg-muted"
         >
-          <span className="text-xs font-semibold uppercase tracking-wider text-foreground/75">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-foreground/80">
             {title}
           </span>
-          {count != null && (
-            <Badge variant="secondary" className="tabular-nums">
-              {count}
-            </Badge>
-          )}
+          {count != null && <Badge variant="secondary">{count}</Badge>}
           <ChevronDown
-            className={`ml-auto h-4 w-4 shrink-0 text-muted-foreground/70 transition-transform group-hover:text-foreground ${
+            className={`ml-auto h-3 w-3 shrink-0 text-muted-foreground transition-transform group-hover:text-foreground ${
               open ? "" : "-rotate-90"
             }`}
           />
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          {sub && <div className="mb-2 mt-1 px-1 text-[11px] text-muted-foreground">{sub}</div>}
-          {children}
-        </CollapsibleContent>
-      </Collapsible>
+        </button>
+        {open && (
+          <>
+            {sub && <div className="px-2 py-1 text-[10px] text-muted-foreground">{sub}</div>}
+            {children}
+          </>
+        )}
+      </div>
     )
   }
   return (
-    <Card>
-      {title && (
-        <div className="mb-2">
-          <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            {title}
-          </div>
-          {sub && <div className="text-[11px] text-muted-foreground">{sub}</div>}
-        </div>
-      )}
+    <Widget title={title} subtitle={sub}>
       {children}
-    </Card>
+    </Widget>
   )
 }
 
@@ -195,7 +178,7 @@ function CoverageSummary({ reported }: { reported: EarningsRow[] }) {
     .filter((e) => assess(e)?.label === "true miss")
     .sort((a, b) => Math.abs(capturable(b)) - Math.abs(capturable(a)))[0]
   return (
-    <div className="mb-2 rounded-md bg-muted/40 px-2.5 py-2 text-[11px]">
+    <div className="mb-2 bg-muted/40 px-2.5 py-2 text-[11px]">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="font-medium text-muted-foreground">Desk coverage</span>
         <span className="text-emerald-600 dark:text-emerald-400">{took} took</span>
@@ -322,7 +305,7 @@ function RunGroup({
       <Button
         variant="ghost"
         onClick={() => setOpen((v) => !v)}
-        className="group -mx-1 flex h-auto w-full items-center gap-2 rounded-md px-1 py-1 text-left"
+        className="group -mx-1 flex h-auto w-full items-center gap-2 px-1 py-1 text-left"
       >
         <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
           {g.day === "—" ? "Run time n/a" : `Run ${dayLabel(g.day)} · 9:30 ET`}
@@ -391,7 +374,7 @@ function ReportedDayBlock({
       <Button
         variant="ghost"
         onClick={() => setOpen((v) => !v)}
-        className="group -mx-1 flex h-auto w-full items-center gap-2 rounded-md px-1 py-1 text-left"
+        className="group -mx-1 flex h-auto w-full items-center gap-2 px-1 py-1 text-left"
       >
         <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
           Reported {dayLabel(g.day)}
@@ -443,7 +426,7 @@ export function Earnings({
       <Panel>
         <div className="flex items-center gap-3 py-3">
           <div className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
-          <p className="text-sm text-muted-foreground">Loading earnings calendar…</p>
+          <p className="text-[11px] text-muted-foreground">Loading earnings calendar…</p>
         </div>
       </Panel>
     )
@@ -451,7 +434,7 @@ export function Earnings({
   if (earnings.reported.length === 0 && earnings.upcoming.length === 0) {
     return (
       <Panel>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-[11px] text-muted-foreground">
           No earnings on the calendar yet — it refreshes a few times a day.
         </p>
       </Panel>
@@ -474,22 +457,20 @@ export function Earnings({
   const noMatches = searching && filteredReported.length === 0 && filteredUpcoming.length === 0
 
   return (
-    <div className="space-y-3">
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+    <div>
+      <div className="relative border-b border-border p-1">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
         <input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search by symbol…"
-          className="h-8 w-full rounded-md border border-border bg-card pl-8 pr-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 sm:w-64"
+          className={`${fieldCls} w-full pl-6 sm:w-64`}
         />
       </div>
 
       {noMatches && (
-        <Card>
-          <p className="text-sm text-muted-foreground">No matches for "{query.trim()}".</p>
-        </Card>
+        <Empty>No matches for "{query.trim()}".</Empty>
       )}
 
       {filteredReported.length > 0 && (
@@ -498,7 +479,7 @@ export function Earnings({
           sub="capturable drift from the first post-report open — the uncapturable overnight gap is shown separately and excluded from the verdict"
         >
           <CoverageSummary reported={filteredReported} />
-          <div className="space-y-3">
+          <div className="space-y-1">
             {groupByDay(filteredReported, (e) => e.report_date.slice(0, 10)).map((g) => (
               <ReportedDayBlock key={g.day} g={g} forceExpanded={searching} />
             ))}
@@ -508,7 +489,7 @@ export function Earnings({
 
       {filteredUpcoming.length > 0 && (
         <Panel title="Reporting soon" sub="grouped by when to run the desk — biggest names first">
-          <div className="space-y-3">
+          <div className="space-y-1">
             {groupByDay(filteredUpcoming, (e) => (e.run_at ?? "").slice(0, 10) || "—").map((g) => (
               <RunGroup key={g.day} g={g} forceExpanded={searching} />
             ))}
