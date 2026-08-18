@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react"
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom"
-import { api, type LivePick, type SymbolTimeline, type EarningsRow } from "@/lib/api"
+import { type LivePick, type SymbolTimeline, type EarningsRow } from "@/lib/api"
+import { useEarnings, useLive, useTimelines } from "@/lib/queries"
 import { useTheme } from "@/lib/theme"
 import { Header } from "@/components/Header"
 import { Nav } from "@/components/Nav"
@@ -35,45 +36,25 @@ function Shell() {
   const { pathname } = useLocation()
   const [theme, toggleTheme] = useTheme()
 
-  // All data lives here — survives page navigation (real multipage URLs, SPA data).
-  const [liveRows, setLiveRows] = useState<LivePick[]>([])
-  const [market, setMarket] = useState("")
-  const [liveLoaded, setLiveLoaded] = useState(false)
-  const [liveOpen, setLiveOpen] = useState(0)
+  // Data comes from shared queries keyed by endpoint, NOT from local state +
+  // setInterval. The dashboard asks for /api/live and /api/earnings too; with
+  // query keys those callers collapse into one request and one cache entry
+  // instead of each running its own timer against the same endpoint.
+  const live = useLive()
+  const timelines = useTimelines()
 
-  const [symbols, setSymbols] = useState<SymbolTimeline[]>([])
-  const [historyLoaded, setHistoryLoaded] = useState(false)
+  const liveRows: LivePick[] = live.data?.live ?? []
+  const market = live.data?.market ?? ""
+  const liveOpen = liveRows.length
+  const symbols: SymbolTimeline[] = timelines.data?.symbols ?? []
 
-  const [earnings, setEarnings] = useState<{ upcoming: EarningsRow[]; reported: EarningsRow[] } | null>(null)
-
-  // Live: 15s poll
-  useEffect(() => {
-    let alive = true
-    const load = () => api.live().then(d => { if (!alive) return; setLiveRows(d.live); setMarket(d.market); setLiveLoaded(true); setLiveOpen(d.live.length) }).catch(() => {})
-    load()
-    const t = setInterval(load, 15_000)
-    return () => { alive = false; clearInterval(t) }
-  }, [])
-
-  // History: 60s poll
-  useEffect(() => {
-    let alive = true
-    const load = () => api.timelines().then(d => { if (alive) { setSymbols(d.symbols); setHistoryLoaded(true) } }).catch(() => {})
-    load()
-    const t = setInterval(load, 60_000)
-    return () => { alive = false; clearInterval(t) }
-  }, [])
-
-  // Earnings: lazy — fetch once the Earnings page is first visited, then 5min poll
+  // Earnings stays lazy — it is the most expensive endpoint, so it is not
+  // fetched until the Earnings page has been visited at least once.
   const [earningsVisited, setEarningsVisited] = useState(false)
   useEffect(() => { if (pathname === "/earnings") setEarningsVisited(true) }, [pathname])
-  useEffect(() => {
-    if (!earningsVisited) return
-    const load = () => api.earnings().then(d => setEarnings(d || { upcoming: [], reported: [] })).catch(() => setEarnings(prev => prev ?? { upcoming: [], reported: [] }))
-    load()
-    const t = setInterval(load, 300_000)
-    return () => clearInterval(t)
-  }, [earningsVisited])
+  const earningsQuery = useEarnings(earningsVisited)
+  const earnings: { upcoming: EarningsRow[]; reported: EarningsRow[] } | null =
+    earningsVisited ? (earningsQuery.data ?? { upcoming: [], reported: [] }) : null
 
   // Per-page document title
   useEffect(() => { document.title = TITLES[pathname] ?? "AlphaDesk" }, [pathname])
@@ -111,8 +92,8 @@ function Shell() {
               <Route path="/research" element={<ResearchPage />} />
               <Route path="/trade" element={<TradePage />} />
               <Route path="/performance" element={<PerformancePage />} />
-              <Route path="/live" element={<LivePage rows={liveRows} market={market} loading={!liveLoaded} />} />
-              <Route path="/history" element={<HistoryPage symbols={symbols} loading={!historyLoaded} />} />
+              <Route path="/live" element={<LivePage rows={liveRows} market={market} loading={live.isPending} />} />
+              <Route path="/history" element={<HistoryPage symbols={symbols} loading={timelines.isPending} />} />
               <Route path="/earnings" element={<EarningsPage earnings={earnings} />} />
               <Route path="/system" element={<SystemPage />} />
               {/* /open merged into Live (session filter) — MarketPage.tsx deleted 2026-08-17,

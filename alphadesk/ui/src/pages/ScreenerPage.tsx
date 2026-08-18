@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react"
-import { Link } from "react-router-dom"
-import { api, type ScreenerAnswer, type ScreenerRow } from "@/lib/api"
-import { Btn, Empty, Tag, Widget, areaCls } from "@/components/terminal"
+import { useState } from "react"
+import { api, type ScreenerAnswer } from "@/lib/api"
+import { useScreener } from "@/lib/queries"
+import { Btn, Empty, Widget, areaCls } from "@/components/terminal"
+import { WindowTable } from "@/components/WindowTable"
 
 /** The front door — an inventory of what's in the window, and an AI you ask.
  *
@@ -12,18 +13,9 @@ import { Btn, Empty, Tag, Widget, areaCls } from "@/components/terminal"
  * article and report, across every symbol) and answers it, citing numbered
  * items resolved server-side back to real stored records. */
 export default function ScreenerPage() {
-  const [rows, setRows] = useState<ScreenerRow[] | null>(null)
-  const [err, setErr] = useState<string | null>(null)
-
-  useEffect(() => {
-    let alive = true
-    const load = () => api.screener()
-      .then(d => { if (alive) setRows(d.symbols) })
-      .catch(e => { if (alive) setErr(String(e.message ?? e)) })
-    load()
-    const t = setInterval(load, 60_000)
-    return () => { alive = false; clearInterval(t) }
-  }, [])
+  const { data, error } = useScreener()
+  const rows = data?.symbols ?? null
+  const err = error ? String(error.message ?? error) : null
 
   const withNews = rows?.filter(r => r.article_count > 0).length ?? 0
   const reporting = rows?.filter(r => r.report_date).length ?? 0
@@ -46,7 +38,7 @@ export default function ScreenerPage() {
         {rows !== null && rows.length === 0 && (
           <Empty>nothing in the window — no upcoming earnings and no fresh news</Empty>
         )}
-        {rows?.map(r => <ScreenerRowItem key={r.symbol} row={r} />)}
+        {rows !== null && rows.length > 0 && <WindowTable rows={rows} />}
       </Widget>
     </div>
   )
@@ -127,41 +119,4 @@ function AskBox() {
   )
 }
 
-function daysUntil(dateStr: string | null): string | null {
-  if (!dateStr) return null
-  const d = Math.round((new Date(dateStr + "T00:00:00").getTime() - Date.now()) / 86_400_000)
-  if (d < 0) return null
-  if (d === 0) return "reports today"
-  if (d === 1) return "reports tomorrow"
-  return `reports in ${d}d`
-}
 
-function ScreenerRowItem({ row }: { row: ScreenerRow }) {
-  const due = daysUntil(row.report_date)
-  return (
-    <div className="border-b border-grid-line px-2 py-1 last:border-b-0 hover:bg-muted/40">
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="num text-[12px] font-bold">{row.symbol}</span>
-        {due && <Tag tone="accent">{due}</Tag>}
-        {row.article_count > 0 && (
-          <span className="num text-[10px] text-muted-foreground">{row.article_count} art</span>
-        )}
-        <div className="flex-1" />
-        <Link to={`/research?symbol=${encodeURIComponent(row.symbol)}`}><Btn variant="ghost">research</Btn></Link>
-        <Link to={`/filings?symbol=${encodeURIComponent(row.symbol)}`}><Btn variant="ghost">filings</Btn></Link>
-        <Link to={`/trade?symbol=${encodeURIComponent(row.symbol)}`}><Btn>trade →</Btn></Link>
-      </div>
-      {row.headlines.length > 0 && (
-        <div className="mt-0.5 space-y-0.5">
-          {row.headlines.slice(0, 3).map((h, i) => (
-            <a key={i} href={h.url} target="_blank" rel="noreferrer"
-              className="block truncate text-[11px] text-muted-foreground hover:text-foreground hover:underline">
-              {h.title}
-              <span className="ml-1.5 text-[10px] text-muted-foreground/70">— {h.source}</span>
-            </a>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}

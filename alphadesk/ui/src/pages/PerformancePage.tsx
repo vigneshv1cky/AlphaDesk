@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { ChevronDown } from "lucide-react"
-import { api, type PerformanceInfo, type PerfTrade } from "@/lib/api"
+import { type PerformanceInfo, type PerfTrade } from "@/lib/api"
+import { usePerformance } from "@/lib/queries"
 import { dirUp, dirWord } from "@/lib/plain"
 import { pnlClass, fmtPct } from "@/lib/pnl"
 import { Badge, Shimmer, Stat, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Widget } from "@/components/terminal"
@@ -147,14 +148,7 @@ function DeciderSplit({ by }: { by: PerformanceInfo["by_decider"] }) {
 }
 
 export default function PerformancePage() {
-  const [data, setData] = useState<PerformanceInfo | null>(null)
-  useEffect(() => {
-    let alive = true
-    const load = () => api.performance().then(d => { if (alive) setData(d) }).catch(() => {})
-    load()
-    const t = setInterval(load, 60_000)
-    return () => { alive = false; clearInterval(t) }
-  }, [])
+  const { data } = usePerformance(30)
 
   if (!data) return (
     <div className="collage">

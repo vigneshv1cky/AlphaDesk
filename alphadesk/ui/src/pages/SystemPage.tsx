@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react"
-import { api, type SystemInfo } from "@/lib/api"
+import { useSystem } from "@/lib/queries"
 import { Shimmer, Stat, Widget } from "@/components/terminal"
 
 function fmtAgo(ts: string | null): string {
@@ -23,14 +22,7 @@ function StatCard({ label, value, sub, tone }: { label: string; value: string; s
  * autonomous entry engine, deleted 2026-08-16, and would now be permanently
  * frozen numbers pretending to be live. */
 export default function SystemPage() {
-  const [info, setInfo] = useState<SystemInfo | null>(null)
-  useEffect(() => {
-    let alive = true
-    const load = () => api.system().then(d => { if (alive) setInfo(d) }).catch(() => {})
-    load()
-    const t = setInterval(load, 30_000)
-    return () => { alive = false; clearInterval(t) }
-  }, [])
+  const { data: info } = useSystem()
 
   if (!info) return (
     <div className="collage">

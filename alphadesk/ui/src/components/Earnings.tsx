@@ -319,6 +319,7 @@ function RunGroup({
       </Button>
       {open && (
         <>
+          <div className="max-h-[420px] overflow-y-auto">
           <Table>
             <TableHeader><TableRow>
               <TableHead>Symbol</TableHead>
@@ -337,9 +338,9 @@ function RunGroup({
               ))}
             </TableBody>
           </Table>
+          </div>
           <Button
             variant="ghost"
-            size="xs"
             onClick={() => setOpen(false)}
             className="mt-1 font-medium"
           >
@@ -388,6 +389,7 @@ function ReportedDayBlock({
       </Button>
       {open && (
         <>
+          <div className="max-h-[420px] overflow-y-auto">
           <Table>
             <TableHeader><TableRow>
               <TableHead>Symbol</TableHead>
@@ -404,8 +406,9 @@ function ReportedDayBlock({
               ))}
             </TableBody>
           </Table>
+          </div>
           <div className="py-2 text-center">
-            <Button variant="ghost" size="sm" onClick={() => setOpen(false)} className="text-xs">
+            <Button variant="ghost" onClick={() => setOpen(false)} className="text-xs">
               − show less
             </Button>
           </div>

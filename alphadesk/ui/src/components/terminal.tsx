@@ -274,8 +274,8 @@ export function Badge({
 }
 
 export function Button({
-  variant = "default", size, className, ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string }) {
+  variant = "default", className, ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string }) {
   return (
     <button
       {...props}

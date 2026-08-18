@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react"
-import { api, type Stats } from "@/lib/api"
+import { useStats } from "@/lib/queries"
 import { pnlClass } from "@/lib/pnl"
 
 /** The header readout — a compact ticker strip, not a row of cards. Values are
@@ -14,13 +13,7 @@ function Cell({ label, value, tone }: { label: string; value: string; tone?: num
 }
 
 export function Header({ liveOpenCount }: { liveOpenCount?: number }) {
-  const [stats, setStats] = useState<Stats | null>(null)
-  useEffect(() => {
-    const load = () => api.stats().then(setStats).catch(() => {})
-    load()
-    const i = setInterval(load, 60_000)
-    return () => clearInterval(i)
-  }, [])
+  const { data: stats } = useStats()
 
   const t = stats?.total
   const graded = t?.graded ?? 0

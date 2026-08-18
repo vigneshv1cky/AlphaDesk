@@ -1,6 +1,5 @@
 import { Link } from "react-router-dom"
-import { api } from "@/lib/api"
-import { usePoll } from "@/lib/poll"
+import { useEarnings, useLive, usePerformance, useScreener, useSystem } from "@/lib/queries"
 import { Pnl } from "@/lib/pnl"
 import { Spark } from "@/components/Spark"
 import { Btn, Empty, Stat, TD, TH, THead, TR, Table, Tag, Widget } from "@/components/terminal"
@@ -16,11 +15,13 @@ import { Btn, Empty, Stat, TD, TH, THead, TR, Table, Tag, Widget } from "@/compo
  * that data actually moves — prices in seconds, the earnings calendar in
  * minutes — so one slow endpoint never blocks the rest of the grid. */
 export default function DashboardPage() {
-  const live = usePoll(() => api.live(), 15_000)
-  const perf = usePoll(() => api.performance(30), 60_000)
-  const screener = usePoll(() => api.screener(), 60_000)
-  const system = usePoll(() => api.system(), 30_000)
-  const earnings = usePoll(() => api.earnings(), 300_000)
+  // Same query keys the app shell uses, so /api/live and /api/earnings are
+  // fetched once for the whole page rather than once per consumer.
+  const live = useLive()
+  const perf = usePerformance(30)
+  const screener = useScreener()
+  const system = useSystem()
+  const earnings = useEarnings()
 
   const rows = live.data?.live ?? []
   const p = perf.data
