@@ -7,10 +7,7 @@ const LINKS = [
   { to: "/dashboard", label: "Dashboard" },
   { to: "/screener", label: "Screener" },
   { to: "/filings", label: "Filings" },
-  { to: "/trade", label: "Trade" },
-  { to: "/performance", label: "Performance" },
-  { to: "/live", label: "Live" },
-  { to: "/history", label: "History" },
+  { to: "/chart", label: "Chart" },
   { to: "/earnings", label: "Earnings" },
   { to: "/system", label: "Health" },
 ]

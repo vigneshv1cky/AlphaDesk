@@ -78,17 +78,17 @@ export default function SystemPage() {
         </div>
       </Widget>
 
-      <Widget span={12} title="Ground rules">
+      <Widget span={12} title="What this is">
         <div className="space-y-1.5 p-2 text-[11px] text-muted-foreground">
           <p>
-            Trades enter this system exactly one way: a human clicking Book on{" "}
-            <code className="text-foreground">/trade</code>. There is no autonomous entry path,
-            no position cap, no daily-loss circuit breaker enforced against a manual decision —
-            those existed for the unattended bot and were removed with it (2026-08-16).
+            AlphaDesk is a consumption terminal: it fetches, reads and presents market
+            information. It holds no positions, books no trades and keeps no score — the
+            execution and measurement layers were removed on 2026-08-18.
           </p>
           <p>
-            Sessions are self-contained — every position exits at its session close, never
-            carrying into another market.
+            The AI reads and summarizes only, and every claim it renders is tied to a
+            source this server fetched. Anything it cannot back is dropped before you
+            see it.
           </p>
         </div>
       </Widget>

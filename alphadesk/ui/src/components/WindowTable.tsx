@@ -92,8 +92,8 @@ export function WindowTable({ rows }: { rows: ScreenerRow[] }) {
           <Link to={`/filings?symbol=${encodeURIComponent(c.row.original.symbol)}`} onClick={e => e.stopPropagation()}>
             <Btn variant="ghost">filings</Btn>
           </Link>
-          <Link to={`/trade?symbol=${encodeURIComponent(c.row.original.symbol)}`} onClick={e => e.stopPropagation()}>
-            <Btn>trade →</Btn>
+          <Link to={`/chart?symbol=${encodeURIComponent(c.row.original.symbol)}`} onClick={e => e.stopPropagation()}>
+            <Btn>chart →</Btn>
           </Link>
         </div>
       ),

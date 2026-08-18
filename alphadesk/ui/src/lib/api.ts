@@ -40,135 +40,11 @@ export interface Plan {
   hold: string // "single-day" | "multi-day"
 }
 
-export interface Pick {
-  id: number
-  ts: string
-  symbol: string
-  arm: "TEAM" | "LONER"
-  edge: string | null
-  trigger_src: string
-  session: string
-  direction: "LONG" | "SHORT"
-  horizon_days: number
-  score: number
-  adjusted_score: number | null
-  confidence: number
-  verdict: string | null
-  approved: number
-  triage_reason: string | null
-  thesis: string | null
-  debate: Debate | null
-  briefs: Brief[] | null
-  model_tags: Record<string, string> | null
-  low_liquidity: number
-  entry_price: number | null
-  spy_price: number | null
-  plan_entry: number | null
-  plan_target: number | null
-  plan_stop: number | null
-  plan_note: string | null
-  ret_1d: number | null
-  ret_horizon: number | null
-  spy_ret_horizon: number | null
-  alpha_net: number | null
-  alpha_adj: number | null // beta-adjusted + borrow-aware alpha (the honest number, alongside alpha_net)
-  beta: number | null // stock's beta vs SPY (trailing daily returns, clamped 0–3)
-  graded_at: string | null
-  exit_ts: string | null
-  exit_reason: string | null
-  exit_price: number | null
-  exit_return_pct: number | null
-  exit_alpha: number | null
-  mfe_pct: number | null
-  mae_pct: number | null
-}
-
 // One open pick tracked live against the current price.
-export interface LivePick {
-  id: number
-  ts: string
-  entry_ts: string // honest entry fill time (9:30 open if the call was made off-hours)
-  symbol: string
-  direction: "LONG" | "SHORT"
-  horizon_days: number
-  session: string
-  edge: string | null
-  verdict: string | null
-  approved: number
-  taken: number
-  plan_entry: number
-  plan_target: number
-  plan_stop: number
-  plan_note: string | null
-  order_type: string | null // 'market' (fill at open) | 'limit' (fill only if price reaches entry)
-  current: number | null
-  pnl_pct: number | null
-  alpha_so_far: number | null // interim vs-SPY, net friction — NOT the official grade
-  adjusted_score: number | null // quant composite score at booking
-  progress: number | null // 0 = at stop, 1 = at target
-  status: string // working | near target | near stop | target hit | stopped out | no quote
-}
 
 // One call in a symbol's timeline, with its outcome.
-export interface TimelineEvent {
-  id: number
-  ts: string
-  entry_ts: string // honest entry fill time (9:30 open if the call was made off-hours)
-  direction: "LONG" | "SHORT"
-  horizon_days: number
-  session: string // PRE | OPEN | AFTER | CLOSED — the market window the trade ran in
-  edge: string | null
-  verdict: string | null
-  approved: number
-  adjusted_score: number | null
-  plan_entry: number | null
-  plan_target: number | null
-  plan_stop: number | null
-  entry_price: number | null
-  alpha_net: number | null
-  alpha_adj: number | null // beta-adjusted + borrow-aware alpha (honest counterpart to alpha_net)
-  beta: number | null // stock's beta vs SPY
-  graded_at: string | null
-  exit_ts: string | null
-  exit_reason: string | null
-  exit_price: number | null
-  exit_return_pct: number | null // realized return entry→exit (direction-aware)
-  exit_alpha: number | null // realized alpha vs SPY over the hold, net friction
-  mfe_pct: number | null // max favorable excursion (peak profit) over the hold, % vs entry
-  mae_pct: number | null // max adverse excursion (worst drawdown) over the hold, % vs entry
-  state: "open" | "graded" | "exited" | "not_taken" // not_taken = thesis died before the open fill (never held)
-  current: number | null
-  pnl_pct: number | null
-  alpha_so_far: number | null // interim vs-SPY while open; official alpha_net settles at horizon
-  status: string | null
-}
 
 // The desk's evolving view on one stock — the "track record", grouped.
-export interface SymbolTimeline {
-  symbol: string
-  current: string // LONG | SHORT | EXITED | CLOSED
-  changed: boolean
-  last_ts: string
-  events: TimelineEvent[]
-}
-
-export interface Stats {
-  total: {
-    picks: number
-    graded: number
-    avg_alpha_net: number | null
-    avg_alpha_adj: number | null // beta-adjusted + borrow-aware mean alpha
-    effective_graded: number | null // graded, cluster-deduped (correlated picks count once)
-    wins: number | null
-    total_return_pct: number | null // sum of realized returns across all exited picks
-    exited: number | null
-  }
-  by: Record<
-    string,
-    { bucket: string; n: number; graded: number; avg_alpha_net: number | null; wins: number }[]
-  >
-  debate_lift: { post_debate_acc: number | null; pre_debate_acc: number | null }
-}
 
 export interface TokenRow {
   role: string
@@ -176,19 +52,6 @@ export interface TokenRow {
   calls: number
   input_tok: number
   output_tok: number
-}
-
-export interface SourceStat {
-  source: string
-  articles: number
-  candidates: number
-  ingest_tokens: number
-  debate_tokens: number
-  tokens: number
-  picks: number
-  taken: number
-  graded: number
-  avg_alpha: number | null
 }
 
 export interface EarningsRow {
@@ -248,11 +111,6 @@ export interface SessionAgg {
   avg_alpha: number | null
 }
 
-export interface SessionsResponse {
-  sessions: { day: SessionPick[]; extended: SessionPick[]; night: SessionPick[] }
-  agg: { day: SessionAgg; extended: SessionAgg; night: SessionAgg }
-}
-
 export interface SystemInfo {
   // last_run/runs_today/funnel_today are frozen dead fields — nothing has
   // written to those tables since the autonomous entry engine was deleted
@@ -272,42 +130,6 @@ export interface SystemInfo {
     tokens_today_out: number
     calls_today: number
   }
-}
-
-export interface PerfTrade {
-  id: number
-  symbol: string
-  direction: "LONG" | "SHORT"
-  session: string
-  exit_ts: string | null
-  exit_return_pct: number | null
-  exit_alpha: number | null
-  alpha_net: number | null
-  entry_price: number | null
-  plan_entry: number | null
-  plan_target: number | null
-  plan_stop: number | null
-  mfe_pct: number | null
-  mae_pct: number | null
-  score: number | null
-  thesis: string | null
-  debate: { quant_signals?: Record<string, number> } | null
-}
-
-export interface PerformanceInfo {
-  days: number
-  curve: { ts: string; symbol: string; cum: number; alpha: number }[]
-  n: number
-  total_return: number
-  mean_return: number
-  win_rate: number | null
-  max_drawdown: number
-  trade_sharpe: number | null
-  daily_sharpe: number | null
-  per_market: Record<string, { n: number; pnl: number; wins: number }>
-  /** "HUMAN" | "MACHINE" — the control-arm comparison. */
-  by_decider: Record<string, DeciderStats>
-  trades: PerfTrade[]
 }
 
 async function get<T>(path: string): Promise<T> {
@@ -345,40 +167,6 @@ export interface ChartSeries {
   coverage: number
   median_gap_min: number | null
   indicators_reliable: boolean
-}
-
-export interface ManualPickBody {
-  symbol: string
-  direction: "LONG" | "SHORT"
-  thesis: string
-  target?: number
-  stop?: number
-  horizon_days?: number
-}
-
-export interface ManualPickResult {
-  id: number
-  symbol: string
-  direction: string
-  entry: number
-  target: number
-  stop: number
-  managed_by: string
-  /** Non-blocking caution, e.g. booked inside the session's entry buffer where
-   * the close sweep will exit it early. Null when the timing is fine. */
-  warning: string | null
-}
-
-/** Realized performance split by who decided — you vs the machine, scored
- * identically. The bot keeps booking on paper as a control arm. */
-export interface DeciderStats {
-  n: number
-  pnl: number
-  alpha: number
-  wins: number
-  mean_return: number | null
-  mean_alpha: number | null
-  win_rate: number | null
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
@@ -481,7 +269,6 @@ export interface ResearchAnswer {
 }
 
 export const api = {
-  pick: (id: number) => get<Pick>(`/api/picks/${id}`),
   filings: (symbol: string) =>
     get<{ symbol: string; filings: FilingRow[] }>(`/api/filings/${encodeURIComponent(symbol)}`),
   askFiling: (accession: string, question: string) =>
@@ -493,18 +280,10 @@ export const api = {
   screener: () => get<{ symbols: ScreenerRow[] }>("/api/screener"),
   askScreener: (question: string) =>
     post<ScreenerAnswer>("/api/screener/ask", { question }),
-  bookManual: (body: ManualPickBody) =>
-    post<ManualPickResult>("/api/picks/manual", body),
-  live: () => get<{ live: LivePick[]; market: string }>("/api/live"),
-  timelines: () => get<{ symbols: SymbolTimeline[]; market: string }>("/api/timelines"),
-  stats: () => get<Stats>("/api/stats"),
   system: () => get<SystemInfo>("/api/system"),
-  performance: (days = 30) => get<PerformanceInfo>(`/api/performance?days=${days}`),
   tokens: (days = 1) => get<{ usage: TokenRow[] }>(`/api/tokens?days=${days}`),
-  sources: (days = 30) => get<{ sources: SourceStat[] }>(`/api/sources?days=${days}`),
   earnings: () =>
     get<{ upcoming: EarningsRow[]; reported: EarningsRow[] }>("/api/earnings"),
-  sessions: (days = 14) => get<SessionsResponse>(`/api/sessions?days=${days}`),
 }
 
 // The market runs on US Eastern; show all decision timestamps there.

@@ -1,132 +1,60 @@
 import { Link } from "react-router-dom"
-import { useEarnings, useLive, usePerformance, useScreener, useSystem } from "@/lib/queries"
-import { Pnl } from "@/lib/pnl"
-import { Spark } from "@/components/Spark"
-import { Btn, Empty, Stat, TD, TH, THead, TR, Table, Tag, Widget } from "@/components/terminal"
+import { useEarnings, useScreener, useSystem } from "@/lib/queries"
+import { Btn, Empty, Stat, TD, TH, THead, TR, Table, Widget } from "@/components/terminal"
 
-/** The collage — every surface of the desk visible at once.
+/** The collage — everything the desk is watching, on one canvas.
  *
- * This is the OpenBB Workspace shape: one canvas of tiled widgets rather than
- * a nav bar where each click hides what you were just looking at. A trader
- * deciding anything needs positions, P&L, the news window and the calendar in
- * the same glance; paging between them is the thing this replaces.
+ * This is the OpenBB Workspace shape: tiled widgets rather than a nav bar
+ * where each click hides what you were just looking at.
  *
- * Each tile owns its own poll (see usePoll) at a cadence matched to how fast
- * that data actually moves — prices in seconds, the earnings calendar in
- * minutes — so one slow endpoint never blocks the rest of the grid. */
+ * It used to lead with live positions and an equity curve. Those were the
+ * measurement layer and went with it — AlphaDesk consumes market information,
+ * it does not hold positions or score them. What's left is the stuff you
+ * actually read: what's in the window, what's being said, and who reports
+ * next.
+ *
+ * Each tile owns its own poll at a cadence matched to how fast that data
+ * really moves, so one slow endpoint never blocks the grid. */
 export default function DashboardPage() {
-  // Same query keys the app shell uses, so /api/live and /api/earnings are
-  // fetched once for the whole page rather than once per consumer.
-  const live = useLive()
-  const perf = usePerformance(30)
   const screener = useScreener()
   const system = useSystem()
   const earnings = useEarnings()
 
-  const rows = live.data?.live ?? []
-  const p = perf.data
   const sys = system.data
-  const curve = p?.curve.map(c => c.cum) ?? []
+  const symbols = screener.data?.symbols ?? []
+  const withNews = symbols.filter(s => s.article_count > 0)
+  const reporting = symbols.filter(s => s.report_date)
   const upcoming = earnings.data?.upcoming ?? []
-  const withNews = (screener.data?.symbols ?? []).filter(s => s.article_count > 0)
-  const headlines = withNews.flatMap(s => s.headlines.map(h => ({ ...h, symbol: s.symbol }))).slice(0, 40)
+  const headlines = withNews
+    .flatMap(s => s.headlines.map(h => ({ ...h, symbol: s.symbol })))
+    .sort((a, b) => String(b.published_at ?? "").localeCompare(String(a.published_at ?? "")))
+    .slice(0, 60)
 
   return (
     <div className="collage">
-      {/* ── Status strip ─────────────────────────────────────────────── */}
       <Widget span={12} bodyClassName="grid grid-cols-3 md:grid-cols-6">
         <Stat label="Market" value={sys?.market ?? "—"} />
-        <Stat label="Open positions" value={sys?.open_positions ?? "—"} />
+        <Stat label="In window" value={symbols.length || "—"} sub="symbols" />
+        <Stat label="With news" value={withNews.length || "—"} sub="last 36h" />
+        <Stat label="Reporting" value={reporting.length || "—"} sub="inside the horizon" />
         <Stat
-          label="30d return"
-          value={p ? `${p.total_return >= 0 ? "+" : ""}${p.total_return.toFixed(2)}%` : "—"}
-          tone={p ? (p.total_return >= 0 ? "gain" : "loss") : undefined}
-          sub={p ? `${p.n} trades` : undefined}
+          label="News today"
+          value={sys?.news.articles_today ?? "—"}
+          sub={sys ? `${sys.news.calls_today} AI calls` : undefined}
         />
-        <Stat label="Win rate" value={p?.win_rate != null ? `${p.win_rate}%` : "—"} />
-        <Stat label="News today" value={sys?.news.articles_today ?? "—"} sub={sys ? `${sys.news.calls_today} AI calls` : undefined} />
-        <Stat label="Uptime" value={sys ? `${Math.floor(sys.uptime_s / 3600)}h` : "—"} sub={sys?.graded != null ? `${sys.graded} graded` : undefined} />
+        <Stat label="Uptime" value={sys ? `${Math.floor(sys.uptime_s / 3600)}h` : "—"} />
       </Widget>
 
-      {/* ── Live positions ───────────────────────────────────────────── */}
-      <Widget
-        span={7}
-        title="Live positions"
-        subtitle={rows.length ? `${rows.length} open` : undefined}
-        actions={<Link to="/live"><Btn variant="ghost">open →</Btn></Link>}
-        scroll={220}
-      >
-        {!live.data ? (
-          <Empty>loading…</Empty>
-        ) : rows.length === 0 ? (
-          <Empty>no open positions</Empty>
-        ) : (
-          <Table>
-            <THead>
-              <TH>Sym</TH><TH>Dir</TH><TH align="right">Entry</TH><TH align="right">Last</TH>
-              <TH align="right">P&L</TH><TH align="right">vs SPY</TH><TH>Status</TH>
-            </THead>
-            <tbody>
-              {rows.map(r => (
-                <TR key={r.id}>
-                  <TD className="font-semibold">{r.symbol}</TD>
-                  <TD>
-                    <Tag tone={r.direction === "LONG" ? "gain" : "loss"}>{r.direction}</Tag>
-                  </TD>
-                  <TD align="right" mono>{r.plan_entry?.toFixed(2) ?? "—"}</TD>
-                  <TD align="right" mono>{r.current?.toFixed(2) ?? "—"}</TD>
-                  <TD align="right" mono><Pnl value={r.pnl_pct} /></TD>
-                  <TD align="right" mono><Pnl value={r.alpha_so_far} /></TD>
-                  <TD className="text-muted-foreground">{r.status}</TD>
-                </TR>
-              ))}
-            </tbody>
-          </Table>
-        )}
-      </Widget>
-
-      {/* ── Equity / performance ─────────────────────────────────────── */}
       <Widget
         span={5}
-        title="Equity curve"
-        subtitle="30d, equal-weight"
-        actions={<Link to="/performance"><Btn variant="ghost">detail →</Btn></Link>}
-      >
-        <div className="px-2 pt-2">
-          <Spark values={curve} height={72} tone={p && p.total_return < 0 ? "loss" : "gain"} />
-        </div>
-        <div className="grid grid-cols-3 border-t border-grid-line">
-          <Stat label="Max DD" value={p ? `${p.max_drawdown.toFixed(2)}%` : "—"} />
-          <Stat label="Sharpe (trade)" value={p?.trade_sharpe ?? "—"} />
-          <Stat label="Sharpe (daily)" value={p?.daily_sharpe ?? "—"} />
-        </div>
-        <div className="grid grid-cols-2 border-t border-grid-line">
-          {["HUMAN", "MACHINE"].map(who => {
-            const d = p?.by_decider?.[who]
-            return (
-              <Stat
-                key={who}
-                label={who}
-                value={d?.mean_alpha != null ? `${d.mean_alpha >= 0 ? "+" : ""}${d.mean_alpha}%` : "—"}
-                tone={d?.mean_alpha != null ? (d.mean_alpha >= 0 ? "gain" : "loss") : undefined}
-                sub={d ? `${d.n} trades · mean α` : "no closed trades"}
-              />
-            )
-          })}
-        </div>
-      </Widget>
-
-      {/* ── Screener window ──────────────────────────────────────────── */}
-      <Widget
-        span={4}
         title="Window"
-        subtitle={screener.data ? `${screener.data.symbols.length} symbols · ${withNews.length} with news` : undefined}
-        actions={<Link to="/screener"><Btn variant="ghost">ask →</Btn></Link>}
-        scroll={260}
+        subtitle={screener.data ? `${symbols.length} symbols · alphabetical, nothing ranked` : "loading…"}
+        actions={<Link to="/screener"><Btn variant="ghost">filter →</Btn></Link>}
+        scroll={340}
       >
         {!screener.data ? (
           <Empty>loading…</Empty>
-        ) : screener.data.symbols.length === 0 ? (
+        ) : symbols.length === 0 ? (
           <Empty>nothing in the window</Empty>
         ) : (
           <Table>
@@ -134,7 +62,7 @@ export default function DashboardPage() {
               <TH>Sym</TH><TH align="right">News</TH><TH>Reports</TH><TH></TH>
             </THead>
             <tbody>
-              {screener.data.symbols.slice(0, 200).map(s => (
+              {symbols.slice(0, 250).map(s => (
                 <TR key={s.symbol}>
                   <TD className="font-semibold">{s.symbol}</TD>
                   <TD align="right" mono className={s.article_count ? "" : "text-muted-foreground/50"}>
@@ -142,8 +70,8 @@ export default function DashboardPage() {
                   </TD>
                   <TD mono className="text-muted-foreground">{s.report_date ?? "—"}</TD>
                   <TD align="right">
-                    <Link to={`/trade?symbol=${encodeURIComponent(s.symbol)}`}>
-                      <Btn variant="ghost">trade</Btn>
+                    <Link to={`/chart?symbol=${encodeURIComponent(s.symbol)}`}>
+                      <Btn variant="ghost">chart</Btn>
                     </Link>
                   </TD>
                 </TR>
@@ -153,8 +81,7 @@ export default function DashboardPage() {
         )}
       </Widget>
 
-      {/* ── News tape ────────────────────────────────────────────────── */}
-      <Widget span={4} title="News tape" subtitle={`${headlines.length} headlines`} scroll={260}>
+      <Widget span={7} title="News tape" subtitle={`${headlines.length} headlines, newest first`} scroll={340}>
         {!screener.data ? (
           <Empty>loading…</Empty>
         ) : headlines.length === 0 ? (
@@ -174,9 +101,8 @@ export default function DashboardPage() {
         )}
       </Widget>
 
-      {/* ── Earnings calendar ────────────────────────────────────────── */}
       <Widget
-        span={4}
+        span={12}
         title="Reporting soon"
         subtitle={upcoming.length ? `${upcoming.length} names` : undefined}
         actions={<Link to="/earnings"><Btn variant="ghost">calendar →</Btn></Link>}
@@ -189,15 +115,20 @@ export default function DashboardPage() {
         ) : (
           <Table>
             <THead>
-              <TH>Date</TH><TH>Sym</TH><TH>Sess</TH><TH align="right">Est EPS</TH>
+              <TH>Date</TH><TH>Sym</TH><TH>Sess</TH><TH align="right">Est EPS</TH><TH></TH>
             </THead>
             <tbody>
-              {upcoming.slice(0, 200).map((e, i) => (
+              {upcoming.slice(0, 250).map((e, i) => (
                 <TR key={`${e.symbol}-${i}`}>
                   <TD mono className="text-muted-foreground">{e.report_date?.slice(5, 10)}</TD>
                   <TD className="font-semibold">{e.symbol}</TD>
                   <TD className="text-muted-foreground">{e.session ?? "—"}</TD>
                   <TD align="right" mono>{e.eps_estimate ?? "—"}</TD>
+                  <TD align="right">
+                    <Link to={`/chart?symbol=${encodeURIComponent(e.symbol)}`}>
+                      <Btn variant="ghost">chart</Btn>
+                    </Link>
+                  </TD>
                 </TR>
               ))}
             </tbody>
