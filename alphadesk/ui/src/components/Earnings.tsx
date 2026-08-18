@@ -2,8 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react"
 import { ChevronDown, Search } from "lucide-react"
 import { type EarningsRow } from "@/lib/api"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { InfoTip } from "@/components/InfoTip"
 import { Badge, Button, Empty, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Widget, fieldCls } from "@/components/terminal"
+import { Link } from "react-router-dom"
 
 function Panel({
   title,
@@ -100,20 +100,11 @@ function groupByDay(rows: EarningsRow[], key: (e: EarningsRow) => string): DayGr
   return groups
 }
 
-// Did the desk act on a reporter? (coverage self-assessment)
-const ENG: Record<string, { label: string; cls: string }> = {
-  TOOK: { label: "Took", cls: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" },
-  DEBATED: { label: "Debated", cls: "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400" },
-  SKIPPED: { label: "Skipped", cls: "bg-amber-500/15 text-amber-600 dark:text-amber-400" },
-}
+// The desk-coverage widgets that used to live here (EngBadge, assess,
+// AssessTag, CoverageSummary, whyText) are gone. Every one of them answered
+// "how well did the trading desk do against this reporter" — a measurement
+// question, from tables that no longer exist.
 
-function EngBadge({ state }: { state?: string }) {
-  const b = state ? ENG[state] : undefined
-  if (!b) return <Badge variant="ghost" className="text-muted-foreground/40">·</Badge>
-  return <Badge className={b.cls}>{b.label}</Badge>
-}
-
-const BIG_MOVE = 6 // % drift that counts as a real move (matches the skip-miss line)
 const THIN_CAP = 100_000_000 // below ~$100M cap: effectively untradeable at size
 
 // Prefer the real 20d-avg-$vol flag (same bar the trading pipeline gates entries
@@ -126,95 +117,8 @@ function isLowLiquidity(e: EarningsRow): boolean {
   return e.low_liquidity ?? ((e.market_cap ?? Infinity) < THIN_CAP)
 }
 
-// Classify a reporter's outcome vs what the desk did. A big drift the desk didn't
-// act on is only a TRUE miss if it was tradeable; in a thin/illiquid name it's a
-// FALSE miss (a pump you couldn't have captured — the HIHO case). For names the
-// desk DID act on, whether the interim drift is going its way (not the official
-// grade, which settles at the horizon).
-function assess(e: EarningsRow): { label: string; cls: string; tip: string } | null {
-  // Key on the CAPTURABLE drift (from the open), not the gap-inclusive total — the
-  // overnight gap repriced before you could act, so a pure-gap move is not a miss.
-  const move = e.move_drift_pct ?? e.move_since_report_pct
-  if (move == null) return { label: "pending", cls: "text-muted-foreground/50", tip: "no post-report session yet" }
-  const eng = e.engagement
-  if (eng === "TOOK" || eng === "DEBATED") {
-    if (!e.engagement_dir || Math.abs(move) < 1)
-      return { label: "flat", cls: "text-muted-foreground/60", tip: "little drift so far" }
-    const favorable = e.engagement_dir === "LONG" ? move > 0 : move < 0
-    return favorable
-      ? { label: "on track", cls: "text-gain", tip: "interim drift is going our way (not the official grade)" }
-      : { label: "adverse", cls: "text-loss", tip: "interim drift is against our call (not the official grade)" }
-  }
-  // SKIPPED / UNSEEN
-  if (Math.abs(move) < BIG_MOVE)
-    return { label: "fair pass", cls: "text-muted-foreground/60", tip: "small move — nothing forgone" }
-  const thin = isLowLiquidity(e)
-  return thin
-    ? { label: "false miss", cls: "text-amber-600 dark:text-amber-400", tip: "big move but too illiquid to trade at size — uncatchable" }
-    : { label: "true miss", cls: "font-semibold text-red-600 dark:text-red-400", tip: "big, tradeable move the desk didn't act on" }
-}
 
-function AssessTag({ e }: { e: EarningsRow }) {
-  const a = assess(e)
-  if (!a) return null
-  return (
-    <InfoTip tip={a.tip} className={`cursor-help text-[10px] ${a.cls}`}>
-      {a.label}
-    </InfoTip>
-  )
-}
-
-// One-glance "did we do well?" — how many reporters the desk took / debated /
-// skipped / never saw, plus the biggest drift it didn't act on.
-function CoverageSummary({ reported }: { reported: EarningsRow[] }) {
-  const c = (s: string) => reported.filter((e) => e.engagement === s).length
-  const took = c("TOOK")
-  const debated = c("DEBATED")
-  const skipped = c("SKIPPED")
-  const unseen = reported.length - took - debated - skipped
-  const trueMiss = reported.filter((e) => assess(e)?.label === "true miss").length
-  const falseMiss = reported.filter((e) => assess(e)?.label === "false miss").length
-  const capturable = (e: EarningsRow) => e.move_drift_pct ?? e.move_since_report_pct ?? 0
-  const worst = reported
-    .filter((e) => assess(e)?.label === "true miss")
-    .sort((a, b) => Math.abs(capturable(b)) - Math.abs(capturable(a)))[0]
-  return (
-    <div className="mb-2 bg-muted/40 px-2.5 py-2 text-[11px]">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="font-medium text-muted-foreground">Desk coverage</span>
-        <span className="text-emerald-600 dark:text-emerald-400">{took} took</span>
-        <span className="text-indigo-600 dark:text-indigo-400">{debated} debated</span>
-        <span className="text-amber-600 dark:text-amber-400">{skipped} skipped</span>
-        <span className="text-muted-foreground">{unseen} not seen</span>
-      </div>
-      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className={trueMiss > 0 ? "font-semibold text-red-600 dark:text-red-400" : "text-muted-foreground"}>
-          {trueMiss} true miss{trueMiss === 1 ? "" : "es"}
-        </span>
-        <span className="text-amber-600 dark:text-amber-400">{falseMiss} false (untradeable)</span>
-        {worst && (
-          <span className="text-muted-foreground">
-            worst: <span className="font-semibold text-foreground">{worst.symbol}</span>{" "}
-            <span className={capturable(worst) >= 0 ? "text-gain" : "text-loss"}>
-              {capturable(worst) >= 0 ? "+" : ""}
-              {capturable(worst).toFixed(1)}% drift
-            </span>
-          </span>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function whyText(e: EarningsRow): string {
-  if (e.engagement === "UNSEEN")
-    return "Not surfaced — the desk didn't run after this reported, or it wasn't in that run's news/earnings window."
-  return e.engagement_why || "(no reason recorded)"
-}
-
-// A reporter row that expands to show WHY the desk acted as it did (its own
-// stored reasoning: judge summary / thesis for takes & debates, the scout's
-// reason for skips, or the coverage-gap note for unseen).
+// One reported name.
 //
 // Flex divs, NOT <tr>s. This block is virtualized (see ReportedTable) and the
 // largest reported day carries 289 names; a virtualizer positions each item
@@ -222,120 +126,62 @@ function whyText(e: EarningsRow): string {
 // inside ONE element also makes each reporter a single virtual item whose
 // height simply changes when it opens, instead of two sibling rows the
 // virtualizer would have to keep in sync.
-const RCOLS = [80, 70, 60, 84, 96, 0, 22] as const   // 0 = flex-fill
-const ROW_H = 25        // closed row, including its 1px rule
-const DETAIL_H = 52     // expanded reasoning panel — FIXED, scrolls internally
+// Symbol · cap · session · actual · estimate · chart-link. 0 = flex-fill.
+const RCOLS = [80, 70, 60, 0, 0, 70] as const
+const ROW_H = 25        // every row, including its 1px rule — uniform now that
+                        // rows no longer expand, so the virtualizer needs no
+                        // measurement at all.
 
 function rcol(i: number) {
   const w = RCOLS[i]
   return w ? { width: w, flex: "0 0 auto" as const } : { flex: "1 1 0%" as const, minWidth: 0 }
 }
 
-function ReportedRow({ e, open, onToggle }: { e: EarningsRow; open: boolean; onToggle: () => void }) {
-  // Headline the CAPTURABLE drift (from the open); show the uncapturable gap as
-  // muted context so a pure-gap reprice reads as "gap, no drift", not a big move.
-  const drift = e.move_drift_pct ?? e.move_since_report_pct
-  const gap = e.move_gap_pct
-  const has = drift != null
-  const up = (drift ?? 0) >= 0
-  const took = e.engagement === "TOOK" || e.engagement === "DEBATED"
+function ReportedRow({ e }: { e: EarningsRow }) {
+  // Rows no longer expand. The detail panel showed the desk's own reasoning
+  // for engaging with a reporter, and the drift column showed how the name
+  // moved afterwards — both came from tables the retired trading engine wrote
+  // and nothing populates now. A calendar answers "who reported when"; what
+  // the name did next belongs on its chart.
   return (
-    <div className="border-b border-grid-line">
-      <div
-        onClick={onToggle}
-        aria-expanded={open}
-        className="flex h-[24px] cursor-pointer items-center text-[11px] hover:bg-muted/60"
-      >
-        <div style={rcol(0)} className="truncate px-2 font-semibold">{e.symbol}</div>
-        <div style={rcol(1)} className="truncate px-2 text-muted-foreground">{fmtCap(e.market_cap)}</div>
-        <div style={rcol(2)} className="truncate px-2 text-muted-foreground">{e.session}</div>
-        <div style={rcol(3)} className="truncate px-2"><EngBadge state={e.engagement} /></div>
-        <div style={rcol(4)} className="truncate px-2"><AssessTag e={e} /></div>
-        <div style={rcol(5)} className="num truncate px-2 text-right">
-          {has ? (
-            <>
-              <InfoTip
-                tip="Capturable drift since the report — the move from the first post-report open (excludes the uncapturable overnight gap)"
-                className={up ? "text-gain" : "text-loss"}
-              >
-                {up ? "+" : ""}
-                {drift!.toFixed(1)}%
-              </InfoTip>
-              {gap != null && Math.abs(gap) >= 0.1 && (
-                <span className="ml-1.5 text-muted-foreground/50">
-                  {gap >= 0 ? "+" : ""}
-                  {gap.toFixed(1)}% gap
-                </span>
-              )}
-            </>
-          ) : (
-            <span className="text-muted-foreground">—</span>
-          )}
-        </div>
-        <div style={rcol(6)} className="px-1">
-          <ChevronDown
-            className={`h-3 w-3 shrink-0 text-muted-foreground/40 transition-transform ${
-              open ? "" : "-rotate-90"
-            }`}
-          />
-        </div>
+    <div className="flex h-[24px] items-center border-b border-grid-line text-[11px] hover:bg-muted/60">
+      <div style={rcol(0)} className="truncate px-2 font-semibold">{e.symbol}</div>
+      <div style={rcol(1)} className="truncate px-2 text-muted-foreground">{fmtCap(e.market_cap)}</div>
+      <div style={rcol(2)} className="truncate px-2 text-muted-foreground">{e.session}</div>
+      <div style={rcol(3)} className="num truncate px-2 text-right text-muted-foreground">
+        {e.eps_actual ?? "—"}
       </div>
-      {open && (
-        <div
-          style={{ height: DETAIL_H }}
-          className="overflow-y-auto bg-muted/40 px-2 py-1 text-[11px] leading-snug text-muted-foreground"
-        >
-          {took && e.engagement_dir && (
-            <span className="mr-1 font-medium text-foreground">
-              {e.engagement_dir === "LONG" ? "Long" : "Short"}
-              {e.engagement_verdict ? ` · ${e.engagement_verdict}` : ""}:
-            </span>
-          )}
-          {whyText(e)}
-        </div>
-      )}
+      <div style={rcol(4)} className="num truncate px-2 text-right text-muted-foreground">
+        {e.eps_estimate ?? "—"}
+      </div>
+      <div style={rcol(5)} className="px-2 text-right">
+        <Link to={`/chart?symbol=${encodeURIComponent(e.symbol)}`} className="text-accent hover:underline">
+          chart →
+        </Link>
+      </div>
     </div>
   )
 }
 
-/** The reported-day table, virtualized with DYNAMIC measurement.
+/** The reported-day table, virtualized.
  *
- * Measured live: the largest reported day is 289 names, so expanding one used
- * to mount ~1,700 DOM nodes and push ~7,000px of page.
+ * Measured live: the largest reported day is 289 names, which previously
+ * mounted ~1,700 DOM nodes and pushed ~7,000px of page.
  *
- * `estimateSize` is only a first guess — rows expand to show the desk's
- * reasoning, so heights genuinely vary. Attaching `virt.measureElement` as the
- * item ref lets the virtualizer observe each row's real height and reflow the
- * ones after it, which a fixed row height cannot do. `data-index` is required:
- * measureElement reads it to know which item it just measured. */
+ * Rows are a uniform height now that they no longer expand, so the virtualizer
+ * needs no measurement — which also sidesteps a real problem: react-virtual's
+ * `measureElement` ResizeObserver never fired for the old expanding rows
+ * (verified at 289-row scale — the row grew while the spacer and following
+ * offsets did not, so an expanded row sat on top of its neighbour). */
 function ReportedTable({ rows }: { rows: EarningsRow[] }) {
   const scrollRef = useRef<HTMLDivElement>(null)
-  // Expansion is owned HERE, not inside the row. The virtualizer has to know
-  // when an item's height changes, and it cannot learn that from state hidden
-  // inside a child.
-  const [openKey, setOpenKey] = useState<string | null>(null)
-  // Sizes are COMPUTED, not measured.
-  //
-  // measureElement's ResizeObserver never fired for the expand here — verified
-  // twice in the browser: the row grew 25px -> 49px while the spacer stayed at
-  // count x 25 and the next row kept its old offset, so an expanded row sat on
-  // top of its neighbour. Forcing virt.measure() on toggle did not fix it
-  // either. Rather than keep fighting an observer that is not firing, the
-  // expanded panel is given a FIXED height (it scrolls internally for long
-  // reasoning), which makes every row height knowable up front — so the
-  // virtualizer needs no measurement at all and cannot disagree with the DOM.
   const virt = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (i) =>
-      openKey === rows[i].symbol + rows[i].report_date ? ROW_H + DETAIL_H : ROW_H,
+    estimateSize: () => ROW_H,
     overscan: 10,
   })
-
-  // estimateSize closes over openKey, so the virtualizer has to be told the
-  // sizing function changed when a row toggles.
-  useEffect(() => { virt.measure() }, [openKey, virt])
-  const HEADS = ["Symbol", "Cap", "Session", "Desk", "Verdict", "Drift · gap", ""]
+  const HEADS = ["Symbol", "Cap", "Session", "Actual", "Est", ""]
   return (
     <>
       <div className="flex border-b border-border bg-panel-header">
@@ -344,7 +190,7 @@ function ReportedTable({ rows }: { rows: EarningsRow[] }) {
             key={h || i}
             style={rcol(i)}
             className={`h-[22px] truncate px-2 text-[9px] font-semibold uppercase leading-[22px] tracking-[0.06em] text-muted-foreground ${
-              i === 5 ? "text-right" : ""
+              i >= 3 ? "text-right" : ""
             }`}
           >
             {h}
@@ -358,14 +204,7 @@ function ReportedTable({ rows }: { rows: EarningsRow[] }) {
               key={rows[vi.index].symbol + rows[vi.index].report_date}
               style={{ position: "absolute", top: 0, left: 0, width: "100%", height: vi.size, transform: `translateY(${vi.start}px)` }}
             >
-              <ReportedRow
-                e={rows[vi.index]}
-                open={openKey === rows[vi.index].symbol + rows[vi.index].report_date}
-                onToggle={() => {
-                  const k = rows[vi.index].symbol + rows[vi.index].report_date
-                  setOpenKey((cur) => (cur === k ? null : k))
-                }}
-              />
+              <ReportedRow e={rows[vi.index]} />
             </div>
           ))}
         </div>
@@ -555,9 +394,8 @@ export function Earnings({
       {filteredReported.length > 0 && (
         <Panel
           title="Just reported"
-          sub="capturable drift from the first post-report open — the uncapturable overnight gap is shown separately and excluded from the verdict"
+          sub="most recent first — open a day to see the names and what they printed"
         >
-          <CoverageSummary reported={filteredReported} />
           <div className="space-y-1">
             {groupByDay(filteredReported, (e) => e.report_date.slice(0, 10)).map((g) => (
               <ReportedDayBlock key={g.day} g={g} forceExpanded={searching} />
@@ -567,7 +405,7 @@ export function Earnings({
       )}
 
       {filteredUpcoming.length > 0 && (
-        <Panel title="Reporting soon" sub="grouped by when to run the desk — biggest names first">
+        <Panel title="Reporting soon" sub="grouped by report day — biggest names first">
           <div className="space-y-1">
             {groupByDay(filteredUpcoming, (e) => (e.run_at ?? "").slice(0, 10) || "—").map((g) => (
               <RunGroup key={g.day} g={g} forceExpanded={searching} />

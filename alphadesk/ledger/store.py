@@ -1,8 +1,12 @@
-"""The decision ledger — SQLite (WAL). Every evaluation, token, and funnel count.
+"""The data store — SQLite (WAL).
 
-One row per evaluation (team or solo). Closed-market picks carry
-entry_price=NULL and are stamped with entry-at-next-open semantics by the
-grader. All writes are single-process; the dashboard reads the same file.
+Everything the terminal caches or accumulates: news articles and their
+enrichment, SEC filings with their text and Q&A caches, research answers, the
+earnings calendar, and token spend.
+
+There is no trading ledger here. The picks/runs/funnel/skips tables that used
+to live in this file were dropped on 2026-08-18 along with the execution layer,
+and `init()` removes them from pre-existing databases.
 """
 
 import json
@@ -16,104 +20,6 @@ _DB = DATA_DIR / "ledger.db"
 _lock = threading.Lock()
 
 _SCHEMA = """
-CREATE TABLE IF NOT EXISTS picks (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts              TEXT NOT NULL,                 -- decision time UTC ISO
-    symbol          TEXT NOT NULL,
-    arm             TEXT NOT NULL,                 -- TEAM | LONER
-    edge            TEXT,                          -- SPILLOVER | THEME | MOMENTUM
-    trigger_src     TEXT NOT NULL,                 -- STREAM | DEEP_RUN | REPLAY
-    session         TEXT NOT NULL,                 -- PRE | OPEN | AFTER | CLOSED
-    -- decision
-    direction       TEXT NOT NULL,                 -- LONG | SHORT
-    horizon_days    INTEGER NOT NULL,
-    score           REAL NOT NULL,                 -- pre-debate
-    adjusted_score  REAL,                          -- post-debate (team only)
-    confidence      REAL NOT NULL,
-    verdict         TEXT,                          -- STRONG | SOFT | PASS
-    approved        INTEGER NOT NULL DEFAULT 0,
-    -- context
-    triage_reason   TEXT,
-    thesis          TEXT,
-    debate          TEXT,                          -- JSON transcript
-    briefs          TEXT,                          -- JSON
-    model_tags      TEXT,                          -- JSON: stage → model actually used
-    low_liquidity   INTEGER NOT NULL DEFAULT 0,
-    -- attribution
-    skeptic_moved_score REAL,
-    arbiter_overrode    INTEGER DEFAULT 0,
-    -- market snapshot
-    entry_price     REAL,                          -- NULL when decided market-closed
-    spy_price       REAL,
-    -- actionable trade plan (execution desk): suggested levels for the committed call
-    plan_entry      REAL,
-    plan_target     REAL,
-    plan_stop       REAL,
-    plan_note       TEXT,
-    -- outcomes
-    ret_1d          REAL,
-    ret_horizon     REAL,
-    spy_ret_horizon REAL,
-    alpha_net       REAL,
-    graded_at       TEXT,
-    -- position lifecycle: set when the Chief marks TAKE; re-evaluated on later runs
-    taken           INTEGER NOT NULL DEFAULT 0,
-    exit_ts         TEXT,                          -- early exit stamped by a re-eval
-    exit_reason     TEXT,
-    exit_price      REAL,                          -- price at exit (target/stop hit or review)
-    exit_return_pct REAL,                          -- realized return entry→exit (direction-aware)
-    exit_alpha      REAL,                          -- realized alpha vs SPY over the hold, net friction
-    -- path while held: how far it ran / how far underwater BEFORE it closed
-    mfe_pct         REAL,                          -- max favorable excursion (peak profit), % vs entry
-    mae_pct         REAL                           -- max adverse excursion (worst drawdown), % vs entry
-);
-CREATE INDEX IF NOT EXISTS idx_picks_ts ON picks (ts);
-CREATE INDEX IF NOT EXISTS idx_picks_symbol ON picks (symbol);
-
-CREATE TABLE IF NOT EXISTS runs (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts        TEXT NOT NULL,
-    kind      TEXT NOT NULL,                       -- PREMARKET | EVENING | ADHOC
-    top_picks TEXT                                 -- JSON
-);
-
-CREATE TABLE IF NOT EXISTS funnel (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    window_ts  TEXT NOT NULL,
-    ingested   INTEGER DEFAULT 0,
-    candidates INTEGER DEFAULT 0,
-    picked     INTEGER DEFAULT 0,
-    skipped    INTEGER DEFAULT 0,
-    skip_reasons TEXT                              -- JSON [{symbol, reason}]
-);
-
-CREATE TABLE IF NOT EXISTS relationships (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts          TEXT NOT NULL,
-    from_sym    TEXT NOT NULL,      -- the shocked company
-    to_sym      TEXT NOT NULL,      -- the exposed, tradable company
-    direction   TEXT,              -- LONG | SHORT (the ripple's implied trade)
-    chain       TEXT,              -- the causal chain, web-verified
-    UNIQUE(from_sym, to_sym, direction) ON CONFLICT REPLACE
-);
-CREATE INDEX IF NOT EXISTS idx_rel_from ON relationships (from_sym);
-
--- News-stated inter-company relations (a SUPPLIES|COMPETES|PARTNERS b), extracted
--- by the enrichment from article TEXT and carrying the article URL as evidence.
--- The accumulating fact graph the connections desk reads before any LLM search.
-CREATE TABLE IF NOT EXISTS relation_facts (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    first_seen TEXT NOT NULL,
-    last_seen  TEXT NOT NULL,
-    from_sym   TEXT NOT NULL,
-    to_sym     TEXT NOT NULL,
-    rel        TEXT NOT NULL,        -- SUPPLIES | COMPETES | PARTNERS
-    evidence   TEXT,                 -- article URL
-    UNIQUE(from_sym, to_sym, rel) ON CONFLICT IGNORE
-);
-CREATE INDEX IF NOT EXISTS idx_relfact_from ON relation_facts (from_sym);
-CREATE INDEX IF NOT EXISTS idx_relfact_to ON relation_facts (to_sym);
-
 CREATE TABLE IF NOT EXISTS token_usage (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     ts          TEXT NOT NULL,
@@ -124,31 +30,6 @@ CREATE TABLE IF NOT EXISTS token_usage (
     decision_id TEXT,
     source      TEXT             -- ingestion source this call served (FINANCIAL|EARNINGS|WORLD|SPILLOVER); NULL = cross-source
 );
-
--- Per-run ingestion volume by source: how many articles came in from where, and
--- how many became candidates. Joined with token_usage.source + picks.source for
--- the source scorecard (cost + volume + value per ingestion channel).
-CREATE TABLE IF NOT EXISTS ingest_stats (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts         TEXT NOT NULL,
-    source     TEXT NOT NULL,     -- FINANCIAL | EARNINGS | WORLD | SPILLOVER
-    articles   INTEGER DEFAULT 0,
-    candidates INTEGER DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_ingest_ts ON ingest_stats (ts);
-
--- Scout skips, graded forward for missed moves (anti-survivorship). A skip has
--- no direction, so 'missed' = a large |move vs SPY| we chose not to even look at.
-CREATE TABLE IF NOT EXISTS skips (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts         TEXT NOT NULL,
-    symbol     TEXT NOT NULL,
-    reason     TEXT,
-    abs_alpha  REAL,        -- |symbol return − SPY| over the grade window, %
-    missed     INTEGER,     -- 1 if abs_alpha crossed the miss threshold
-    graded_at  TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_skips_ts ON skips (ts);
 
 -- Earnings calendar: who reported (with the EPS surprise) and who's about to.
 -- Drives "be ready" (upcoming) + post-earnings-drift candidates (recently reported).
@@ -165,41 +46,6 @@ CREATE TABLE IF NOT EXISTS earnings (
 );
 CREATE INDEX IF NOT EXISTS idx_earnings_date ON earnings (report_date);
 
--- LEGACY/unused: one web-grounded read per earnings event. The earnings brief is
--- now pure code-fetched facts (desk/earnings_reader.earnings_block) — no LLM read
--- exists to cache. Table kept for existing DBs; no longer written.
-CREATE TABLE IF NOT EXISTS earnings_reads (
-    symbol      TEXT NOT NULL,
-    report_date TEXT NOT NULL,
-    report_read TEXT,
-    ts          TEXT,
-    UNIQUE(symbol, report_date) ON CONFLICT REPLACE
-);
-
--- Shadow A/B on the material-reaction gate: one row per public reporter (gate-passed
--- AND gate-dropped), graded forward vs SPY in the reaction direction. Lets us see
--- whether forward alpha turns on at the gate threshold or the gate cuts winners.
-CREATE TABLE IF NOT EXISTS earnings_reactions (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts              TEXT NOT NULL,      -- first-sighting time (fixes the Model-A entry clock)
-    symbol          TEXT NOT NULL,
-    report_date     TEXT NOT NULL,      -- YYYY-MM-DD, stable event key
-    session         TEXT,               -- BMO|AMC|DAY (drives the entry clock)
-    direction       TEXT,               -- LONG|SHORT, from the reaction sign
-    horizon_days    INTEGER,            -- fixed A/B horizon
-    mkt_session     TEXT,               -- MARKET session at sighting (PRE|OPEN|AFTER|CLOSED) → Model-A entry clock
-    reaction_total  REAL,               -- reaction % at sighting (the gate input)
-    gate_passed     INTEGER,            -- 1 if |reaction| >= MATERIAL_REACTION_PCT
-    low_liquidity   INTEGER DEFAULT 0,
-    entry_price     REAL,               -- filled forward by the grader (next 9:30 open)
-    ret_horizon     REAL,
-    spy_ret_horizon REAL,
-    alpha_net       REAL,               -- forward alpha vs SPY, reaction direction, net friction
-    graded_at       TEXT,
-    UNIQUE(symbol, report_date) ON CONFLICT IGNORE   -- one row per report event (first sighting wins)
-);
-CREATE INDEX IF NOT EXISTS idx_reactions_ts ON earnings_reactions (ts);
-
 -- Persistent enrichment cache: an article's sentiment/category never changes, so
 -- enrich it once and reuse forever. Kills the biggest recurring token cost —
 -- re-enriching the same overlapping news on every run/restart.
@@ -212,16 +58,6 @@ CREATE TABLE IF NOT EXISTS enrichment_cache (
     ticker_sentiment TEXT,     -- JSON {TICKER: {sentiment, label}} — per-company overrides
     ts               TEXT
 );
-
--- Local daily OHLC cache — backtests (and anything replaying history) fill this
--- once and never hammer yfinance again (its rate limiter throttles bulk downloads).
-CREATE TABLE IF NOT EXISTS price_daily (
-    symbol TEXT NOT NULL,
-    date   TEXT NOT NULL,      -- YYYY-MM-DD (calendar date)
-    open   REAL, high REAL, low REAL, close REAL, volume REAL,
-    PRIMARY KEY (symbol, date)
-);
-CREATE INDEX IF NOT EXISTS idx_pricedaily_sym ON price_daily (symbol);
 
 -- Raw ticker-tagged articles (ingest/news.py). enrichment_cache holds the
 -- LLM's opinion of an article keyed by id; this holds the article itself
@@ -341,17 +177,22 @@ def init() -> None:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(research_cache)")}
         if cols and "symbol" not in cols:
             conn.execute("DROP TABLE research_cache")
+
+        # One-time removal of the trading ledger (2026-08-18). AlphaDesk stopped
+        # booking, holding and grading positions, and these tables outlived the
+        # code that wrote them. This is DESTRUCTIVE and deliberate: an existing
+        # database loses its decision history the first time this runs. Back up
+        # ledger.db first if that history matters.
+        for dead in ("picks", "runs", "funnel", "relationships", "relation_facts",
+                     "skips", "earnings_reads", "price_daily", "ingest_stats",
+                     "earnings_reactions"):
+            conn.execute(f"DROP TABLE IF EXISTS {dead}")
+
         conn.executescript(_SCHEMA)
-        # idempotent migrations for pre-existing DBs (no-op once the column exists)
-        for col, decl in (("taken", "INTEGER NOT NULL DEFAULT 0"),
-                          ("exit_ts", "TEXT"), ("exit_reason", "TEXT"),
-                          ("exit_price", "REAL"), ("exit_return_pct", "REAL"),
-                          ("exit_alpha", "REAL"), ("mfe_pct", "REAL"),
-                          ("mae_pct", "REAL")):
-            try:
-                conn.execute(f"ALTER TABLE picks ADD COLUMN {col} {decl}")
-            except sqlite3.OperationalError:
-                pass  # already migrated
+
+        # Idempotent column migrations for pre-existing databases — no-ops once
+        # the column exists. Only the surviving tables are covered; the picks
+        # migrations went with the table.
         try:
             conn.execute("ALTER TABLE earnings ADD COLUMN market_cap REAL")
         except sqlite3.OperationalError:
@@ -365,14 +206,6 @@ def init() -> None:
             conn.execute("ALTER TABLE earnings ADD COLUMN low_liquidity INTEGER")
         except sqlite3.OperationalError:
             pass  # already migrated
-        for col, decl in (("plan_entry", "REAL"), ("plan_target", "REAL"),
-                          ("plan_stop", "REAL"), ("plan_note", "TEXT"),
-                          ("source", "TEXT"), ("decision_id", "TEXT"),
-                          ("order_type", "TEXT")):   # 'market' | 'limit' — how the entry fills (Model A)
-            try:
-                conn.execute(f"ALTER TABLE picks ADD COLUMN {col} {decl}")
-            except sqlite3.OperationalError:
-                pass  # already migrated
         try:
             conn.execute("ALTER TABLE token_usage ADD COLUMN source TEXT")
         except sqlite3.OperationalError:
@@ -381,36 +214,6 @@ def init() -> None:
             conn.execute("ALTER TABLE enrichment_cache ADD COLUMN ticker_sentiment TEXT")
         except sqlite3.OperationalError:
             pass  # already migrated
-        for col in ("beta", "alpha_adj"):   # honest-alpha prototype (beta-adjusted, borrow-aware)
-            try:
-                conn.execute(f"ALTER TABLE picks ADD COLUMN {col} REAL")
-            except sqlite3.OperationalError:
-                pass  # already migrated
-        for col in ("sector", "cluster"):   # concentration cap / correlation clustering
-            try:
-                conn.execute(f"ALTER TABLE picks ADD COLUMN {col} TEXT")
-            except sqlite3.OperationalError:
-                pass  # already migrated
-        for col, decl in (("broker_order_id", "TEXT"), ("broker_status", "TEXT"),
-                          ("broker_qty", "REAL"),
-                          ("broker_fill_price", "REAL"), ("broker_fill_ts", "TEXT")):
-            try:   # paper portfolio manager (Alpaca); fill = the ledger entry when present
-                conn.execute(f"ALTER TABLE picks ADD COLUMN {col} {decl}")
-            except sqlite3.OperationalError:
-                pass  # already migrated
-        try:   # market session at sighting → the reaction A/B's Model-A entry clock
-            conn.execute("ALTER TABLE earnings_reactions ADD COLUMN mkt_session TEXT")
-        except sqlite3.OperationalError:
-            pass  # already migrated
-        try:   # capturable drift (from the first post-report open) — the honest miss gauge
-            conn.execute("ALTER TABLE earnings_reactions ADD COLUMN reaction_drift REAL")
-        except sqlite3.OperationalError:
-            pass  # already migrated
-        for col, decl in (("hedge_of", "INTEGER"),):
-            try:   # macro hedge — companion SHORT protecting a LONG through overnight shock
-                conn.execute(f"ALTER TABLE picks ADD COLUMN {col} {decl}")
-            except sqlite3.OperationalError:
-                pass  # already migrated
 
 
 def _now() -> str:
@@ -818,32 +621,10 @@ def upcoming_earnings(days: int = 7) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def earnings_reactions_batch(symbols: list[str]) -> dict[str, dict]:
-    """Latest reaction data per symbol from the earnings_reactions table."""
-    if not symbols:
-        return {}
-    syms = sorted({s.upper() for s in symbols})
-    ph = ",".join("?" for _ in syms)
-    with _connect() as conn:
-        rows = conn.execute(
-            f"SELECT symbol, reaction_total, reaction_drift, direction, entry_price"
-            f" FROM earnings_reactions WHERE symbol IN ({ph})"
-            " ORDER BY ts DESC", syms,
-        ).fetchall()
-    out = {}
-    for r in rows:
-        s = r["symbol"].upper()
-        if s not in out:
-            out[s] = {"reaction_total": r["reaction_total"],
-                      "reaction_drift": r["reaction_drift"],
-                      "direction": r["direction"]}
-    return out
-
-
 def news_health() -> dict:
-    """Is the news/screener pipeline alive? Last article ingested, how many
-    today, and today's AI spend — the one thing on the terminal that still
-    runs unattended and can silently fail (Polygon or DeepSeek outage)."""
+    """Is the news pipeline alive? Last article ingested, how many today, and
+    today's AI spend — the one thing here that runs unattended and can fail
+    silently (a dead feed or a dead model endpoint)."""
     with _connect() as conn:
         last_at = conn.execute(
             "SELECT max(ingested_at) FROM news_articles").fetchone()[0]

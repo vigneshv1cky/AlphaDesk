@@ -251,19 +251,11 @@ def api_earnings():
     upcoming.sort(key=lambda e: (e["run_at"] or "9999", -(e.get("market_cap") or 0.0)))
     upcoming = _dedupe_dual(upcoming)
     reported = _dedupe_dual(reported)
-    # How each name actually MOVED after reporting is consumption data and
-    # stays. Whether "the desk engaged" with it was a measurement concept and
-    # went with the ledger.
-    reactions = store.earnings_reactions_batch([e["symbol"] for e in reported])
-    for e in reported:
-        r = reactions.get(e["symbol"].upper())
-        if r:
-            e["move_since_report_pct"] = r["reaction_total"]
-            # The honest miss gauge is the CAPTURABLE drift from the first post-report
-            # open — a gap move (total big, drift ~0) is not a tradeable miss. When no
-            # regular session had traded at sighting, drift is NULL and the whole move
-            # is extended-hours (capturable) → fall back to the total.
-            e["move_drift_pct"] = r.get("reaction_drift") if r.get("reaction_drift") is not None else r["reaction_total"]
+    # Post-report drift is NOT reported here. It came from earnings_reactions,
+    # a table the retired trading engine wrote to grade its own reaction gate —
+    # nothing populates it any more, so serving it would mean serving stale
+    # numbers from a dead system. The calendar answers "who reports when"; what
+    # a name did afterwards belongs on its chart.
 
     # Same liquidity bar the live trading pipeline actually gates entries on
     # (20-day avg $ volume, not market cap — a thin float can hide behind a

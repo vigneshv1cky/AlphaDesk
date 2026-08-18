@@ -125,11 +125,12 @@ class AlpacaNews:
                     if not (art_id and title and symbols):
                         continue
                     ts = getattr(a, "created_at", None)
+                    published = ts.isoformat() if isinstance(ts, datetime) else str(ts or "")
                     out.append(Article(
                         id=art_id,
                         title=title,
                         url=getattr(a, "url", "") or "",
-                        published_at=ts.isoformat() if hasattr(ts, "isoformat") else str(ts or ""),
+                        published_at=published,
                         symbols=symbols[:8],
                         summary=(getattr(a, "summary", "") or "")[:400],
                         source=getattr(a, "source", "") or "Alpaca",

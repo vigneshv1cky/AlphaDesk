@@ -1,6 +1,32 @@
 """Ledger round-trips. The store had no coverage at all before this."""
 
-import json
+
+
+def test_init_drops_the_retired_trading_tables(store):
+    """A pre-existing ledger loses its trading tables on first init.
+
+    This is DESTRUCTIVE by design — the execution layer is gone and these
+    outlived the code that wrote them — so it is worth a test that says so out
+    loud rather than leaving it as a surprise.
+    """
+    import sqlite3
+
+    dead = ["picks", "runs", "funnel", "skips", "price_daily", "earnings_reactions"]
+    con = sqlite3.connect(store._DB)
+    for t in dead:
+        con.execute(f"CREATE TABLE IF NOT EXISTS {t} (id INTEGER PRIMARY KEY, junk TEXT)")
+        con.execute(f"INSERT INTO {t} (junk) VALUES ('legacy row')")
+    con.commit()
+    con.close()
+
+    store.init()
+
+    con = sqlite3.connect(store._DB)
+    names = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    con.close()
+    assert not (set(dead) & names), f"still present after init: {set(dead) & names}"
+    # and the tables the terminal actually uses survived
+    assert {"news_articles", "earnings", "filings", "research_cache", "token_usage"} <= names
 
 
 def test_articles_round_trip_and_group_by_ticker(store):

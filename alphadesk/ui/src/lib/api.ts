@@ -61,21 +61,14 @@ export interface EarningsRow {
   eps_estimate: number | null
   eps_actual?: number | null
   surprise_pct?: number | null
-  move_since_report_pct?: number | null // total reaction since the report (gap + drift)
-  move_gap_pct?: number | null // the overnight/pre-market gap — repriced before you could act (uncapturable)
-  move_drift_pct?: number | null // capturable drift from the first post-report open — what you could trade
-  market_cap?: number | null // for ranking big names first within a run-day
-  low_liquidity?: boolean | null // same 20d avg $vol bar the trading pipeline gates entries on; null = unmeasurable
-  run_at?: string | null // when to run the desk to catch the drift (9:30 ET, next session)
-  public_at?: string | null // when the report becomes tradeable (BMO/DAY 4:00, AMC 16:00 ET)
-  pre_report_close?: number | null // pre-armed close the drift reaction is measured from
-  implied_move_pct?: number | null // pre-armed options-implied move (the market's own expectation)
-  // coverage self-assessment (reported names only): did the desk act on this reporter?
-  engagement?: "TOOK" | "DEBATED" | "SKIPPED" | "UNSEEN"
-  engagement_pick_id?: number | null
-  engagement_dir?: "LONG" | "SHORT" | null
-  engagement_verdict?: string | null // STRONG | SOFT | PASS (for took/debated)
-  engagement_why?: string | null // the desk's own reason: judge summary / thesis / skip reason
+  market_cap?: number | null // biggest names first within a day group
+  low_liquidity?: boolean | null // 20d avg $vol bar; null = unmeasurable
+  run_at?: string | null // day-group key for upcoming reporters
+  public_at?: string | null // when the report goes public (BMO/DAY 9:30, AMC 16:00 ET)
+  pre_report_close?: number | null
+  implied_move_pct?: number | null // options-implied move — the market's own expectation
+  // NOTE: post-report drift (move_*_pct) and desk engagement are gone. Both
+  // came from tables the retired trading engine wrote; nothing populates them.
 }
 
 // A pick as shown in the Sessions view (decision + lifecycle + outcome).

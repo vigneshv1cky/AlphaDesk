@@ -45,7 +45,6 @@ def test_price_helpers_do_not_raise_nameerror(call):
 
 
 def test_store_read_helpers_run_on_an_empty_ledger(store):
-    assert store.earnings_reactions_batch([]) == {}
     assert store.recent_articles_by_ticker("2099-01-01T00:00:00Z") == {}
     assert store.upcoming_earnings(days=5) == []
     assert store.recently_reported(days=3) == []

@@ -32,7 +32,10 @@ _cache: dict[str, tuple[float, dict]] = {}
 _cache_lock = threading.Lock()
 
 
-def _evict_expired(cache: dict[str, tuple[float, object]], ttl_s: float):
+def _evict_expired(cache: dict[str, tuple[float, Any]], ttl_s: float):
+    # `Any` rather than `object` for the value: dict is invariant, so an
+    # `object` annotation rejects every real cache here (each holds a more
+    # specific value type) even though eviction only ever reads v[0].
     now = time.time()
     stale = [k for k, v in cache.items() if now - v[0] > ttl_s * 2]
     for k in stale:
@@ -81,19 +84,18 @@ def _live_last_trade(symbol: str) -> Optional[tuple[float, object]]:
         return None
 
 
-# Module-level caches and lookup tables used by the functions below.
+# Module-level caches and lookup tables used by the functions below. These live
+# here rather than beside their functions because a refactor that deletes a
+# function must not be able to take shared state with it — which is exactly how
+# they were lost once.
 _liquidity_batch_cache: dict[str, Any] = {"ts": 0.0, "key": None, "data": {}}
+
 _macro_cache: dict | None = None
 _macro_cache_lock = threading.Lock()
 _macro_cache_ts: float = 0.0
-_MACRO_CACHE_TTL_S = 600  # 10 min — macro data moves slowly
-_macro_cache_lock = threading.Lock()
-_macro_cache_ts: float = 0.0
-_MACRO_CACHE_TTL_S = 600  # 10 min — macro data moves slowly
-_macro_cache_ts: float = 0.0
-_MACRO_CACHE_TTL_S = 600  # 10 min — macro data moves slowly
-_MACRO_CACHE_TTL_S = 600  # 10 min — macro data moves slowly
 _macro_prev: dict[str, float] = {}
+_MACRO_CACHE_TTL_S = 600  # 10 min — macro data moves slowly
+
 _SECTOR_MAP = {
     "Technology": "XLK", "Financial Services": "XLF", "Energy": "XLE",
     "Healthcare": "XLV", "Industrials": "XLI", "Consumer Cyclical": "XLY",
@@ -103,9 +105,6 @@ _SECTOR_MAP = {
 }
 _sector_cache: dict[str, float] = {}
 _sector_cache_ts: float = 0.0
-_SECTOR_TTL_S = 300
-_sector_cache_ts: float = 0.0
-_SECTOR_TTL_S = 300
 _SECTOR_TTL_S = 300
 
 
