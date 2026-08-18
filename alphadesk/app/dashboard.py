@@ -156,11 +156,11 @@ def api_chart(symbol: str, days: int = 2):
     illiquid name's "1-minute" chart can be a handful of prints stretched
     across days, and it draws identically to a real one.
     """
-    from alphadesk.ingest import prices
+    from alphadesk.providers import get_prices
     sym = "".join(c for c in symbol.upper() if c.isalnum() or c in ".-")[:12]
     if not sym:
         raise HTTPException(400, "bad symbol")
-    series = prices.get_chart_series(sym, days=days)
+    series = get_prices().chart_series(sym, days=days)
     if not series:
         raise HTTPException(404, f"no intraday bars for {sym}")
     return series
@@ -180,11 +180,25 @@ def api_system():
     thing that runs unattended (the news/AI pipeline). The old position and
     grading counters went with the execution layer — a consumption product has
     no positions to report."""
+    import os
+
     from alphadesk.config import session as market_session
+    from alphadesk.providers import available
     return {
         "uptime_s": round(_process_age_s()),
         "market": market_session(),
         "news": store.news_health(),
+        # Which plugins this deployment has, and which are selected. Worth
+        # showing: with providers pluggable, "why is there no news" is usually
+        # "the feed you configured isn't the one you think".
+        "providers": {
+            "available": available(),
+            "selected": {
+                "llm": os.environ.get("LLM_PROVIDER", "openai-compatible"),
+                "news": os.environ.get("NEWS_PROVIDER", "polygon"),
+                "prices": os.environ.get("PRICE_PROVIDER", "builtin"),
+            },
+        },
     }
 
 

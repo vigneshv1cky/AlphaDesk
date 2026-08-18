@@ -81,6 +81,34 @@ def _live_last_trade(symbol: str) -> Optional[tuple[float, object]]:
         return None
 
 
+# Module-level caches and lookup tables used by the functions below.
+_liquidity_batch_cache: dict[str, Any] = {"ts": 0.0, "key": None, "data": {}}
+_macro_cache: dict | None = None
+_macro_cache_lock = threading.Lock()
+_macro_cache_ts: float = 0.0
+_MACRO_CACHE_TTL_S = 600  # 10 min — macro data moves slowly
+_macro_cache_lock = threading.Lock()
+_macro_cache_ts: float = 0.0
+_MACRO_CACHE_TTL_S = 600  # 10 min — macro data moves slowly
+_macro_cache_ts: float = 0.0
+_MACRO_CACHE_TTL_S = 600  # 10 min — macro data moves slowly
+_MACRO_CACHE_TTL_S = 600  # 10 min — macro data moves slowly
+_macro_prev: dict[str, float] = {}
+_SECTOR_MAP = {
+    "Technology": "XLK", "Financial Services": "XLF", "Energy": "XLE",
+    "Healthcare": "XLV", "Industrials": "XLI", "Consumer Cyclical": "XLY",
+    "Consumer Defensive": "XLP", "Basic Materials": "XLB",
+    "Real Estate": "XLRE", "Utilities": "XLU",
+    "Communication Services": "XLC",
+}
+_sector_cache: dict[str, float] = {}
+_sector_cache_ts: float = 0.0
+_SECTOR_TTL_S = 300
+_sector_cache_ts: float = 0.0
+_SECTOR_TTL_S = 300
+_SECTOR_TTL_S = 300
+
+
 def get_context(symbol: str) -> Optional[dict]:
     """Price/liquidity context for one symbol (fetched on demand, cached)."""
     sym = symbol.upper()

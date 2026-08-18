@@ -26,7 +26,7 @@ import hashlib
 import logging
 from datetime import timedelta, timezone
 
-from alphadesk.ai.deepseek import DeepSeekError, chat_json, wrap_data
+from alphadesk.ai.llm import LLMError, chat_json, wrap_data
 from alphadesk.config import (
     NEWS_LOOKBACK_HOURS,
     SCREENER_ASK_MAX_ARTICLES,
@@ -204,7 +204,7 @@ def ask(question: str) -> dict | None:
             role="screener-ask", source="POLYGON",
             max_input_chars=SCREENER_ASK_MAX_CHARS, max_tokens=1536,
         )
-    except DeepSeekError as exc:
+    except LLMError as exc:
         log.warning("screener ask failed (%r): %s", question, exc)
         return None
 

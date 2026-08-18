@@ -16,9 +16,10 @@ import hashlib
 import json
 import logging
 
-from alphadesk.ai.deepseek import DeepSeekError, chat_json, wrap_data
+from alphadesk.ai.llm import LLMError, chat_json, wrap_data
 from alphadesk.config import RESEARCH_CACHE_TTL_HOURS, RESEARCH_MAX_CHARS
-from alphadesk.ingest import openbb_ownership, prices
+from alphadesk.ingest import openbb_ownership
+from alphadesk.providers import get_prices
 from alphadesk.ledger import store
 
 log = logging.getLogger("alphadesk.research")
@@ -62,22 +63,23 @@ def _fetch_sections(symbol: str) -> list[dict]:
     """Every section a symbol question might need, fetched up front. Each:
     {title, data} — data is None/unavailable-shaped when that source failed,
     never an exception the caller has to handle."""
-    fundamentals = prices.get_fundamentals(symbol)
+    px = get_prices()
+    fundamentals = px.fundamentals(symbol)
     sector = fundamentals.get("sector") if fundamentals else None
 
     insider = openbb_ownership.get_insider_trades(symbol)
-    sector_perf = prices.sector_change_pct(sector) if sector else None
+    sector_perf = px.sector_change_pct(sector) if sector else None
 
     return [
         {"title": "Fundamentals", "data": fundamentals or {"available": False}},
         {"title": "Institutional ownership",
-         "data": prices.get_institutional_ownership(symbol) or {"available": False}},
+         "data": px.institutional_ownership(symbol) or {"available": False}},
         {"title": "Insider trades (SEC Form 4)",
          "data": {"trades": _wrap_insider_trades(insider)} if insider else {"available": False}},
         {"title": "Earnings history",
-         "data": prices.get_earnings_context(symbol) or {"available": False}},
+         "data": px.earnings_context(symbol) or {"available": False}},
         {"title": "Macro snapshot",
-         "data": prices.macro_snapshot() or {"available": False}},
+         "data": px.macro() or {"available": False}},
         {"title": "Sector performance",
          "data": {"sector": sector, "change_pct": sector_perf} if sector_perf is not None
                  else {"available": False}},
@@ -140,7 +142,7 @@ def ask(symbol: str, question: str) -> dict | None:
             _SYSTEM, user, role="research-agent", source=None, decision_id=f"{sym}:{qh}",
             max_input_chars=RESEARCH_MAX_CHARS, max_tokens=1024,
         )
-    except DeepSeekError as exc:
+    except LLMError as exc:
         log.warning("research agent failed for %s %r: %s", sym, question, exc)
         return None
 

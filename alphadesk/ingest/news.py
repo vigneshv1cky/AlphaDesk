@@ -1,25 +1,22 @@
-"""News ingestion — Polygon REST poll → enrichment → persisted for the screener.
+"""News ingestion — poll the configured provider, enrich, persist.
 
 Recovered and adapted from the v1 multi-agent system (removed 11263ae,
 2026-08-07): same Polygon fetch and the same enrichment_cache-backed
 amortization, with the LLM call swapped from the old committee's call_role()
 (claude_sdk/kimi/deepseek, multi-role) to this repo's single-purpose
-ai/deepseek.py client. The enrichment prompt (category/sentiment/relations) is
+ai/llm.py client. The enrichment prompt (category/sentiment/relations) is
 unchanged — it was already tuned and working.
 """
 
 import logging
-import os
-from datetime import datetime, timezone
+from datetime import datetime
 
-from alphadesk.ai.deepseek import DeepSeekError, chat_json, wrap_data
+from alphadesk.ai.llm import LLMError, chat_json, wrap_data
 from alphadesk.ledger import store
 
 log = logging.getLogger("alphadesk.news")
 
-_POLYGON_KEY = os.environ.get("POLYGON_API_KEY", "")
 _BATCH = 30               # articles per enrichment call — fewer calls, less overhead
-_MAX_SCAN = 400           # cap raw articles paged through (free-tier rate-limit guard)
 _seen_ids: set[str] = set()
 _SEEN_CAP = 100_000       # bound memory in a 24/7 process; clearing only risks
                           # re-fetching an old article, absorbed by enrichment_cache
@@ -54,56 +51,49 @@ _ENRICH_SYSTEM = (
 )
 
 
-def fetch_articles(since: datetime, limit: int = 200) -> list[dict]:
-    """Raw Polygon articles (ticker-tagged) since `since`, NEWEST first.
-
-    Bounded: stops after `limit` usable articles OR the raw-scan cap — whichever
-    comes first. Recency-first is deliberate: a wide window holds far more than
-    the cap, so the only correct policy under a hard cap is to sacrifice the
-    OLDEST news, never the newest.
-    """
-    if not _POLYGON_KEY:
-        log.warning("POLYGON_API_KEY not set — news ingestion disabled")
-        return []
-    import polygon
-    client = polygon.RESTClient(api_key=_POLYGON_KEY)
-    out: list[dict] = []
-    scanned = 0
+def _provider_name() -> str:
+    """Which feed this batch came from — recorded against the token spend so
+    /api/tokens stays meaningful after someone switches providers."""
+    from alphadesk.providers import get_news
     try:
-        for art in client.list_ticker_news(
-            published_utc_gte=since.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            limit=min(limit, 1000), sort="published_utc", order="desc",
-        ):
-            scanned += 1
-            if scanned > _MAX_SCAN:
-                log.warning("Polygon scan cap (%d) hit — %d usable articles collected",
-                           _MAX_SCAN, len(out))
-                break
-            art_id = str(getattr(art, "id", "") or getattr(art, "article_url", ""))
-            if not art_id or art_id in _seen_ids:
-                continue
-            if len(_seen_ids) >= _SEEN_CAP:
-                _seen_ids.clear()
-            _seen_ids.add(art_id)
-            tickers = [t for t in (getattr(art, "tickers", None) or []) if t]
-            title = getattr(art, "title", "") or ""
-            if not tickers or not title:
-                continue
-            publisher = getattr(art, "publisher", None)
-            out.append({
-                "id": art_id,
-                "title": title,
-                "summary": (getattr(art, "description", "") or "")[:400],
-                "source": publisher.name if publisher and hasattr(publisher, "name") else "Polygon",
-                "url": getattr(art, "article_url", "") or "",
-                "published_at": str(getattr(art, "published_utc", "")
-                                    or datetime.now(timezone.utc).isoformat()),
-                "tickers": tickers[:8],
-            })
-            if len(out) >= limit:
-                break
-    except Exception as exc:
-        log.warning("Polygon fetch failed: %s", exc)
+        return getattr(get_news(), "name", "news")
+    except Exception:
+        return "news"
+
+
+def fetch_articles(since: datetime, limit: int = 200) -> list[dict]:
+    """Ticker-tagged articles since `since`, NEWEST first, from whichever news
+    provider is configured (NEWS_PROVIDER).
+
+    Returns the dict shape the rest of the pipeline stores. A provider failure
+    is logged and yields an empty list: a dead feed must leave the terminal
+    showing the articles it already has, never an error page.
+    """
+    from alphadesk.providers import ProviderError, get_news
+    try:
+        provider = get_news()
+        articles = provider.fetch(since, limit=limit)
+    except ProviderError as exc:
+        log.warning("news provider unavailable: %s", exc)
+        return []
+    except Exception as exc:                      # a broken plugin is not fatal
+        log.error("news provider raised unexpectedly: %s", exc)
+        return []
+
+    out: list[dict] = []
+    for a in articles:
+        # Dedupe across polls. The window overlaps by design, so without this
+        # every cycle would re-enrich the same articles.
+        if not a.id or a.id in _seen_ids:
+            continue
+        if len(_seen_ids) >= _SEEN_CAP:
+            _seen_ids.clear()
+        _seen_ids.add(a.id)
+        out.append({
+            "id": a.id, "title": a.title, "summary": a.summary,
+            "source": a.source, "url": a.url,
+            "published_at": a.published_at, "tickers": a.symbols,
+        })
     return out
 
 
@@ -127,9 +117,9 @@ def enrich(articles: list[dict]) -> dict[str, dict]:
         )
         try:
             out = chat_json(_ENRICH_SYSTEM, "Articles:\n" + wrap_data("articles", numbered),
-                            role="news-enrich", source="POLYGON")
+                            role="news-enrich", source=_provider_name())
             return {item["i"]: item for item in out.get("items", [])}
-        except DeepSeekError as exc:
+        except LLMError as exc:
             log.warning("Enrichment batch failed (%s) — neutral fallback ×%d", exc, len(batch))
             return {}
 

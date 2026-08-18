@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "alphadesk"
 version = "0.2.0"
-description = "AlphaDesk — a human-operated stock research and execution terminal. No autonomous trading."
+description = "AlphaDesk — an open-source, pluggable market research terminal."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
 authors = [
     { name = "Vignesh Murugan" },
 ]
-keywords = ["stocks", "research", "trading", "terminal", "sec-edgar", "llm"]
+keywords = ["stocks", "research", "terminal", "sec-edgar", "llm", "finance", "plugins"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Financial and Insurance Industry",
@@ -39,6 +39,14 @@ dependencies = [
     "openbb-core>=1.6.10",          # ingest/openbb_ownership.py — SEC Form 4 insider trades,
     "openbb-sec>=1.6.7",            # Fetcher class only, NOT the `openbb` metapackage
 ]
+
+# Providers plug in here. A package declaring this group is discovered
+# automatically once installed — see docs/providers.md.
+[project.entry-points."alphadesk.providers"]
+# example = "mypackage.providers:register_all"
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff", "httpx"]      # httpx backs fastapi's TestClient
 
 [project.urls]
 Homepage = "https://github.com/vigneshv1cky/AlphaDesk"

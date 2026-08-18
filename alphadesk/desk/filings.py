@@ -14,7 +14,7 @@ appear in the SEC document survive.
 import hashlib
 import logging
 
-from alphadesk.ai.deepseek import DeepSeekError, chat_json, wrap_data
+from alphadesk.ai.llm import LLMError, chat_json, wrap_data
 from alphadesk.config import FILING_MAX_CHARS
 from alphadesk.ingest import edgar
 from alphadesk.ledger import store
@@ -94,7 +94,7 @@ def ask(accession: str, question: str) -> dict | None:
             role="filing-qa", source="EDGAR", decision_id=accession,
             max_input_chars=FILING_MAX_CHARS + 2000, max_tokens=1024,
         )
-    except DeepSeekError as exc:
+    except LLMError as exc:
         log.warning("filing QA failed for %s: %s", accession, exc)
         return None
 

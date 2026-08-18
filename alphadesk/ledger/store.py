@@ -9,7 +9,6 @@ import json
 import sqlite3
 import threading
 from datetime import datetime, timezone
-from typing import Any, Optional
 
 from alphadesk.config import DATA_DIR
 
@@ -839,16 +838,6 @@ def earnings_reactions_batch(symbols: list[str]) -> dict[str, dict]:
                       "reaction_drift": r["reaction_drift"],
                       "direction": r["direction"]}
     return out
-    """The most recent report for `symbol` within `days` (if it has one) — used at
-    brief time to decide whether to web-read the report."""
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT symbol, report_date, session, eps_estimate, eps_actual, surprise_pct"
-            " FROM earnings WHERE symbol=? AND eps_actual IS NOT NULL"
-            "   AND report_date >= ? AND report_date <= ?"
-            " ORDER BY report_date DESC LIMIT 1", (symbol.upper(), _et_date(-int(days)), _et_date(0)),
-        ).fetchone()
-    return dict(row) if row else None
 
 
 def news_health() -> dict:

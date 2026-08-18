@@ -115,9 +115,8 @@ output "external_ip" {
 # ---------------------------------------------------------------------------
 
 variable "alert_email" {
-  description = "Email for engine-down alerts"
+  description = "Email for engine-down alerts. No default on purpose — a forked repo must not send its alerts to the original author."
   type        = string
-  default     = "muruganvignesh0810@gmail.com"
 }
 
 resource "google_project_service" "monitoring" {

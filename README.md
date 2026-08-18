@@ -1,246 +1,120 @@
 # AlphaDesk
 
-A pure-quant **post-earnings-drift research engine**. No LLM, no agents — a weighted
-set of statistical signals scores each earnings reporter, the desk books
-session-scoped paper positions, and a self-grading ledger scores every call forward
-vs SPY.
+A dense, dark, self-hosted **market research terminal**. Open source, and
+pluggable at every seam that touches the outside world.
 
-**Research / paper only — no live order execution.** (Alpaca PAPER fills are opt-in
-and off by default.)
-
-## Table of contents
-
-- [The idea](#the-idea)
-- [How a run works](#how-a-run-works)
-- [The signals](#the-signals)
-- [Trading model](#trading-model)
-- [Risk rails](#risk-rails)
-- [Ledger and grading](#ledger-and-grading)
-- [Backtesting](#backtesting)
-- [Quick start](#quick-start)
-- [Commands](#commands)
-- [Configuration](#configuration)
-- [Repository layout](#repository-layout)
-- [Design principles](#design-principles)
-- [Status](#status)
-- [Disclaimer](#disclaimer)
-
-## The idea
-
-Markets price a headline in seconds, but the *consequences* take days to propagate.
-Post-earnings drift (PEAD) is the classic example: after a big earnings reaction,
-the move often keeps going as algos price the headline but miss the nuance. The
-desk watches the Nasdaq earnings calendar, waits for a material reaction, scores it,
-and bets the continuation.
-
-## How a run works
-
-Every `AUTORUN_INTERVAL_MINUTES` (5 on the VM) during 04:00–19:00 ET:
+It reads: news, SEC filings, fundamentals, ownership, insider activity, the
+earnings calendar, charts. It does not trade, hold positions or keep score —
+see [Not a trading system](#not-a-trading-system).
 
 ```
-Nasdaq earnings calendar (BMO/AMC/DAY, EPS estimate/actual/surprise)
-        │
-   drift candidates — recently-public reporters with a material reaction (≥1.5%)
-        │
-   anti-double-dip — drop held symbols + 24h re-pick cooldown
-        │
-   quant scoring — top 40 movers, batched price/options/fundamental context,
-   one batched moves_since_report, 8-way concurrent scoring
-        │
-   composite = 6 weighted signals → −100..+100 → direction (LONG/SHORT)
-        │
-   risk rails — max open positions, per-sector·direction concentration,
-   daily-loss stop, session-aware sizing
-        │
-   ATR plan → book → funnel (why-picked / why-dropped)
-        │
-   watchers — tiered exits (target / trailing / stop / spike / stale / session-close)
-        │
-   grader — realized exit = the grade (alpha vs SPY, net friction)
+┌ status ────────────────────────────────────────────────────────┬─────────┐
+│ market · in window · with news · reporting · news today · up    │  ASK    │
+├──────────────────┬─────────────────────────────────────────────┤         │
+│ WINDOW           │ NEWS TAPE                                   │ window  │
+│ 215 symbols      │ NVDA  Why the trade desk stock plunged…     │ symbol  │
+│ AACG  —  08-19   │ AMZN  History says a $10,000 investment…    │ filing  │
+│ AAPL  1  —       │ MSFT  How IREN is cashing in on AI…         │         │
+├──────────────────┴─────────────────────────────────────────────┤ …ask a  │
+│ REPORTING SOON                                                 │ question│
+└────────────────────────────────────────────────────────────────┴─────────┘
 ```
 
-The desk also **pre-arms** upcoming reporters (pre-report close + options-implied
-move stored ahead of release) so the moment a report goes public the reaction is
-measured instantly.
+## What makes it different
 
-## The signals
+**The AI cannot make a claim it can't back.** Every answer is checked against
+records the server itself fetched, and anything unverifiable is *deleted before
+you see it* — three mechanisms, one per surface:
 
-Each signal returns −100 (strong SHORT) to +100 (strong LONG), weighted into a
-composite:
+| Surface | The model cites | The server verifies against |
+|---|---|---|
+| Window ask | item index | the numbered window it was handed |
+| Filing Q&A | a verbatim quote | a substring check on the real SEC text |
+| Symbol research | section index | the sections this server actually fetched |
 
-| Signal | Weight | What it measures |
-|--------|--------|------------------|
-| `earnings_drift` | 0.30 | reaction + drift continuation vs the gap (underreaction gauge) |
-| `volume_expansion` | 0.20 | post-report volume confirms real new information |
-| `sector_divergence` | 0.15 | company-specific move vs sector rotation |
-| `short_interest_risk` | −0.10 | squeeze/borrow penalty for SHORTs, fuel for LONGs |
-| `price_structure` | 0.15 | trend strength vs ATR exhaustion |
-| `liquidity` | 0.10 | the drift sweet spot ($0.5B–$10B, enough volume) |
+**It admits when its data is too thin.** Free market-data feeds carry a
+fraction of consolidated volume, so an illiquid name's "1-minute" chart can be
+a handful of prints stretched across days — and it renders *identically* to a
+real one. AlphaDesk measures bar coverage and gap size and **hides** RSI/MACD
+below the floor rather than drawing something that looks trustworthy and isn't.
 
-Weights are **learned** (`quant/calibrate.py`): online nudges after every graded
-outcome, batch re-calibration from the last 200 closed trades, plus exit-parameter
-recommendations (widening the stop if >60% of exits are stops, etc.).
-
-## Trading model
-
-- **Session-scoped trades.** Each market window is its own trade: PRE 4:00–9:30,
-  OPEN 9:30–16:00, AFTER 16:00–20:00. A pick entered in a session exits at that
-  session's close — **nothing carries into another market**. Night is not tradeable;
-  a pick decided at night is stamped PRE and enters at the next 4:00 open.
-- **Per-market buffers** (`config.py`): `START_BUFFER_MIN` (15) skips the volatile
-  open, `ENTRY_BUFFER_MIN` (60) stops entries in the final hour — never buy when
-  we're about to close — and `EXIT_BUFFER_MIN` (15) closes positions before the
-  boundary. Entries: PRE 4:15–8:30, OPEN 9:45–15:00, AFTER 16:15–19:00. Exits:
-  9:15 / 15:45 / 19:45 (the last entry still gets ~45 min).
-- **Entry** fills at the live price when found; a pick with no live trade is not
-  taken. **Exit** is pure code (target/stop/trailing/spike/stale/session-close).
-
-## Risk rails
-
-Paper-desk circuit breakers, all env-overridable:
-
-- `MAX_OPEN_POSITIONS` (20) — the book is capped; new entries are gated at the cap.
-- `CONCENTRATION_MAX_PER_CLUSTER` (2) — max taken picks per sector·direction per day.
-- `DAILY_LOSS_STOP_PCT` (10) — stop opening after that much realized loss today.
-- 0.5× conviction sizing in thin PRE/AFTER sessions.
-
-Every trigger records a funnel/skip reason so it's visible, never silent.
-
-## Ledger and grading
-
-Every evaluation is one row in `~/.alphadesk/ledger.db` (SQLite/WAL). The grader is
-pure code:
-
-- **Entry.** Closed-market picks fill at the next open; broker-filled picks use the
-  actual fill. Entry precedence: broker fill → live price → Model-A open.
-- **Outcomes.** `alpha_net` = directional return − SPY − friction (doubled for
-  low-liquidity names). `alpha_adj` = the same plus beta-adjustment and short-borrow.
-- **Realized exits are the grade.** A closed session trade is stamped `alpha_net` +
-  `graded_at` at exit, so the forward grader never re-grades it.
-- **Paths.** MFE/MAE from daily high/low over the hold window.
-- **Anti-survivorship.** Gate-dropped reporters (reaction A/B) and quant drops
-  (day-deduped skips) are all graded forward.
-
-## Backtesting
-
-`python -m alphadesk.main backtest --days 90` replays past earnings with the same
-entry/benchmark/friction model as a live pick, bucketed by reaction size, session,
-direction — and with `--selection`, graded in the composite's direction by score.
-Reads a **local daily-price cache** (`price_daily` table): backfill once, then
-re-runs take ~1 minute instead of being yfinance-rate-limited.
+**The window is not ranked.** Every symbol with fresh news or an upcoming
+report, alphabetically. Sort a column if you want; nothing is ordered for you
+by an opinion you can't inspect.
 
 ## Quick start
 
 ```bash
 pip install -r requirements.txt
-
-# Web dashboard + autorun + watchers + grader
-python -m alphadesk.main dashboard        # http://localhost:8000
-
-# One-shot headless run
-python -m alphadesk.main desk
-
-# Rebuild the UI (React 19 + TS + Vite → app/static/)
-cd alphadesk/ui && pnpm build
+cp alphadesk/deploy/env.example .env      # then edit it
+python -m alphadesk.main dashboard        # http://127.0.0.1:8000
 ```
 
-## Commands
+Frontend development:
 
 ```bash
-python -m alphadesk.main dashboard    # FastAPI + SPA + autorun + watchers + grader
-python -m alphadesk.main desk         # one-shot run
-python -m alphadesk.main grade        # grade due picks / MFE-MAE
-python -m alphadesk.main status       # ledger summary
-python -m alphadesk.main backtest     # does drift pay on history? (--selection)
-python -m alphadesk.main abtest       # reaction-gate A/B
-python -m alphadesk.main alpha        # alpha_net vs beta-adjusted alpha_adj
-python -m alphadesk.main earnings     # refresh calendar, show upcoming/recent
+cd alphadesk/ui && pnpm install && pnpm dev     # proxies /api to :8000
 ```
 
-## Configuration
-
-Set via `.env` or environment.
-
-**Required**
+### Minimum configuration
 
 ```ini
-ALPACA_API_KEY=...            # market data + tradable universe
+ALPACA_API_KEY=...            # market data + the tradable universe
 ALPACA_SECRET_KEY=...
+LLM_API_KEY=...               # any OpenAI-compatible endpoint
+SEC_USER_AGENT=YourApp (you@example.com)   # SEC requires real contact info
 ```
 
-**Key knobs** (all optional, defaults shown)
+Everything else has a working default. SEC EDGAR needs no key at all.
+
+## Pluggable
+
+Three seams, each a `Protocol` with a name you select in config:
 
 ```ini
-ALPHADESK_DATA=~/.alphadesk
-AUTORUN_INTERVAL_MINUTES=5
-AUTORUN_START_ET=04:00
-AUTORUN_END_ET=19:00
-MATERIAL_REACTION_PCT=1.5
-QUANT_PREFILTER_MIN_SCORE=5.0
-QUANT_SCORE_CANDIDATES=40
-MAX_OPEN_POSITIONS=20
-CONCENTRATION_MAX_PER_CLUSTER=2
-DAILY_LOSS_STOP_PCT=10
-START_BUFFER_MIN=5
-ENTRY_BUFFER_MIN=15
-EXIT_BUFFER_MIN=5
-PAPER_TRADING=0              # route picks to Alpaca PAPER for real fills
-PM_BASE_USD=1000
-PM_MAX_POSITION_USD=2500
-ALERTS_WEBHOOK_URL=          # Telegram/Slack/Discord incoming webhook
-SHORT_BORROW_APR=2.0         # honest-alpha borrow charge
-SHORT_BORROW_APR_ILLIQUID=30.0
+LLM_PROVIDER=openai-compatible   # deepseek · openai · groq · ollama · lmstudio
+# LLM_PROVIDER=anthropic
+NEWS_PROVIDER=polygon            # or alpaca
+PRICE_PROVIDER=builtin           # alpaca + yfinance
 ```
 
-## Repository layout
+Bring your own without forking — a local module via `ALPHADESK_PLUGINS`, or a
+published package via the `alphadesk.providers` entry point. Registering an
+existing name replaces the built-in. See **[docs/providers.md](docs/providers.md)**.
+
+Dashboard tiles work the same way: a widget registers itself
+(`ui/src/widgets/registry.ts`), and the page renders whatever is registered.
+
+## Layout
 
 ```
 alphadesk/
-  config.py            sessions, buffers, risk rails, tradable universe
-  main.py              CLI + 5 async loops (grader, earnings+arm, autorun, watcher, quant watcher)
-  ingest/
-    earnings.py        Nasdaq calendar → drift candidates + pre-earnings + pre-arm
-    prices.py          price context, options IV, sector ETFs, macro
-  quant/
-    signals.py         6 weighted signals → composite → direction
-    calibrate.py       online + batch weight learning
-    watcher.py         tiered exits (TP/trail/stop/spike/stale/session-close)
-    stream.py          Alpaca WebSocket live prices
-  desk/
-    stream.py          Find Trades pipeline (candidates → risk rails → score → book)
-    workflow.py        research_run() batch twin
-    plan.py            ATR-based entry/target/stop
-    portfolio.py       opt-in Alpaca paper order routing + reconcile
-  ledger/
-    store.py           SQLite/WAL: picks, runs, funnel, skips, earnings, price_daily
-    grader.py          forward grading vs SPY + MFE/MAE + reaction A/B
-    backtest.py        replay history (local price cache)
-  app/
-    dashboard.py       FastAPI: /api/* + SPA
-    alerts.py          webhook notifications
-  ui/                  React 19 + TS + Vite → app/static/
+  providers/    the plugin seams: LLM, news, prices + the registry
+  ingest/       news polling, SEC EDGAR, earnings calendar, price/indicator math
+  desk/         the three AI surfaces: window ask, filing Q&A, symbol research
+  ai/           one transport: text in, JSON out, injection-guarded, cost-tracked
+  ledger/       SQLite store — articles, filings, caches, token spend
+  app/          FastAPI + the built SPA
+  ui/           React 19 + Vite; dense terminal styling, no component library
 ```
 
-## Design principles
+## Not a trading system
 
-- **Code owns facts, physics, safety, and scoring; signals own judgment.** No LLM,
-  no hardcoded narrative. Price exits are code; grading is pure arithmetic.
-- **Forward-only evidence.** Every pick declares direction + horizon and is graded
-  at that horizon vs SPY. The system earns trust from its ledger.
-- **Fail safe.** A failed stage drops that candidate. Never a phantom pick.
-- **Anti-survivorship.** Rejected candidates and skips are graded forward too.
+Earlier versions of this repo traded. Two autonomous engines were built,
+measured against the S&P, and deleted: **−0.072%** mean alpha over 503
+backtested trades, **−1.123%** over 44 live ones. The manual booking layer that
+replaced them was removed too, on 2026-08-18, when the project became a
+consumption product.
 
-## Status
+There is no order routing, no position state and no broker integration in this
+codebase. If you want that, the history is in git — but the measured result is
+in the numbers above.
 
-Early and **unproven.** As of 2026-08-07: backtests (1700+ reports) and 300+ live
-exits land near-zero-to-negative — the drift edge is not validated. The composite
-**selection** adds value in a narrow pocket (score 5–10, OPEN session, LONGs), while
-high scores, PRE/AFTER sessions, and SHORTs lose consistently. The desk is running
-all sessions to build the live sample before tuning toward that pocket. Everything
-is instrumented (performance page, backtest, funnel, risk rails) to make that
-decision data-backed.
+## Contributing
 
-## Disclaimer
+See [CONTRIBUTING.md](CONTRIBUTING.md). New data sources should be providers,
+not edits to `ingest/`.
 
-For educational and informational purposes only. **Not financial advice.** This
-system does not place trades. Algorithmic trading carries significant risk of loss.
+## Licence
+
+MIT.

@@ -7,7 +7,8 @@ CIK, its actual 10-Q shape, the full-text search param names). Three facts
 that are easy to get wrong and will silently 403/empty-result you if you do:
 
   1. SEC requires a descriptive User-Agent with contact info on every request
-     (`_UA` below) — a generic or missing one gets throttled or blocked.
+     (`SEC_USER_AGENT`, see `_user_agent()`) — generic or missing gets
+     throttled or blocked. There is no safe default; each deployment sets it.
   2. Full-text search filters by CIK via `ciks=` (zero-padded 10 digits), NOT
      `tickers=` — the latter is silently ignored and returns unfiltered
      results across every filer, which reads as "it worked" until you notice
@@ -19,6 +20,7 @@ that are easy to get wrong and will silently 403/empty-result you if you do:
 """
 
 import logging
+import os
 import re
 import time
 import urllib.error
@@ -26,7 +28,27 @@ import urllib.request
 
 log = logging.getLogger("alphadesk.edgar")
 
-_UA = "AlphaDesk research (contact: muruganvignesh0810@gmail.com)"
+def _user_agent() -> str:
+    """SEC requires a descriptive User-Agent with real contact info on every
+    request, and throttles or blocks generic ones.
+
+    This MUST be configured per deployment. It used to be one maintainer's
+    address hardcoded — which meant every fork would have hammered EDGAR under
+    his name and could have got him rate-limited for someone else's traffic.
+    """
+    ua = os.environ.get("SEC_USER_AGENT", "").strip()
+    if ua:
+        return ua
+    if not _user_agent._warned:                      # type: ignore[attr-defined]
+        log.warning(
+            "SEC_USER_AGENT is not set. SEC asks for a descriptive User-Agent with "
+            "contact info (e.g. 'AlphaDesk (you@example.com)') and throttles requests "
+            "without one — filings may fail or be slow until you set it.")
+        _user_agent._warned = True                   # type: ignore[attr-defined]
+    return "AlphaDesk (contact not configured; set SEC_USER_AGENT)"
+
+
+_user_agent._warned = False                          # type: ignore[attr-defined]
 _TICKER_MAP_URL = "https://www.sec.gov/files/company_tickers.json"
 _SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik10}.json"
 _FTS_URL = "https://efts.sec.gov/LATEST/search-index"
@@ -46,7 +68,7 @@ def _get(url: str, timeout: float = 15.0) -> bytes:
     wait = _MIN_INTERVAL_S - (time.monotonic() - _last_request_t)
     if wait > 0:
         time.sleep(wait)
-    req = urllib.request.Request(url, headers={"User-Agent": _UA})
+    req = urllib.request.Request(url, headers={"User-Agent": _user_agent()})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.read()
