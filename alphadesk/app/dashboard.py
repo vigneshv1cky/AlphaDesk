@@ -166,6 +166,14 @@ def api_chart(symbol: str, days: int = 2):
     return series
 
 
+@app.get("/api/tape")
+def api_tape():
+    """The market strip pinned across the top of the terminal. Cached upstream
+    for a minute — this is glanceable context, not a quote feed."""
+    from alphadesk.providers import get_prices
+    return {"tape": get_prices().market_tape()}
+
+
 @app.get("/api/tokens")
 def api_tokens(days: int = 1):
     days = max(1, min(days, 365))   # a negative `days` becomes an invalid SQLite modifier → NULL → misleading data

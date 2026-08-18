@@ -14,6 +14,7 @@ export const keys = {
   earnings: ["earnings"] as const,
   screener: ["screener"] as const,
   system: ["system"] as const,
+  tape: ["tape"] as const,
 }
 
 export const useEarnings = (enabled = true) =>
@@ -21,6 +22,9 @@ export const useEarnings = (enabled = true) =>
 
 export const useScreener = () =>
   useQuery({ queryKey: keys.screener, queryFn: api.screener, refetchInterval: 60_000 })
+
+export const useTape = () =>
+  useQuery({ queryKey: keys.tape, queryFn: api.tape, refetchInterval: 60_000 })
 
 export const useSystem = () =>
   useQuery({ queryKey: keys.system, queryFn: api.system, refetchInterval: 30_000 })

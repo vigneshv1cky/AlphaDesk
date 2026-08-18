@@ -1,10 +1,11 @@
 import { lazy, Suspense, useEffect, useState } from "react"
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom"
 import { type EarningsRow } from "@/lib/api"
-import { useEarnings } from "@/lib/queries"
+import { useEarnings, useSystem } from "@/lib/queries"
 import { useTheme } from "@/lib/theme"
 import { Header } from "@/components/Header"
-import { Nav } from "@/components/Nav"
+import { Sidebar } from "@/components/Sidebar"
+import { TickerTape } from "@/components/TickerTape"
 import { AiRail } from "@/components/AiRail"
 import { Moon, Monitor, Sun } from "lucide-react"
 
@@ -23,6 +24,40 @@ const TITLES: Record<string, string> = {
   "/chart": "Chart · AlphaDesk",
   "/earnings": "Earnings · AlphaDesk",
   "/system": "System Health · AlphaDesk",
+}
+
+/** ET clock + market session, pinned in the header. The market runs on US
+ * Eastern; showing the viewer's local time would make every other timestamp on
+ * the terminal ambiguous. */
+function MarketClock() {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 30_000)
+    return () => clearInterval(t)
+  }, [])
+  const { data } = useSystem()
+  const time = now.toLocaleTimeString("en-US", {
+    timeZone: "America/New_York", hour: "numeric", minute: "2-digit",
+  })
+  const day = now.toLocaleDateString("en-US", {
+    timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric",
+  })
+  const sess = data?.market ?? ""
+  const label = sess === "OPEN" ? "Open" : sess === "PRE" ? "Pre-Mkt"
+    : sess === "AFTER" ? "After-Hrs" : sess === "CLOSED" ? "Closed" : ""
+  return (
+    <div className="flex shrink-0 items-center gap-2 px-2">
+      <span className="num text-[11px]">{time} ET</span>
+      <span className="text-[10px] text-muted-foreground">· {day}</span>
+      {label && (
+        <span className={`border px-1 text-[9px] font-semibold uppercase tracking-[0.06em] ${
+          sess === "OPEN" ? "border-gain/40 text-gain" : "border-border text-muted-foreground"
+        }`}>
+          {label}
+        </span>
+      )}
+    </div>
+  )
 }
 
 function Shell() {
@@ -46,12 +81,11 @@ function Shell() {
           a data-dense terminal uses the full width of the display, and a
           centred 1200px column would waste half a monitor. */}
       <header className="z-30 flex h-[30px] shrink-0 items-stretch border-b border-border bg-panel-header">
-        <div className="flex shrink-0 items-center gap-1.5 px-2">
+        <div className="flex w-[150px] shrink-0 items-center gap-1.5 border-r border-border px-2">
           <span className="h-2 w-2 bg-accent" />
           <span className="text-[11px] font-bold tracking-[0.06em]">ALPHADESK</span>
         </div>
-        <div className="w-px shrink-0 bg-border" />
-        <Nav />
+        <MarketClock />
         <div className="min-w-0 flex-1" />
         <Header />
         <button
@@ -62,11 +96,14 @@ function Shell() {
           {theme === "dark" ? <Moon className="h-3 w-3" /> : theme === "light" ? <Sun className="h-3 w-3" /> : <Monitor className="h-3 w-3" />}
         </button>
       </header>
-      {/* Content and rail are siblings in a flex row: the rail is a real column
-          that the grid reflows around, not an overlay floating on top of the
-          data. On a dense terminal an overlay would cover the thing you are
-          asking about. */}
+      {/* The market strip spans the full width UNDER the header and ABOVE the
+          sidebar split — it is context for everything, not for one view. */}
+      <TickerTape />
+      {/* Sidebar, content and AI rail are three flex siblings. The rail is a
+          real column the grid reflows around, not an overlay: on a dense
+          terminal an overlay would cover the thing you are asking about. */}
       <div className="flex min-h-0 flex-1">
+      <Sidebar />
       <main className="min-h-0 flex-1 overflow-y-auto">
         <div className="p-1">
           <Suspense fallback={<div className="p-2 text-[11px] text-muted-foreground">loading…</div>}>

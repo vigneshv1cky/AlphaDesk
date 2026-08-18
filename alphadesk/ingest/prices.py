@@ -853,3 +853,60 @@ def sector_change_pct(sector: str | None) -> float | None:
     except Exception as exc:
         log.debug("sector ETF download failed: %s", exc)
     return _sector_cache.get(etf)
+
+
+_tape_cache: tuple[float, list[dict]] = (0.0, [])
+_TAPE_TTL_S = 60
+
+
+def market_tape() -> list[dict]:
+    """The index / commodity / crypto strip across the top of the terminal.
+
+    One batched yfinance download for every symbol in MARKET_TAPE, cached for
+    a minute — this is glanceable context, not a trading feed, and refetching
+    eight symbols on every page poll would be the most expensive thing the
+    terminal does for the least benefit.
+
+    Returns [{symbol, label, price, change_pct}]. A symbol that fails to
+    resolve is simply omitted rather than rendered as a zero, because a tape
+    showing 0.00 reads as a crashed market rather than a missing quote.
+    """
+    global _tape_cache
+    ts, cached = _tape_cache
+    if cached and time.time() - ts < _TAPE_TTL_S:
+        return cached
+
+    from alphadesk.config import MARKET_TAPE
+    pairs = []
+    for entry in MARKET_TAPE:
+        sym, _, label = entry.partition(":")
+        pairs.append((sym.strip(), (label or sym).strip()))
+    if not pairs:
+        return []
+
+    out: list[dict] = []
+    try:
+        import yfinance as yf
+        data = yf.download([s for s, _ in pairs], period="5d", interval="1d",
+                           group_by="ticker", progress=False, threads=True,
+                           auto_adjust=True)
+        for sym, label in pairs:
+            try:
+                closes = data[sym]["Close"].dropna()
+                if len(closes) < 2:
+                    continue
+                last, prev = float(closes.iloc[-1]), float(closes.iloc[-2])
+                if not prev:
+                    continue
+                out.append({"symbol": sym, "label": label,
+                            "price": round(last, 2),
+                            "change_pct": round(100.0 * (last - prev) / prev, 2)})
+            except Exception:
+                continue          # one bad symbol must not empty the tape
+    except Exception as exc:
+        log.debug("market tape failed: %s", exc)
+        return cached             # keep the last good tape rather than blanking it
+
+    if out:
+        _tape_cache = (time.time(), out)
+    return out

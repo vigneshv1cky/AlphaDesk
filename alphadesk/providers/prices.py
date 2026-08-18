@@ -48,5 +48,9 @@ class BuiltinPrices:
         from alphadesk.ingest import prices
         return prices.sector_change_pct(sector)
 
+    def market_tape(self) -> list[dict]:
+        from alphadesk.ingest import prices
+        return prices.market_tape()
+
 
 register("prices", BuiltinPrices.name, BuiltinPrices)

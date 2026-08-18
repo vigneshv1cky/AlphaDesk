@@ -378,3 +378,12 @@ def load_universe(refresh: bool = False) -> set[str]:
 
 def in_universe(symbol: str) -> bool:
     return symbol.upper() in (load_universe() or set())
+
+# The index/commodity/crypto strip pinned across the top of the terminal.
+# Comma-separated yfinance symbols; the label is what the tape shows.
+MARKET_TAPE = [
+    s.strip() for s in os.environ.get(
+        "MARKET_TAPE", "^GSPC:S&P 500,^DJI:Dow 30,^IXIC:Nasdaq,^RUT:Russell 2000,"
+                       "^TNX:US 10Y,CL=F:Crude,GC=F:Gold,BTC-USD:Bitcoin"
+    ).split(",") if s.strip()
+]

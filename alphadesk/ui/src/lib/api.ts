@@ -104,6 +104,13 @@ export interface SessionAgg {
   avg_alpha: number | null
 }
 
+export interface TapeEntry {
+  symbol: string
+  label: string
+  price: number
+  change_pct: number
+}
+
 export interface SystemInfo {
   // last_run/runs_today/funnel_today are frozen dead fields — nothing has
   // written to those tables since the autonomous entry engine was deleted
@@ -274,6 +281,7 @@ export const api = {
   askScreener: (question: string) =>
     post<ScreenerAnswer>("/api/screener/ask", { question }),
   system: () => get<SystemInfo>("/api/system"),
+  tape: () => get<{ tape: TapeEntry[] }>("/api/tape"),
   tokens: (days = 1) => get<{ usage: TokenRow[] }>(`/api/tokens?days=${days}`),
   earnings: () =>
     get<{ upcoming: EarningsRow[]; reported: EarningsRow[] }>("/api/earnings"),
