@@ -76,8 +76,8 @@ def ask(accession: str, question: str) -> dict | None:
     fabricated answer.
 
     Cached per (accession, question) — a re-ask of the same question is
-    free; a rephrased one is a deliberate cache miss (see module docstring
-    on symbol_digests' sibling pattern in desk/screener.py)."""
+    free; a rephrased one is a deliberate cache miss (the same amortization
+    pattern desk/screener.py uses for its window-wide asks)."""
     text = get_text(accession)
     if not text:
         return None

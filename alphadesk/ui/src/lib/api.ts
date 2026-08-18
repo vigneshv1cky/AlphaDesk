@@ -394,7 +394,13 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return r.json() as Promise<T>
 }
 
+/** One numbered item the answer cited, resolved server-side back to the
+ * stored record — an article or a calendar row, never a URL the model made
+ * up. `url` is empty for earnings citations (they came from our own
+ * calendar, not a link). */
 export interface ScreenerCitation {
+  kind: "article" | "earnings"
+  symbol: string
   claim: string
   title: string
   url: string
@@ -408,18 +414,24 @@ export interface ScreenerHeadline {
   published_at: string | null
 }
 
-/** One row of the "look here" list. digest/citations are null when the AI
- * call failed or hasn't run yet for this symbol — headlines still render,
- * so a DeepSeek outage never means an empty page. */
+/** One row of the window inventory. Deliberately carries NO score and NO
+ * digest: the list is unranked and un-narrated, and the AI speaks only when
+ * asked (see ScreenerAnswer). */
 export interface ScreenerRow {
   symbol: string
-  score: number
   report_date: string | null
   session: string | null
   article_count: number
-  digest: string | null
-  citations: ScreenerCitation[]
   headlines: ScreenerHeadline[]
+}
+
+/** The answer to one question asked of the whole window. `considered` is how
+ * much the model was actually shown — worth surfacing, since it's the honest
+ * scope of the answer. */
+export interface ScreenerAnswer {
+  answer: string
+  citations: ScreenerCitation[]
+  considered: { articles: number; earnings: number; symbols: number }
 }
 
 export interface FilingRow {
@@ -479,6 +491,8 @@ export const api = {
   chart: (symbol: string, days = 2) =>
     get<ChartSeries>(`/api/chart/${encodeURIComponent(symbol)}?days=${days}`),
   screener: () => get<{ symbols: ScreenerRow[] }>("/api/screener"),
+  askScreener: (question: string) =>
+    post<ScreenerAnswer>("/api/screener/ask", { question }),
   bookManual: (body: ManualPickBody) =>
     post<ManualPickResult>("/api/picks/manual", body),
   live: () => get<{ live: LivePick[]; market: string }>("/api/live"),

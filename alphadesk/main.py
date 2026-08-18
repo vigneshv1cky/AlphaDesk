@@ -73,20 +73,23 @@ async def _serve() -> None:
             await asyncio.sleep(6 * 3600)   # 4×/day keeps upcoming + recent fresh
 
     async def _news_loop():
-        """Background news → screener refresh. This is the ONLY loop in the
-        process that makes an LLM call — it reads and summarizes text for a
-        human, never decides or books a trade (that boundary is enforced by
-        what this loop calls, not by anything here).
+        """Background news ingest. Polls Polygon since the last successful
+        poll (first run: NEWS_LOOKBACK_HOURS), persists the raw articles, and
+        enriches them (category/sentiment/relations).
 
-        Ingests since the last successful poll (first run: NEWS_LOOKBACK_HOURS),
-        then rebuilds the screener so its digest cache is warm — /api/screener
-        reads that cache, so a page load doesn't wait on N synchronous DeepSeek
-        calls. A DeepSeek outage degrades the screener to raw headlines
-        (desk/screener.py's fallback), never an empty page."""
+        It does NOT pre-generate screener digests — the screener ranks nothing
+        and narrates nothing on its own, so there is no digest cache to warm.
+        The AI runs on that page only when a human asks a question
+        (desk/screener.ask, POST /api/screener/ask). This loop still makes an
+        LLM call for ENRICHMENT, which reads and labels text for a human and
+        never decides or books a trade.
+
+        /api/screener is a pure database read, so it stays fast regardless of
+        whether this loop (or DeepSeek) is healthy — a failed enrichment batch
+        degrades to neutral labels, never an empty page."""
         from datetime import timedelta
 
         from alphadesk.config import NEWS_LOOKBACK_HOURS, NEWS_REFRESH_MINUTES, now_et
-        from alphadesk.desk import screener
         from alphadesk.ingest import news
         loop = asyncio.get_running_loop()
         log = logging.getLogger("alphadesk.news")
@@ -98,9 +101,8 @@ async def _serve() -> None:
                 n = await loop.run_in_executor(None, news.poll, since)
                 if n:
                     log.info("Ingested %d new articles", n)
-                await loop.run_in_executor(None, screener.build)
             except Exception as exc:
-                log.error("news/screener refresh error: %s", exc)
+                log.error("news ingest error: %s", exc)
                 last_poll = since   # don't advance the window past a failed poll
             from alphadesk.app import scheduler
             scheduler.beat()
@@ -438,9 +440,10 @@ async def _serve() -> None:
 
     # No entry loop: nothing in this process decides or books a trade. The
     # remaining loops serve the human terminal — refresh data, manage the
-    # exits on positions the operator booked, grade the outcomes, and (news
-    # loop) tell the operator where to look. _news_loop is the one place an
-    # LLM call happens; it reads and summarizes, it does not decide.
+    # exits on positions the operator booked, and grade the outcomes.
+    # _news_loop is the one place an unattended LLM call happens (article
+    # enrichment); it labels text, it does not decide. Every other LLM call
+    # in the repo is on a request path, triggered by a human asking.
     await asyncio.gather(_grader_loop(), _earnings_loop(), _news_loop(),
                          _position_watch_loop(), _quantity_watch_loop(),
                          _daily_summary_loop(), _web_server().serve())

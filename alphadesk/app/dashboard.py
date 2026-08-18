@@ -116,14 +116,36 @@ def api_research_ask(body: ResearchQuestion):
 
 @app.get("/api/screener")
 def api_screener():
-    """Ranked "look here" list — code-computed ranking (earnings proximity +
-    news volume/recency), AI digest only for the top N. Reads
-    desk/screener.py's cache (warmed by main.py's _news_loop on a schedule),
-    so this is normally fast; on a cold cache or a fresh symbol it computes
-    inline. Never blocks on a DeepSeek outage — see screener.build()'s
-    fallback: raw headlines render even with digest=None."""
+    """Everything in the current window, UNRANKED and alphabetical — symbols
+    with fresh news or a report inside SCREENER_HORIZON_DAYS, each with its
+    raw headlines. Pure database read: no LLM call, no score, no top-N. The
+    order of this list is not a recommendation (see desk/screener.py)."""
     from alphadesk.desk import screener
-    return {"symbols": screener.build()}
+    return {"symbols": screener.inventory()}
+
+
+class ScreenerQuestion(BaseModel):
+    question: str
+
+
+@app.post("/api/screener/ask")
+def api_screener_ask(body: ScreenerQuestion):
+    """Ask one question of the WHOLE window at once — every article and
+    upcoming report across every symbol, in a single AI call. This is the
+    only place the screener spends tokens: nothing is narrated in the
+    background, so the model never pre-decides what was interesting.
+
+    Every claim cites a numbered item resolved server-side back to the stored
+    article or calendar row (desk/screener._resolve_citations)."""
+    from alphadesk.desk import screener
+    question = body.question.strip()
+    if not question:
+        raise HTTPException(400, "question is required")
+    result = screener.ask(question)
+    if result is None:
+        raise HTTPException(
+            422, "couldn't answer — nothing in the current window or the AI call failed")
+    return result
 
 
 @app.get("/api/chart/{symbol}")

@@ -3,9 +3,12 @@
 Guidance for AI coding agents working in this repo. **This describes a HUMAN-
 OPERATED terminal.** Two architectures were removed before it: the LLM
 multi-agent system (`11263ae`, 2026-08-07) and every trading bot
-(2026-08-16). There are ZERO autonomous trades. There is now exactly ONE LLM
-call site (`ai/deepseek.py`, added 2026-08-16 evening) — it reads and
-summarizes news for a human, it never decides or books anything.
+(2026-08-16). There are ZERO autonomous trades. There is exactly ONE LLM
+TRANSPORT (`ai/deepseek.py::chat_json`, added 2026-08-16 evening) and four
+read-only callers on top of it — news enrichment, screener asks, filing Q&A,
+and symbol research. Every one of them reads and summarizes for a human; none
+decides, sizes, or books anything. Only enrichment runs unattended; the other
+three fire when a person asks a question.
 
 ## What this is
 
@@ -18,9 +21,17 @@ What the machine still does is the work a person can't: watch data
 continuously, read more news than a human has time for, manage exits on
 positions you opened, and keep an honest score.
 
-- **The Screener tells you where to look.** `/screener` (the default landing
-  page) ranks symbols by earnings proximity + news volume — CODE, not AI —
-  and DeepSeek writes a cited 2-3 sentence digest for the top of that list.
+- **The Screener shows you the window — it does NOT rank it.** `/screener`
+  (the default landing page) lists every symbol with fresh news or a report
+  inside `SCREENER_HORIZON_DAYS`, alphabetically, with its raw headlines. No
+  score, no top-N, no digests written in the background. Ask a question and
+  ONE call reads the whole window — every article and report, across every
+  symbol — and answers it with cited sources.
+- **Then you dig in.** `/filings` asks a question of ONE SEC filing;
+  `/research` asks a question about a symbol's fundamentals, ownership,
+  insider trades, earnings history, macro, and sector. Both answer only from
+  data the server fetched, and both drop any claim whose citation doesn't
+  check out.
 - **You decide.** Click "Trade →" on a Screener row (or type a symbol
   directly) to land on `/trade`: candles + RSI-9 + MACD(12,26,9), a
   data-quality verdict, and a booking form that demands a written thesis.
@@ -118,39 +129,85 @@ cd alphadesk/ui && pnpm build           # rebuild SPA → app/static/
 - **Scoring.** `/api/performance` splits `by_decider` (HUMAN vs MACHINE) so
   human decisions are scored on identical terms to the bot's historical rows.
 
-## The AI research layer (2026-08-16 evening) — the ONE LLM call site
+## The AI research layer — one transport, four read-only callers
 
-`ai/deepseek.py` — plain `deepseek-chat` via `/chat/completions` (OpenAI-
-compatible). No multi-provider abstraction, no rate-limit ladder, no tool-use
-loop: those existed in the deleted v1 system because a COMMITTEE decided
-trades and needed to survive provider outages. This summarizes text for a
-human; on failure the caller drops that item and logs why (`DeepSeekError`) —
-there is nothing to protect with a retry ladder.
+`ai/deepseek.py::chat_json` — plain `deepseek-chat` via `/chat/completions`
+(OpenAI-compatible), JSON mode. No multi-provider abstraction, no rate-limit
+ladder, no tool-use loop: those existed in the deleted v1 system because a
+COMMITTEE decided trades and needed to survive provider outages. This
+summarizes text for a human; on failure the caller drops that item and logs
+why (`DeepSeekError`) — there is nothing to protect with a retry ladder.
 
-- **Hard rule, not a phase: no claim renders without a source.**
-  `desk/screener.py`'s digest prompt cites by ARTICLE INDEX; the citation is
-  resolved back to a real stored URL server-side (`_resolve_citations`) —
-  the model's own idea of a URL is never trusted, only its index into a list
-  we already control.
+The four callers, each with its own `role` label so `/api/tokens` attributes
+cost per feature: `news-enrich` (`ingest/news.py`), `screener-ask`
+(`desk/screener.py`), `filing-qa` (`desk/filings.py`), `research-agent`
+(`desk/research.py`). `news-enrich` is the only one that runs on a timer.
+
+- **Hard rule, not a phase: no claim renders without a source.** Each caller
+  enforces it in the form its data allows, and all three checks run
+  SERVER-SIDE against records we control — the model's own assertion about a
+  source is never trusted:
+  - **screener** — cites by ITEM INDEX into the numbered window it was shown
+    (articles AND earnings rows share one index space), resolved back to the
+    stored article or calendar row (`_resolve_citations`).
+  - **filings** — no numbered list to cite, so the model must quote VERBATIM
+    and every quote is checked as a real substring of the cached SEC text
+    (`_verify_quotes`); a quote that doesn't verify is dropped, not shown.
+  - **research** — cites by SECTION INDEX into the sections this server
+    fetched (`_resolve_citations`); a citation pointing at a section that
+    came back unavailable is dropped.
 - **Injection defense.** `wrap_data()` delimits untrusted article text in
   `<data:*>` blocks; the system prompt is told those blocks are never
   instructions. News text is attacker-reachable in principle (a press
   release could contain text aimed at the summarizer) — this is why.
-- **Two-stage screener, deliberately.** `desk/screener.py`'s ranking (which
-  symbols are worth a look) is CODE — earnings proximity + news
-  volume/recency, same "informational, never gating" pattern as the retired
-  engine's score field. The AI narrates WHY only for the top
-  `SCREENER_TOP_N`. A DeepSeek outage degrades to raw headlines with real
-  URLs, never an empty page — verified 2026-08-16 with a dead API key.
+- **The screener ranks NOTHING, and the AI speaks only when asked.**
+  `inventory()` is a pure database read: every symbol in the window,
+  alphabetical, no score. `ask()` is the only place that page spends tokens.
+  This replaced a two-stage design (code-computed ranking by earnings
+  proximity + news volume, AI auto-narrating the top `SCREENER_TOP_N`) on
+  2026-08-18 — ordering a list IS a judgment, and this terminal's premise is
+  that the judgment belongs to the operator. Two consequences worth keeping:
+  - **Alphabetical is load-bearing, not laziness.** Don't "improve" it by
+    sorting on volume, recency, or move size — that's the ranking coming
+    back in through the sort key. It's also stable, so rows don't reshuffle
+    under the cursor on the 60s poll.
+  - **An idle terminal costs nothing.** No background digests means no spend
+    until someone asks, and `/api/screener` needs no LLM at all — a DeepSeek
+    outage leaves the full list and its real headlines intact and turns only
+    the ask into a clean 422, never an empty page or a 500 (verified with a
+    simulated outage).
 - **Pipeline:** `ingest/news.py` polls Polygon (`POLYGON_API_KEY`,
   `list_ticker_news`) → persists raw articles to `news_articles` → enriches
   (category/sentiment/relations) into the pre-existing `enrichment_cache`
-  table, unchanged from v1 → `desk/screener.py` ranks + generates digests,
-  cached in `symbol_digests` keyed on a hash of the exact article-id set (a
-  re-run with no new news for a symbol costs nothing). `main.py`'s
-  `_news_loop` runs this on `NEWS_REFRESH_MINUTES`, pre-warming the digest
-  cache so `/api/screener` is normally a fast cache read, not a live LLM
-  call.
+  table, unchanged from v1. `main.py`'s `_news_loop` runs exactly that much
+  on `NEWS_REFRESH_MINUTES` — ingest and enrichment, nothing else. It no
+  longer calls into `desk/screener.py`: there is no digest cache to pre-warm,
+  because `/api/screener` is a plain database read. Screener answers are
+  cached in `symbol_digests` under the sentinel symbol `*SCREENER-ASK*`,
+  keyed on a hash of the question PLUS the exact item set behind it, so
+  re-asking while no new news has landed is free.
+- **Research is pre-fetch, NOT a tool-calling loop — and that was a
+  deliberate reversal, one commit later.** `desk/research.py` first shipped
+  as an autonomous agent choosing its own tools turn-by-turn (`1314ec4`,
+  the roadmap's "agentic research layer"); `59b210c` rewrote it so the
+  SERVER pre-fetches all six sections and ONE `chat_json()` call synthesizes
+  from exactly that — same shape as `desk/filings.py`. The recorded reason
+  is simply that it's simpler and the better fit for this workload; the
+  structural consequences are what matter downstream:
+  - `ai/deepseek.py`'s `run_tool_loop` / `_PROVIDE_ANSWER_TOOL` were deleted
+    outright. `chat_json` is again the only thing in that module.
+  - `ask()` takes `(symbol, question)`, not a symbol-free question — the
+    SERVER decides what to fetch, so the model never has to infer the
+    symbol. `/research` has a symbol field, matching Filings and Trade.
+  - Citations moved from "a real, server-captured tool call" to SECTION
+    INDEX against the pre-fetched sections. Those six sections ARE the
+    citable universe and are returned to the UI as the "Data used" trail.
+  - `research_cache`'s primary key changed shape (`question_hash` alone →
+    `(symbol, question_hash)`). SQLite can't ALTER a PK, so `store.init()`
+    carries a one-time drop-and-recreate — correct here precisely because
+    it's purely a cache.
+  Don't reintroduce a tool loop here without a workload that actually needs
+  one.
 - **Token spend is honest.** Every call runs through `store.record_tokens()`
   into the pre-existing `token_usage` table, visible at `/api/tokens`.
 - **Recovered, not reinvented.** The Polygon fetch, the enrichment prompt,
@@ -161,8 +218,9 @@ there is nothing to protect with a retry ladder.
 ## Architecture
 
 ```
-ai/deepseek.py       the ONE LLM call site — plain deepseek-chat, JSON mode,
-                     injection guard, token accounting. No decisions here.
+ai/deepseek.py       the ONE LLM transport — chat_json(): plain deepseek-chat,
+                     JSON mode, injection guard, token accounting. Four
+                     read-only callers. No decisions here.
 ingest/earnings.py   Nasdaq calendar → watchlist, UNFILTERED (-3 to +5 days
                      around the report). A human reading the terminal judges.
 ingest/news.py       Polygon ticker news poll → enrich (DeepSeek) → persist
@@ -171,40 +229,60 @@ ingest/edgar.py      SEC EDGAR — free, no key. Ticker→CIK, filing list,
                      document fetch + BeautifulSoup text extraction, full-text
                      search. See its module docstring for 3 easy-to-get-wrong
                      facts (User-Agent requirement, ciks= not tickers=, iXBRL).
+ingest/openbb_ownership.py
+                     SEC Form 4 insider trades — free, keyless, via
+                     openbb-sec's Fetcher class DIRECTLY (no obb router, so
+                     none of the ~50 other provider packages). Returns None on
+                     any failure. Institutional ownership is deliberately NOT
+                     here: Form 13F is filed BY a manager, so it can't answer
+                     "who holds this stock" — that stays on yfinance
+                     (prices.get_institutional_ownership). Verified live
+                     before choosing this; see its module docstring.
 ingest/prices.py     price context (Alpaca live + yfinance), intraday RSI-9 +
                      MACD + _coverage_stats(), get_chart_series(), options IV,
-                     sector ETFs, macro
+                     fundamentals, institutional ownership, sector ETFs, macro
 quant/signals.py     6 weighted signals → composite (OFFLINE ONLY: backtest,
                      grader, dashboard display — nothing trades on it)
 quant/calibrate.py   online + batch weight learning from graded outcomes
 quant/watcher.py     tiered exits (TP/trail/give-back/stop/spike/stale/
                      RSI-reversal/session-close) — manages YOUR positions
 quant/stream.py      Alpaca WebSocket live prices (SPY registered)
-desk/screener.py     code ranking (earnings + news) + AI digest for the top N,
-                     cached in symbol_digests — the "where to look" page
+desk/screener.py     UNRANKED inventory of the window (pure DB read, no LLM,
+                     alphabetical) + ask(): ONE call over every article and
+                     upcoming report at once, cited by item index, cached in
+                     symbol_digests under '*SCREENER-ASK*'. The front door.
 desk/filings.py      Q&A over ONE filing, answers backed ONLY by verbatim
                      quotes verified as real substrings of the SEC document
                      text server-side — stronger attribution than the
                      screener's index-citations, since there's no numbered
                      list to cite, just one long document
+desk/research.py     Q&A over ONE symbol from 6 server-fetched sections
+                     (fundamentals / institutional ownership / insider trades
+                     / earnings history / macro / sector), cited by SECTION
+                     INDEX, cached in research_cache with a real TTL (the DATA
+                     goes stale even when the question doesn't). Pre-fetch by
+                     design, not a tool loop — see the AI-layer section.
 desk/plan.py         ATR-based entry/target/stop + level-crossing resolution
 desk/portfolio.py    position CLOSING + reconcile (entry routing deleted)
 ledger/store.py      SQLite/WAL ledger + funnel/skips + price_daily +
                      news_articles + symbol_digests + enrichment_cache +
-                     filings + filing_text_cache + filing_qa_cache
+                     filings + filing_text_cache + filing_qa_cache +
+                     research_cache + token_usage
 ledger/grader.py     forward grading vs SPY (alpha_net/alpha_adj), MFE/MAE
 ledger/backtest.py   daily-bar drift research (uses the local price cache)
 ledger/rsi_backtest.py  intraday replay of the RETIRED entry engine
-app/dashboard.py     FastAPI: /api/* incl. /api/screener + /api/chart +
-                     /api/filings/{symbol} + /api/filings/ask +
+app/dashboard.py     FastAPI: /api/* incl. /api/screener (DB read, no LLM) +
+                     /api/screener/ask + /api/chart + /api/filings/{symbol} +
+                     /api/filings/ask + /api/research/ask +
                      /api/picks/manual + SPA
 app/alerts.py        webhook notifications (ALERTS_WEBHOOK_URL)
-main.py              CLI + 6 async loops (grader, earnings+arm, NEWS,
-                     position watch, quant watch, daily summary) — NO entry loop
+main.py              CLI + 6 async loops (grader, earnings+arm, NEWS ingest
+                     +enrich only, position watch, quant watch, daily
+                     summary) — NO entry loop, and nothing pre-narrates
 ui/                  React 19 + TS + Vite → app/static/. Nav is two-tier: the
-                     product loop (/screener /filings /trade /performance)
-                     foregrounded, back-office (/live /history /earnings
-                     /system) demoted. / redirects to /screener; /open
+                     product loop (/screener /filings /research /trade
+                     /performance) foregrounded, back-office (/live /history
+                     /earnings /system) demoted. / redirects to /screener; /open
                      redirects to /live (MarketPage.tsx deleted 2026-08-17 —
                      it was a near-duplicate of Live+History filtered to one
                      session, a leftover of the old multi-session bot loop;
@@ -228,12 +306,18 @@ Nothing new is written under them.
 ```ini
 ALPACA_API_KEY / ALPACA_SECRET_KEY   # market data + universe
 POLYGON_API_KEY                      # ingest/news.py's article source
-DEEPSEEK_API_KEY                     # ai/deepseek.py — the one LLM call site
+DEEPSEEK_API_KEY                     # ai/deepseek.py — the one LLM transport
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 DEEPSEEK_MODEL=deepseek-chat         # not deepseek-reasoner: summarization, not multi-step reasoning
+LLM_MAX_INPUT_CHARS=24000            # global default, sized for batched headlines
 NEWS_REFRESH_MINUTES=20 / NEWS_LOOKBACK_HOURS=36
-SCREENER_HORIZON_DAYS=5 / SCREENER_TOP_N=15
+SCREENER_HORIZON_DAYS=5              # upcoming-earnings window for the inventory
+SCREENER_ASK_MAX_ARTICLES=120        # /api/screener/ask input cap — oldest dropped first
+SCREENER_ASK_MAX_CHARS=40000         # ...and its per-call char budget (the ask is deliberately wide)
 FILING_MAX_CHARS=60000 / FILING_RECENT_LIMIT=12   # ingest/edgar.py — no API key needed, SEC is free
+RESEARCH_MAX_CHARS=30000             # desk/research.py per-call input budget (6 JSON sections)
+RESEARCH_CACHE_TTL_HOURS=4           # real TTL: the DATA ages, not just the question
+OWNERSHIP_TTL_S=21600                # 13F quarterly / Form 4 event-driven — both move slowly
 ALPHADESK_DATA=~/.alphadesk          # ledger.db, universe.json, quant_weights.json
 
 # terminal behaviour (the live path)
@@ -268,7 +352,7 @@ gcloud compute ssh alphadesk --zone=us-east4-a \
 # static: sudo rm -rf the old static dir, then cp -r the new one (stale bundles)
 ```
 
-## Honest status (2026-08-16, end of day)
+## Honest status (2026-08-17)
 
 - **Nothing trades itself.** The terminal is the product; the operator is the
   strategy. There is no validated edge in this repo — two autonomous attempts
@@ -294,9 +378,25 @@ gcloud compute ssh alphadesk --zone=us-east4-a \
   NOT built yet: cross-document Q&A (multiple filings at once), peer-
   comparison matrices, user-uploaded document contrast — the original DSX-
   analog scope, left as later increments on top of this ingestion layer.
-- **Planned next** (not built): an agentic research layer, then news theme
-  grouping. Attribution (no claim without a source) is enforced everywhere
-  built so far, not deferred to a later phase.
+- **Phase 2 shipped (2026-08-17): the research workspace.** `/research` —
+  ask a question about one symbol, answered from six server-fetched sections
+  and cited by section index, with the "Data used" trail rendered under the
+  answer. Insider trades come from SEC Form 4 via `openbb-sec`'s Fetcher
+  class directly (free, keyless); institutional ownership stays on yfinance
+  for the reason in `ingest/openbb_ownership.py`'s docstring. Built first as
+  a tool-calling agent, then deliberately rewritten to pre-fetch — see the
+  AI-layer section for why, and don't undo it casually.
+- **Screener ranking removed (2026-08-18).** The two-stage design (code
+  ranking + auto-digest for the top N) is gone: the page is now an unranked
+  alphabetical inventory plus `POST /api/screener/ask`, one call over the
+  whole window. `SCREENER_TOP_N` was deleted with it. Verified end-to-end —
+  unranked output, out-of-range citations dropped, cache hit on a repeat
+  ask, and a DeepSeek outage returning 422 on the ask while `/api/screener`
+  still serves the full list.
+- **Planned next** (not built): news theme grouping; cross-document filing
+  Q&A, peer-comparison matrices, and user-uploaded document contrast (the
+  rest of the Phase 1 scope). Attribution (no claim without a source) is
+  enforced everywhere built so far, not deferred to a later phase.
 - **Known bug, unfixed:** `plan.atr_plan()` returns `None` for every call under
   the current multipliers (see top). The manual endpoint falls through to the
   same fallback the bot used.

@@ -64,7 +64,7 @@ def chat_json(system: str, user: str, *, role: str, source: str | None = None,
     that got tokens billed — only a request that never reached the provider
     costs nothing to record.
 
-    `role` is a free-form label (e.g. "news-enrich", "screener-digest") — shows
+    `role` is a free-form label (e.g. "news-enrich", "screener-ask") — shows
     up in /api/tokens grouped by role, so cost is attributable to a feature.
 
     `max_input_chars` overrides LLM_MAX_INPUT_CHARS for this call. News

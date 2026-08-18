@@ -134,13 +134,21 @@ DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
 LLM_TIMEOUT_S = float(os.environ.get("LLM_TIMEOUT_S", "60"))
 LLM_MAX_INPUT_CHARS = int(os.environ.get("LLM_MAX_INPUT_CHARS", "24000"))
 
-# Background news→screener loop (main.py's _news_loop). Runs unattended, so its
-# cost is bounded by SCREENER_TOP_N (how many symbols get an AI digest per
-# cycle) rather than by how many symbols merely have news.
+# Background news loop (main.py's _news_loop). Ingest + enrichment ONLY — it
+# no longer pre-generates screener digests. The screener ranks nothing and
+# narrates nothing on its own; the AI runs only when a human asks
+# (desk/screener.ask), so an idle terminal spends nothing on this page.
 NEWS_REFRESH_MINUTES = float(os.environ.get("NEWS_REFRESH_MINUTES", "20"))
 NEWS_LOOKBACK_HOURS = float(os.environ.get("NEWS_LOOKBACK_HOURS", "36"))
 SCREENER_HORIZON_DAYS = int(os.environ.get("SCREENER_HORIZON_DAYS", "5"))  # upcoming-earnings window
-SCREENER_TOP_N = int(os.environ.get("SCREENER_TOP_N", "15"))
+# One ask covers the WHOLE window (every symbol at once), so its input is
+# bounded by these two rather than by a top-N cut of the symbol list. The cap
+# drops the OLDEST articles first — same policy as ingest/news.py's scan cap.
+SCREENER_ASK_MAX_ARTICLES = int(os.environ.get("SCREENER_ASK_MAX_ARTICLES", "120"))
+# Per-call input budget, well above LLM_MAX_INPUT_CHARS (24k, sized for one
+# symbol's batch of headlines) for the same reason FILING_MAX_CHARS is: this
+# call is deliberately wide. A global bump would raise every other call's cost.
+SCREENER_ASK_MAX_CHARS = int(os.environ.get("SCREENER_ASK_MAX_CHARS", "40000"))
 
 # ── Filings workspace (ingest/edgar.py, desk/filings.py) ─────────────────────
 # A 10-K's meaningful narrative (Business, Risk Factors, MD&A) commonly runs

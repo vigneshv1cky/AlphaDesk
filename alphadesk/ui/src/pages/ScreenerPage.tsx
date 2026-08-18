@@ -1,15 +1,18 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
-import { api, type ScreenerRow } from "@/lib/api"
+import { api, type ScreenerAnswer, type ScreenerRow } from "@/lib/api"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 
-/** "Where should I be looking?" — the front door. A code-computed ranking
- * (earnings proximity + news volume/recency) decides which symbols are worth
- * a look; DeepSeek only narrates WHY for the top of that list. If the AI call
- * ever fails, the row still renders with its raw headlines — a research aid
- * degrading to "here's the news" is fine, an empty page is not. */
+/** The front door — an inventory of what's in the window, and an AI you ask.
+ *
+ * Nothing here is ranked. The list is every symbol with fresh news or a
+ * report inside the horizon, alphabetical: ordering a list is itself a
+ * judgment, and the judgment is the operator's. The AI writes nothing on its
+ * own either — ask a question and one call reads the WHOLE window (every
+ * article and report, across every symbol) and answers it, citing numbered
+ * items resolved server-side back to real stored records. */
 export default function ScreenerPage() {
   const [rows, setRows] = useState<ScreenerRow[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -24,21 +27,34 @@ export default function ScreenerPage() {
     return () => { alive = false; clearInterval(t) }
   }, [])
 
+  const withNews = rows?.filter(r => r.article_count > 0).length ?? 0
+  const reporting = rows?.filter(r => r.report_date).length ?? 0
+
   return (
     <div className="space-y-4">
       <div>
         <h1 className="text-lg font-semibold">Screener</h1>
         <p className="text-sm text-muted-foreground">
-          Ranked by earnings proximity and news volume — a written digest for the
-          top names, everyone else shows raw headlines. You decide what to trade.
+          Everything in the window — symbols with fresh news or a report coming up,
+          listed alphabetically. Nothing is ranked or scored. Ask a question below and
+          the AI reads all of it at once.
         </p>
       </div>
+
+      <AskBox />
 
       {err && <p className="text-sm text-red-600">{err}</p>}
       {rows === null && !err && <p className="text-sm text-muted-foreground">Loading…</p>}
       {rows !== null && rows.length === 0 && (
         <p className="text-sm text-muted-foreground">
-          Nothing qualified yet — no upcoming earnings and no fresh news in the window.
+          Nothing in the window yet — no upcoming earnings and no fresh news.
+        </p>
+      )}
+
+      {rows !== null && rows.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {rows.length} symbol{rows.length === 1 ? "" : "s"} · {withNews} with news ·{" "}
+          {reporting} reporting soon
         </p>
       )}
 
@@ -46,6 +62,81 @@ export default function ScreenerPage() {
         {rows?.map(r => <ScreenerCard key={r.symbol} row={r} />)}
       </div>
     </div>
+  )
+}
+
+function AskBox() {
+  const [question, setQuestion] = useState("")
+  const [answer, setAnswer] = useState<ScreenerAnswer | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [asking, setAsking] = useState(false)
+
+  const ask = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!question.trim()) return
+    setAsking(true)
+    setErr(null)
+    setAnswer(null)
+    api.askScreener(question.trim())
+      .then(setAnswer)
+      .catch(e => setErr(String(e.message ?? e)))
+      .finally(() => setAsking(false))
+  }
+
+  return (
+    <Card>
+      <CardContent className="space-y-3 py-4">
+        <form onSubmit={ask} className="flex flex-col gap-2 sm:flex-row sm:items-start">
+          <textarea
+            value={question}
+            onChange={e => setQuestion(e.target.value)}
+            placeholder="e.g. What's the biggest news in the window? Anything unusual before earnings this week?"
+            rows={2}
+            className="flex-1 rounded-md border bg-background px-3 py-2 text-sm"
+          />
+          <Button type="submit" disabled={asking || !question.trim()} className="shrink-0">
+            {asking ? "Reading…" : "Ask"}
+          </Button>
+        </form>
+
+        {err && <p className="text-sm text-red-600">{err}</p>}
+
+        {answer && (
+          <div className="space-y-2 border-t pt-3">
+            <p className="whitespace-pre-wrap text-sm">{answer.answer}</p>
+            <p className="text-[11px] text-muted-foreground">
+              Read {answer.considered.articles} article
+              {answer.considered.articles === 1 ? "" : "s"} and{" "}
+              {answer.considered.earnings} upcoming report
+              {answer.considered.earnings === 1 ? "" : "s"} across{" "}
+              {answer.considered.symbols} symbol
+              {answer.considered.symbols === 1 ? "" : "s"}.
+            </p>
+            {answer.citations.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-[11px] font-medium text-muted-foreground">Sources</p>
+                {answer.citations.map((c, i) => (
+                  <div key={i} className="text-[11px] text-muted-foreground">
+                    <span className="mr-1.5 font-mono">[{i + 1}]</span>
+                    <span className="mr-1.5 font-mono font-semibold">{c.symbol}</span>
+                    {c.url ? (
+                      <a href={c.url} target="_blank" rel="noreferrer"
+                        className="underline decoration-dotted hover:text-foreground">
+                        {c.title}
+                      </a>
+                    ) : (
+                      <span>{c.title}</span>
+                    )}
+                    <span className="ml-1.5 text-muted-foreground/70">— {c.source}</span>
+                    {c.claim && <span className="ml-1.5 italic">“{c.claim}”</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 
@@ -74,6 +165,9 @@ function ScreenerCard({ row }: { row: ScreenerRow }) {
             )}
           </div>
           <div className="flex gap-1.5">
+            <Link to={`/research?symbol=${encodeURIComponent(row.symbol)}`}>
+              <Button size="sm" variant="ghost">Research</Button>
+            </Link>
             <Link to={`/filings?symbol=${encodeURIComponent(row.symbol)}`}>
               <Button size="sm" variant="ghost">Filings</Button>
             </Link>
@@ -83,24 +177,8 @@ function ScreenerCard({ row }: { row: ScreenerRow }) {
           </div>
         </div>
 
-        {row.digest ? (
-          <div className="mt-2">
-            <p className="text-sm">{row.digest}</p>
-            {row.citations.length > 0 && (
-              <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
-                {row.citations.map((c, i) => (
-                  <a key={i} href={c.url} target="_blank" rel="noreferrer"
-                    className="text-[11px] text-muted-foreground underline decoration-dotted hover:text-foreground"
-                    title={c.claim}>
-                    [{i + 1}] {c.source}
-                  </a>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : row.headlines.length > 0 ? (
+        {row.headlines.length > 0 ? (
           <div className="mt-2 space-y-1">
-            <p className="text-[11px] text-muted-foreground">No AI digest yet — raw headlines:</p>
             {row.headlines.slice(0, 3).map((h, i) => (
               <a key={i} href={h.url} target="_blank" rel="noreferrer"
                 className="block text-sm text-muted-foreground hover:text-foreground hover:underline">
@@ -111,7 +189,7 @@ function ScreenerCard({ row }: { row: ScreenerRow }) {
           </div>
         ) : (
           <p className="mt-2 text-sm text-muted-foreground">
-            No recent news — flagged purely on upcoming earnings.
+            No recent news — in the window purely on its upcoming report.
           </p>
         )}
       </CardContent>

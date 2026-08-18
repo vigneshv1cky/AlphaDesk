@@ -241,15 +241,22 @@ CREATE TABLE IF NOT EXISTS news_articles (
 );
 CREATE INDEX IF NOT EXISTS idx_news_published ON news_articles (published_at);
 
--- Cached AI digest per symbol (desk/screener.py). Keyed on a hash of the
--- article-id set actually summarized, so a re-run with no new news for that
--- symbol is a cache hit and costs nothing — the same amortization pattern as
+-- Cached screener answers (desk/screener.py). Keyed on a hash of the exact
+-- input set that produced the answer, so re-asking while no new news has
+-- landed is a cache hit and costs nothing — the same amortization pattern as
 -- enrichment_cache, one level up.
+--
+-- Rows are written under the sentinel symbol '*SCREENER-ASK*' (no real ticker
+-- contains '*'), because an ask now spans the WHOLE window rather than one
+-- symbol: the screener stopped ranking symbols and auto-narrating the top N,
+-- so there are no longer per-symbol digests. Historical per-symbol rows from
+-- that era may still be present; nothing reads them, and they age out with
+-- the article ids in their hash.
 CREATE TABLE IF NOT EXISTS symbol_digests (
-    symbol       TEXT NOT NULL,
-    input_hash   TEXT NOT NULL,   -- sha1 of sorted article_ids that fed this digest
-    digest       TEXT,            -- 2-3 sentence summary
-    citations    TEXT,            -- JSON [{article_id, claim}]
+    symbol       TEXT NOT NULL,   -- '*SCREENER-ASK*' for window-wide asks
+    input_hash   TEXT NOT NULL,   -- sha1 of question + the sorted item ids behind it
+    digest       TEXT,            -- the answer text
+    citations    TEXT,            -- JSON [{kind, symbol, claim, title, url, source}]
     model        TEXT,
     generated_at TEXT,
     PRIMARY KEY (symbol, input_hash)
