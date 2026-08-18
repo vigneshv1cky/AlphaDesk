@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "alphadesk"
 version = "0.2.0"
-description = "AlphaDesk — predictive multi-agent stock research engine (Claude Agent SDK)"
+description = "AlphaDesk — a human-operated stock research and execution terminal. No autonomous trading."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
 authors = [
     { name = "Vignesh Murugan" },
 ]
-keywords = ["stocks", "research", "multi-agent", "llm", "claude", "trading", "prediction"]
+keywords = ["stocks", "research", "trading", "terminal", "sec-edgar", "llm"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Financial and Insurance Industry",
@@ -22,20 +22,27 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Office/Business :: Financial :: Investment",
 ]
+# Keep in sync with requirements.txt — that file carries the per-dependency
+# rationale. There is no Claude Agent SDK dependency: the v1 multi-agent
+# system was removed (11263ae, 2026-08-07) and the one LLM transport left
+# (ai/deepseek.py) is plain urllib against an OpenAI-compatible endpoint.
 dependencies = [
-    "claude-agent-sdk>=0.2.0",
-    "alpaca-py>=0.14.0",
-    "yfinance>=0.2.31",
-    "pandas>=2.0.0",
+    "alpaca-py>=0.14.0",            # market data + tradable universe
+    "yfinance>=0.2.31",             # grading, fundamentals, macro, institutional ownership
+    "pandas>=2.0.0",                # price frames
+    "polygon-api-client>=1.13.0",   # ingest/news.py's article source
+    "beautifulsoup4>=4.12.0",       # ingest/edgar.py's filing text extraction
     "fastapi",
     "uvicorn",
     "python-dotenv",
     "python-multipart",
+    "openbb-core>=1.6.10",          # ingest/openbb_ownership.py — SEC Form 4 insider trades,
+    "openbb-sec>=1.6.7",            # Fetcher class only, NOT the `openbb` metapackage
 ]
 
 [project.urls]
-Homepage = "https://github.com/vigneshv1cky/Stock-trading-agent"
-Repository = "https://github.com/vigneshv1cky/Stock-trading-agent"
+Homepage = "https://github.com/vigneshv1cky/AlphaDesk"
+Repository = "https://github.com/vigneshv1cky/AlphaDesk"
 
 [tool.setuptools.packages.find]
 include = ["alphadesk*"]
