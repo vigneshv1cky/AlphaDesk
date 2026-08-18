@@ -1,6 +1,7 @@
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { ChevronDown, Search } from "lucide-react"
 import { type EarningsRow } from "@/lib/api"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import { InfoTip } from "@/components/InfoTip"
 import { Badge, Button, Empty, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Widget, fieldCls } from "@/components/terminal"
 
@@ -213,11 +214,24 @@ function whyText(e: EarningsRow): string {
 
 // A reporter row that expands to show WHY the desk acted as it did (its own
 // stored reasoning: judge summary / thesis for takes & debates, the scout's
-// reason for skips, or the coverage-gap note for unseen). Two <TableRow>s per
-// reporter, not one <tr> with a nested toggle button — same reasoning as
-// PerformancePage's TradeRow: <button> isn't valid inside <tr>.
-function ReportedRow({ e }: { e: EarningsRow }) {
-  const [open, setOpen] = useState(false)
+// reason for skips, or the coverage-gap note for unseen).
+//
+// Flex divs, NOT <tr>s. This block is virtualized (see ReportedTable) and the
+// largest reported day carries 289 names; a virtualizer positions each item
+// absolutely, which a <tbody> cannot express. Rendering summary + detail
+// inside ONE element also makes each reporter a single virtual item whose
+// height simply changes when it opens, instead of two sibling rows the
+// virtualizer would have to keep in sync.
+const RCOLS = [80, 70, 60, 84, 96, 0, 22] as const   // 0 = flex-fill
+const ROW_H = 25        // closed row, including its 1px rule
+const DETAIL_H = 52     // expanded reasoning panel — FIXED, scrolls internally
+
+function rcol(i: number) {
+  const w = RCOLS[i]
+  return w ? { width: w, flex: "0 0 auto" as const } : { flex: "1 1 0%" as const, minWidth: 0 }
+}
+
+function ReportedRow({ e, open, onToggle }: { e: EarningsRow; open: boolean; onToggle: () => void }) {
   // Headline the CAPTURABLE drift (from the open); show the uncapturable gap as
   // muted context so a pure-gap reprice reads as "gap, no drift", not a big move.
   const drift = e.move_drift_pct ?? e.move_since_report_pct
@@ -226,19 +240,23 @@ function ReportedRow({ e }: { e: EarningsRow }) {
   const up = (drift ?? 0) >= 0
   const took = e.engagement === "TOOK" || e.engagement === "DEBATED"
   return (
-    <>
-      <TableRow onClick={() => setOpen((v) => !v)} aria-expanded={open} className="cursor-pointer">
-        <TableCell className="font-semibold">{e.symbol}</TableCell>
-        <TableCell className="text-xs text-muted-foreground">{fmtCap(e.market_cap)}</TableCell>
-        <TableCell className="text-xs text-muted-foreground">{e.session}</TableCell>
-        <TableCell><EngBadge state={e.engagement} /></TableCell>
-        <TableCell><AssessTag e={e} /></TableCell>
-        <TableCell className="text-right font-mono text-xs tabular-nums">
+    <div className="border-b border-grid-line">
+      <div
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex h-[24px] cursor-pointer items-center text-[11px] hover:bg-muted/60"
+      >
+        <div style={rcol(0)} className="truncate px-2 font-semibold">{e.symbol}</div>
+        <div style={rcol(1)} className="truncate px-2 text-muted-foreground">{fmtCap(e.market_cap)}</div>
+        <div style={rcol(2)} className="truncate px-2 text-muted-foreground">{e.session}</div>
+        <div style={rcol(3)} className="truncate px-2"><EngBadge state={e.engagement} /></div>
+        <div style={rcol(4)} className="truncate px-2"><AssessTag e={e} /></div>
+        <div style={rcol(5)} className="num truncate px-2 text-right">
           {has ? (
             <>
               <InfoTip
                 tip="Capturable drift since the report — the move from the first post-report open (excludes the uncapturable overnight gap)"
-                className={`cursor-help ${up ? "text-gain" : "text-loss"}`}
+                className={up ? "text-gain" : "text-loss"}
               >
                 {up ? "+" : ""}
                 {drift!.toFixed(1)}%
@@ -253,30 +271,105 @@ function ReportedRow({ e }: { e: EarningsRow }) {
           ) : (
             <span className="text-muted-foreground">—</span>
           )}
-        </TableCell>
-        <TableCell>
+        </div>
+        <div style={rcol(6)} className="px-1">
           <ChevronDown
-            className={`h-3.5 w-3.5 shrink-0 text-muted-foreground/40 transition-transform ${
+            className={`h-3 w-3 shrink-0 text-muted-foreground/40 transition-transform ${
               open ? "" : "-rotate-90"
             }`}
           />
-        </TableCell>
-      </TableRow>
+        </div>
+      </div>
       {open && (
-        <TableRow className="hover:bg-transparent">
-          <TableCell colSpan={7} className="bg-muted/40">
-            <div className="py-1 text-xs leading-relaxed text-muted-foreground">
-              {took && e.engagement_dir && (
-                <span className="mr-1 font-medium text-foreground">
-                  {e.engagement_dir === "LONG" ? "Long" : "Short"}
-                  {e.engagement_verdict ? ` · ${e.engagement_verdict}` : ""}:
-                </span>
-              )}
-              {whyText(e)}
-            </div>
-          </TableCell>
-        </TableRow>
+        <div
+          style={{ height: DETAIL_H }}
+          className="overflow-y-auto bg-muted/40 px-2 py-1 text-[11px] leading-snug text-muted-foreground"
+        >
+          {took && e.engagement_dir && (
+            <span className="mr-1 font-medium text-foreground">
+              {e.engagement_dir === "LONG" ? "Long" : "Short"}
+              {e.engagement_verdict ? ` · ${e.engagement_verdict}` : ""}:
+            </span>
+          )}
+          {whyText(e)}
+        </div>
       )}
+    </div>
+  )
+}
+
+/** The reported-day table, virtualized with DYNAMIC measurement.
+ *
+ * Measured live: the largest reported day is 289 names, so expanding one used
+ * to mount ~1,700 DOM nodes and push ~7,000px of page.
+ *
+ * `estimateSize` is only a first guess — rows expand to show the desk's
+ * reasoning, so heights genuinely vary. Attaching `virt.measureElement` as the
+ * item ref lets the virtualizer observe each row's real height and reflow the
+ * ones after it, which a fixed row height cannot do. `data-index` is required:
+ * measureElement reads it to know which item it just measured. */
+function ReportedTable({ rows }: { rows: EarningsRow[] }) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  // Expansion is owned HERE, not inside the row. The virtualizer has to know
+  // when an item's height changes, and it cannot learn that from state hidden
+  // inside a child.
+  const [openKey, setOpenKey] = useState<string | null>(null)
+  // Sizes are COMPUTED, not measured.
+  //
+  // measureElement's ResizeObserver never fired for the expand here — verified
+  // twice in the browser: the row grew 25px -> 49px while the spacer stayed at
+  // count x 25 and the next row kept its old offset, so an expanded row sat on
+  // top of its neighbour. Forcing virt.measure() on toggle did not fix it
+  // either. Rather than keep fighting an observer that is not firing, the
+  // expanded panel is given a FIXED height (it scrolls internally for long
+  // reasoning), which makes every row height knowable up front — so the
+  // virtualizer needs no measurement at all and cannot disagree with the DOM.
+  const virt = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: (i) =>
+      openKey === rows[i].symbol + rows[i].report_date ? ROW_H + DETAIL_H : ROW_H,
+    overscan: 10,
+  })
+
+  // estimateSize closes over openKey, so the virtualizer has to be told the
+  // sizing function changed when a row toggles.
+  useEffect(() => { virt.measure() }, [openKey, virt])
+  const HEADS = ["Symbol", "Cap", "Session", "Desk", "Verdict", "Drift · gap", ""]
+  return (
+    <>
+      <div className="flex border-b border-border bg-panel-header">
+        {HEADS.map((h, i) => (
+          <div
+            key={h || i}
+            style={rcol(i)}
+            className={`h-[22px] truncate px-2 text-[9px] font-semibold uppercase leading-[22px] tracking-[0.06em] text-muted-foreground ${
+              i === 5 ? "text-right" : ""
+            }`}
+          >
+            {h}
+          </div>
+        ))}
+      </div>
+      <div ref={scrollRef} className="max-h-[420px] overflow-y-auto">
+        <div style={{ height: virt.getTotalSize(), position: "relative" }}>
+          {virt.getVirtualItems().map((vi) => (
+            <div
+              key={rows[vi.index].symbol + rows[vi.index].report_date}
+              style={{ position: "absolute", top: 0, left: 0, width: "100%", height: vi.size, transform: `translateY(${vi.start}px)` }}
+            >
+              <ReportedRow
+                e={rows[vi.index]}
+                open={openKey === rows[vi.index].symbol + rows[vi.index].report_date}
+                onToggle={() => {
+                  const k = rows[vi.index].symbol + rows[vi.index].report_date
+                  setOpenKey((cur) => (cur === k ? null : k))
+                }}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
     </>
   )
 }
@@ -389,24 +482,7 @@ function ReportedDayBlock({
       </Button>
       {open && (
         <>
-          <div className="max-h-[420px] overflow-y-auto">
-          <Table>
-            <TableHeader><TableRow>
-              <TableHead>Symbol</TableHead>
-              <TableHead>Cap</TableHead>
-              <TableHead>Session</TableHead>
-              <TableHead>Desk</TableHead>
-              <TableHead>Verdict</TableHead>
-              <TableHead className="text-right">Drift · gap</TableHead>
-              <TableHead />
-            </TableRow></TableHeader>
-            <TableBody>
-              {g.rows.map((e) => (
-                <ReportedRow key={e.symbol + e.report_date} e={e} />
-              ))}
-            </TableBody>
-          </Table>
-          </div>
+          <ReportedTable rows={g.rows} />
           <div className="py-2 text-center">
             <Button variant="ghost" onClick={() => setOpen(false)} className="text-xs">
               − show less
