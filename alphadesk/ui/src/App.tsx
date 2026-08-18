@@ -105,7 +105,7 @@ function Shell() {
       <div className="flex min-h-0 flex-1">
       <Sidebar />
       <main className="min-h-0 flex-1 overflow-y-auto">
-        <div className="p-1">
+        <div>
           <Suspense fallback={<div className="p-2 text-[11px] text-muted-foreground">loading…</div>}>
             <Routes>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />

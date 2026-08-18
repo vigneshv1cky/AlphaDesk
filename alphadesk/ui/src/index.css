@@ -90,7 +90,7 @@
     --chart-3: oklch(0.439 0 0);
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
-    --radius: 0.125rem;   /* terminal geometry: near-square, not rounded UI */
+    --radius: 0.5rem;   /* AlphaSpace widgets are visibly rounded */
     --sidebar: oklch(0.985 0 0);
     --sidebar-foreground: oklch(0.145 0 0);
     --sidebar-primary: oklch(0.205 0 0);
@@ -102,41 +102,40 @@
 }
 
 .dark {
-    /* OpenBB-style canvas: the PAGE is the darkest surface and panels sit a
-       hair above it, separated by hairline rules rather than elevation or
-       radius. Panels are only ~2% lighter than the canvas — at this density
-       the border does the separating, and a lifted card would read as a
-       consumer dashboard. */
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.93 0 0);
-    --card: oklch(0.168 0 0);
-    --card-foreground: oklch(0.93 0 0);
-    --panel: oklch(0.168 0 0);
-    --panel-header: oklch(0.196 0 0);
-    --grid-line: oklch(1 0 0 / 8%);
-    --popover: oklch(0.185 0 0);
-    --popover-foreground: oklch(0.93 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.22 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.22 0 0);
-    --muted-foreground: oklch(0.65 0 0);
-    --accent: oklch(0.62 0.17 250);
-    --accent-foreground: oklch(0.99 0 0);
-    --destructive: oklch(0.7 0.16 22);
-    --gain: oklch(0.72 0.19 145);
-    --gain-foreground: oklch(0.15 0 0);
-    --loss: oklch(0.68 0.21 25);
-    --loss-foreground: oklch(0.15 0 0);
-    --border: oklch(1 0 0 / 11%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.62 0.17 250);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
+    /* AlphaSpace palette. The canvas is a dark NAVY-black, not neutral grey —
+       that blue cast is most of why their surface reads as a product rather
+       than a terminal emulator. Panels sit a step above it with rounded
+       corners and a hairline border; nothing is elevated with shadow. */
+    --background: #0a0d14;
+    --foreground: #e6e8eb;
+    --card: #141922;
+    --card-foreground: #e6e8eb;
+    --panel: #141922;
+    --panel-header: #141922;      /* headers are part of the card, not a band */
+    --grid-line: #1e242f;
+    --popover: #1a202b;
+    --popover-foreground: #e6e8eb;
+    --primary: #e6e8eb;
+    --primary-foreground: #0a0d14;
+    --secondary: #1a202b;
+    --secondary-foreground: #e6e8eb;
+    --muted: #1a202b;
+    --muted-foreground: #8b94a3;
+    --accent: #2f7fee;            /* the blue on Start trial / active pills */
+    --accent-foreground: #ffffff;
+    --destructive: #e5484d;
+    --gain: #16c784;              /* teal-leaning green, not grass */
+    --gain-foreground: #06251a;
+    --loss: #e5484d;              /* coral red, softer than pure #f00 */
+    --loss-foreground: #2a0c0e;
+    --border: #232a36;
+    --input: #2a3240;
+    --ring: #2f7fee;
+    --chart-1: #4a9eff;
+    --chart-2: #16c784;
+    --chart-3: #e5484d;
+    --chart-4: #8b94a3;
+    --chart-5: #a371f7;
     --sidebar: oklch(0.205 0 0);
     --sidebar-foreground: oklch(0.985 0 0);
     --sidebar-primary: oklch(0.488 0.243 264.376);
@@ -158,10 +157,10 @@
     }
   html {
     @apply font-sans;
-    /* 13px, down from 15px. The single highest-leverage density lever: every
-       rem-based size in the app scales off it, so the whole terminal tightens
-       without touching a component. */
-    font-size: 13px;
+    /* 14px. The OpenBB pass ran this at 13px for maximum density; AlphaSpace
+       is a step larger and more legible, and every rem-based size scales off
+       this one line. */
+    font-size: 14px;
     }
   /* Numeric cells are monospace + tabular so digits align down a column and a
      changing price doesn't reflow its neighbours. */
@@ -185,12 +184,14 @@
   /* The collage canvas: a fixed 12-column grid the widgets span. Dense by
      construction — tiles butt against each other with a hairline gutter
      rather than floating in whitespace. */
+  /* Cards floating on the canvas with a real gutter — AlphaSpace separates
+     widgets with space, not with shared hairlines. */
   .collage {
     display: grid;
     grid-template-columns: repeat(12, minmax(0, 1fr));
-    gap: 1px;
-    background: var(--grid-line);
-    border: 1px solid var(--grid-line);
+    gap: 8px;
+    padding: 8px;
+    background: transparent;
     }
   /* Below tablet the 12-col grid collapses to one column — a widget grid that
      keeps 12 columns on a phone is unreadable, not dense. */

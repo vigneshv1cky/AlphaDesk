@@ -14,9 +14,12 @@ import { cn } from "@/lib/utils"
 /* ── Widget: the tiled panel every surface is built from ────────────────── */
 
 export function Widget({
-  title, subtitle, actions, span = 12, className, bodyClassName, scroll, children,
+  title, symbol, subtitle, actions, span = 12, className, bodyClassName, scroll, children,
 }: {
   title?: React.ReactNode
+  /** Rendered in accent blue before the title, the way AlphaSpace prefixes a
+   * widget with the symbol it is scoped to ("NVDA EQUITY OVERVIEW"). */
+  symbol?: string
   subtitle?: React.ReactNode
   actions?: React.ReactNode
   /** Columns to span on the 12-col `.collage` grid. Ignored off-grid. */
@@ -33,20 +36,29 @@ export function Widget({
       // Inline gridColumn, not a Tailwind class: `col-span-${n}` is built at
       // runtime and would be purged from the stylesheet.
       style={{ gridColumn: `span ${span} / span ${span}` }}
-      className={cn("flex min-w-0 flex-col bg-panel", className)}
+      className={cn(
+        "flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-panel",
+        className,
+      )}
     >
       {(title || actions) && (
-        <header className="flex h-[26px] shrink-0 items-center gap-2 border-b border-border bg-panel-header px-2">
+        <header className="flex h-[34px] shrink-0 items-center gap-2 px-3">
+          {symbol && (
+            <span className="shrink-0 text-[12px] font-semibold text-accent">{symbol}</span>
+          )}
           {title && (
-            <h2 className="truncate text-[10px] font-semibold uppercase tracking-[0.08em] text-foreground/80">
+            <h2 className="truncate text-[11px] font-semibold uppercase tracking-[0.06em] text-foreground/90">
               {title}
             </h2>
           )}
           {subtitle && (
-            <span className="truncate text-[10px] text-muted-foreground">{subtitle}</span>
+            <span className="truncate text-[11px] text-muted-foreground">{subtitle}</span>
           )}
           <div className="flex-1" />
           {actions}
+          {/* The lock / expand affordances AlphaSpace puts on every widget.
+              Inert for now — they mark where per-widget controls belong. */}
+          <span className="shrink-0 text-[11px] leading-none text-muted-foreground/40">⤢</span>
         </header>
       )}
       <div
@@ -71,7 +83,7 @@ export function Btn({
     <button
       {...props}
       className={cn(
-        "inline-flex h-[22px] shrink-0 items-center gap-1 whitespace-nowrap px-2 text-[11px] font-medium transition-colors disabled:pointer-events-none disabled:opacity-40",
+        "inline-flex h-[24px] shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-2.5 text-[11px] font-medium transition-colors disabled:pointer-events-none disabled:opacity-40",
         variant === "default" && "border border-border bg-transparent hover:bg-muted",
         variant === "ghost" && "text-muted-foreground hover:bg-muted hover:text-foreground",
         variant === "accent" && "bg-accent text-accent-foreground hover:opacity-90",
@@ -87,10 +99,10 @@ export function Btn({
  * a base width silently wins and every field eats its own row. Callers state
  * their own width (`w-24`, `flex-1`, `w-full`). */
 export const fieldCls =
-  "h-[22px] border border-input bg-background px-1.5 text-[11px] text-foreground placeholder:text-muted-foreground/60 focus:border-ring focus:outline-none"
+  "h-[26px] rounded-md border border-input bg-background px-1.5 text-[11px] text-foreground placeholder:text-muted-foreground/60 focus:border-ring focus:outline-none"
 
 export const areaCls =
-  "resize-y border border-input bg-background px-1.5 py-1 text-[11px] leading-snug text-foreground placeholder:text-muted-foreground/60 focus:border-ring focus:outline-none"
+  "resize-y rounded-md border border-input bg-background px-1.5 py-1 text-[11px] leading-snug text-foreground placeholder:text-muted-foreground/60 focus:border-ring focus:outline-none"
 
 export function Tag({
   tone = "neutral", className, children,
@@ -147,7 +159,7 @@ export function TH({
   return (
     <th
       className={cn(
-        "h-[22px] whitespace-nowrap px-2 text-[9px] font-semibold uppercase tracking-[0.06em] text-muted-foreground",
+        "h-[28px] whitespace-nowrap px-3 text-[10px] font-medium uppercase tracking-[0.06em] text-muted-foreground",
         align === "left" && "text-left",
         align === "right" && "text-right",
         align === "center" && "text-center",
@@ -190,7 +202,7 @@ export function TD({
     <td
       colSpan={colSpan}
       className={cn(
-        "h-[24px] whitespace-nowrap px-2",
+        "h-[30px] whitespace-nowrap px-3",
         align === "left" && "text-left",
         align === "right" && "text-right",
         align === "center" && "text-center",

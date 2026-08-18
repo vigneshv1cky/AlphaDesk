@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useSearchParams } from "react-router-dom"
 import { api, type FilingRow } from "@/lib/api"
 import { Btn, Empty, Tag, areaCls, fieldCls } from "@/components/terminal"
+import { cn } from "@/lib/utils"
 
 /** The AI rail — the ONE place the terminal answers questions.
  *
@@ -127,26 +128,32 @@ export function AiRail() {
     }
   }
 
-  if (!open) {
-    return (
-      <button
-        onClick={() => setOpen(true)}
-        title="Open the AI panel"
-        className="flex w-[26px] shrink-0 flex-col items-center gap-2 border-l border-border bg-panel-header py-2 text-[10px] uppercase tracking-[0.12em] text-muted-foreground hover:text-foreground"
-      >
-        <span>◀</span>
-        <span style={{ writingMode: "vertical-rl" }}>Ask</span>
-      </button>
-    )
-  }
+  const Collapsed = (
+    <button
+      onClick={() => setOpen(true)}
+      title="Open the AI panel"
+      className={cn(
+        "w-[28px] shrink-0 flex-col items-center gap-2 border-l border-border bg-panel py-2 text-[10px] uppercase tracking-[0.12em] text-muted-foreground hover:text-foreground",
+        // Below xl the canvas cannot afford a 360px rail — sidebar + rail
+        // would leave the data less room than the chrome. Collapsed is forced
+        // there regardless of the stored preference.
+        open ? "flex xl:hidden" : "flex",
+      )}
+    >
+      <span>◀</span>
+      <span style={{ writingMode: "vertical-rl" }}>Ask</span>
+    </button>
+  )
+
+  if (!open) return Collapsed
 
   return (
-    <aside className="flex w-[340px] shrink-0 flex-col border-l border-border bg-panel">
-      <header className="flex h-[26px] shrink-0 items-center gap-2 border-b border-border bg-panel-header px-2">
-        <h2 className="text-[10px] font-semibold uppercase tracking-[0.08em]">Ask</h2>
-        <span className="truncate text-[10px] text-muted-foreground">
-          {mode === "window" ? "the whole window" : mode === "symbol" ? symbol || "a symbol" : "one filing"}
-        </span>
+    <>
+    {Collapsed}
+    <aside className="hidden w-[360px] shrink-0 flex-col border-l border-border bg-background xl:flex">
+      <header className="flex h-[42px] shrink-0 items-center gap-2 px-3">
+        <span className="text-[13px] text-accent">✦</span>
+        <h2 className="text-[12px] font-semibold uppercase tracking-[0.06em]">Ask AlphaDesk</h2>
         <div className="flex-1" />
         {turns.length > 0 && <Btn variant="ghost" onClick={() => setTurns([])}>clear</Btn>}
         <Btn variant="ghost" onClick={() => setOpen(false)} title="Collapse">▶</Btn>
@@ -196,13 +203,40 @@ export function AiRail() {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {turns.length === 0 && !busy && (
-          <Empty>
-            {mode === "window"
-              ? "Ask about everything in the window at once."
-              : mode === "symbol"
-                ? "Ask about one symbol's fundamentals, ownership, insiders, macro or sector."
-                : "Pick a filing, then ask it something. Answers are verbatim quotes only."}
-          </Empty>
+          <div className="flex h-full flex-col justify-end p-3">
+            <h3 className="text-[20px] font-semibold leading-tight">
+              What would you<br />like to know?
+            </h3>
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
+              {mode === "window"
+                ? "Reads every article and upcoming report at once."
+                : mode === "symbol"
+                  ? "Fundamentals, ownership, insiders, macro and sector for one symbol."
+                  : "One SEC filing. Answers are verbatim quotes, verified."}
+            </p>
+            <div className="mt-3 space-y-2">
+              {(mode === "window"
+                ? ["What's the biggest news in the window?",
+                   "Anything unusual before earnings this week?",
+                   "Which sectors are showing up most?"]
+                : mode === "symbol"
+                  ? ["Is institutional ownership growing?",
+                     "Any recent insider selling?",
+                     "How did the last earnings land?"]
+                  : ["What did they say about margins?",
+                     "Any new risk factors?",
+                     "What changed since last quarter?"]
+              ).map(q => (
+                <button
+                  key={q}
+                  onClick={() => setQuestion(q)}
+                  className="block w-full rounded-full border border-border px-3 py-2 text-left text-[11px] text-foreground/90 transition-colors hover:bg-muted"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
         {turns.map((t, i) => (
           <div key={i} className="border-b border-grid-line px-2 py-1.5">
@@ -255,14 +289,20 @@ export function AiRail() {
         />
         <div className="mt-1 flex items-center gap-1">
           <span className="truncate text-[9px] text-muted-foreground">
-            {MODES.find(m => m.id === mode)?.blurb}
+            AI can make mistakes. Every claim is cited — check the sources.
           </span>
           <div className="flex-1" />
-          <Btn type="submit" variant="accent" disabled={!ready}>
-            {busy ? "…" : "Ask"}
-          </Btn>
+          <button
+            type="submit"
+            disabled={!ready}
+            aria-label="Ask"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-30"
+          >
+            {busy ? "…" : "↑"}
+          </button>
         </div>
       </form>
     </aside>
+    </>
   )
 }

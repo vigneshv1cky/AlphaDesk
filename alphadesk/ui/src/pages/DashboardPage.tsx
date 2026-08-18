@@ -1,5 +1,6 @@
 import "@/widgets/builtin"          // registers the shipped tiles
 import { widgets } from "@/widgets/registry"
+import { ViewHeader } from "@/components/ViewHeader"
 
 /** The collage — every tile the deployment has, on one canvas.
  *
@@ -13,11 +14,14 @@ import { widgets } from "@/widgets/registry"
  */
 export default function DashboardPage() {
   return (
-    <div className="collage">
+    <>
+      <ViewHeader title="Markets" />
+      <div className="collage">
       {widgets().map(w => {
         const W = w.component
         return <W key={w.id} />
       })}
-    </div>
+      </div>
+    </>
   )
 }
