@@ -150,11 +150,11 @@ not edits to `ingest/`.
 
 **[docs/data-sources.md](docs/data-sources.md)** lists every upstream, how it is
 collected, and what its terms are. Read it before running a public instance —
-two sources are unofficial endpoints rather than licensed APIs, and one
-dependency's licence conflicts with the one declared below.
+two sources are unofficial endpoints rather than licensed APIs rather than
+licensed feeds.
 
 ## Licence
 
-MIT — **but see [docs/data-sources.md](docs/data-sources.md)**: `openbb-core`
-and `openbb-sec` are AGPL-3.0-only, which is not consistent with an MIT
-declaration for the combined work. That is unresolved.
+MIT. Every dependency is permissive — see
+[docs/data-sources.md](docs/data-sources.md) for the audit and for the terms of
+the data sources themselves, which are a separate matter from the code licence.

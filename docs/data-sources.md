@@ -58,29 +58,16 @@ SEC filing data is US-government public domain. Two conditions apply:
 Set it to your own address. It identifies your deployment's traffic, and a
 shared or borrowed one gets someone else rate-limited for your requests.
 
-## ⚠️ Licence conflict: OpenBB is AGPL, AlphaDesk declares MIT
+## Licence: resolved (2026-08-18)
 
-`openbb-core` and `openbb-sec` are **AGPL-3.0-only**. They are used for one
-feature: SEC Form 4 insider trades (`ingest/openbb_ownership.py`).
+AlphaDesk previously depended on `openbb-core` / `openbb-sec`, which are
+**AGPL-3.0-only**, while declaring MIT. AGPL §13 extends to software users
+interact with over a network — exactly what this is — so the MIT declaration
+was not consistent with the combined work.
 
-AGPL-3.0 is strong copyleft, and §13 extends it to software users interact with
-**over a network** — which is exactly what AlphaDesk is. Distributing a work
-that combines AGPL code and calling the result MIT is not consistent; anyone
-taking the MIT declaration at face value would be misled.
-
-Three honest ways out:
-
-1. **Make OpenBB an optional extra** (recommended). A default install stays
-   MIT-clean; users who want insider trades opt in and accept AGPL terms for
-   their own deployment. `desk/research.py` already renders a missing section
-   as unavailable, so the feature degrades rather than breaks.
-2. **Drop it** and read Form 4 straight from EDGAR. AlphaDesk already has an
-   EDGAR client; this removes the conflict and a dependency.
-3. **Relicense AlphaDesk as AGPL-3.0.** Legitimate, and what OpenBB and
-   comparable projects do — but it changes what others may do with your code.
-
-Until one is chosen, treat the MIT declaration in `pyproject.toml` as
-**unresolved**.
+Both are now removed. They existed for one feature, SEC Form 4 insider trades,
+which `ingest/insider.py` reads straight from EDGAR instead: same data, one
+fewer framework, and no copyleft obligation. MIT now governs cleanly.
 
 ## Dependency licences
 
@@ -97,8 +84,8 @@ Checked from installed package metadata:
 | uvicorn | BSD-3-Clause |
 | python-dotenv | BSD-3-Clause |
 | mcp | MIT |
-| **openbb-core** | **AGPL-3.0-only** |
-| **openbb-sec** | **AGPL-3.0-only** |
+
+No AGPL or other copyleft dependency remains.
 
 ## What AlphaDesk stores
 

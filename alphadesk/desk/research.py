@@ -18,7 +18,7 @@ import logging
 
 from alphadesk.ai.llm import LLMError, chat_json, wrap_data
 from alphadesk.config import RESEARCH_CACHE_TTL_HOURS, RESEARCH_MAX_CHARS
-from alphadesk.ingest import openbb_ownership
+from alphadesk.ingest import insider
 from alphadesk.providers import get_prices
 from alphadesk.ledger import store
 
@@ -67,7 +67,7 @@ def _fetch_sections(symbol: str) -> list[dict]:
     fundamentals = px.fundamentals(symbol)
     sector = fundamentals.get("sector") if fundamentals else None
 
-    insider = openbb_ownership.get_insider_trades(symbol)
+    insider_rows = insider.get_insider_trades(symbol)
     sector_perf = px.sector_change_pct(sector) if sector else None
 
     return [
@@ -75,7 +75,8 @@ def _fetch_sections(symbol: str) -> list[dict]:
         {"title": "Institutional ownership",
          "data": px.institutional_ownership(symbol) or {"available": False}},
         {"title": "Insider trades (SEC Form 4)",
-         "data": {"trades": _wrap_insider_trades(insider)} if insider else {"available": False}},
+         "data": {"trades": _wrap_insider_trades(insider_rows)} if insider_rows
+                 else {"available": False}},
         {"title": "Earnings history",
          "data": px.earnings_context(symbol) or {"available": False}},
         {"title": "Macro snapshot",

@@ -76,9 +76,12 @@ ingest/edgar.py SEC EDGAR: ticker->CIK, filing list, text extraction. Free, no
 ingest/earnings.py Nasdaq calendar -> the earnings window
 ingest/prices.py Alpaca live + yfinance; intraday RSI-9/MACD, _coverage_stats,
                chart series, fundamentals, ownership, macro, sector
-ingest/openbb_ownership.py SEC Form 4 insider trades via openbb-sec's Fetcher
-               directly (not the obb router). 13F deliberately NOT here — it's
-               filed BY a manager, so it can't answer "who holds this stock".
+ingest/insider.py SEC Form 4 insider trades, parsed from EDGAR XML directly.
+               NOTE: primaryDocument points at the XSL-RENDERED view; the raw
+               XML is the bare filename in the same folder. Derivative rows
+               (options/RSUs) are excluded — only share trades answer "did an
+               insider buy". 13F deliberately NOT here: it's filed BY a
+               manager, so it can't answer "who holds this stock".
 desk/screener.py unranked window (pure DB read) + ask() over the whole window
 desk/filings.py  Q&A over ONE filing, verbatim quotes verified server-side
 desk/research.py Q&A over ONE symbol from 6 pre-fetched sections
@@ -131,17 +134,18 @@ project references, so it exits 0 on code that cannot compile. Use `tsc -b`.
 - **Without `tailwind-merge`, a caller's `w-24` does not beat a base `w-full`.**
   Shared class constants must not ship widths.
 
-## Licensing (unresolved)
+## Licensing
 
-`openbb-core` / `openbb-sec` are **AGPL-3.0-only**; `pyproject.toml` declares
-MIT. AGPL §13 covers software users reach over a network, which is exactly what
-this is. Options are in `docs/data-sources.md` — make OpenBB an optional extra,
-read Form 4 straight from EDGAR instead, or relicense. Don't ship a public
-instance assuming MIT governs until one is picked.
+MIT, and every dependency is permissive. `openbb-core` / `openbb-sec` were
+removed on 2026-08-18 — they are AGPL-3.0-only, which does not combine with an
+MIT declaration for a network-served app. They backed one feature, Form 4
+insider trades; `ingest/insider.py` now reads that from EDGAR directly. Don't
+reintroduce a copyleft dependency without deciding the project's licence first.
 
-Two upstreams are also unofficial endpoints rather than licensed APIs
-(`yfinance` scrapes Yahoo; the earnings calendar reads an undocumented
-`api.nasdaq.com` route). Both are documented in `docs/data-sources.md`.
+Two upstreams are unofficial endpoints rather than licensed APIs (`yfinance`
+scrapes Yahoo; the earnings calendar reads an undocumented `api.nasdaq.com`
+route). Documented in `docs/data-sources.md`; they matter for a public
+instance.
 
 ## Known gaps
 
