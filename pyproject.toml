@@ -36,6 +36,9 @@ dependencies = [
     "uvicorn",
     "python-dotenv",
     "python-multipart",
+    "mcp>=1.0",                     # `alphadesk.main mcp` — exposes the terminal to agents
+    # NOTE: openbb-core / openbb-sec are AGPL-3.0-only while this project
+    # declares MIT. See docs/data-sources.md — that conflict is unresolved.
     "openbb-core>=1.6.10",          # ingest/openbb_ownership.py — SEC Form 4 insider trades,
     "openbb-sec>=1.6.7",            # Fetcher class only, NOT the `openbb` metapackage
 ]

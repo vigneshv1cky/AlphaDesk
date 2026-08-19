@@ -17,5 +17,6 @@ python-multipart            # form parsing
 # ownership deliberately stays on yfinance above, not OpenBB's 13F — SEC's
 # Form 13F is filed BY an institutional manager, not BY the held company, so
 # it can't answer "who holds this stock" (verified live before choosing this).
+mcp>=1.0                    # `alphadesk.main mcp` — agent access over MCP
 openbb-core>=1.6.10
 openbb-sec>=1.6.7

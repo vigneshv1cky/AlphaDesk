@@ -1,6 +1,7 @@
 """AlphaDesk entrypoint.
 
   python -m alphadesk.main dashboard      # the terminal (API + SPA)
+  python -m alphadesk.main mcp            # expose the same data to agents
   python -m alphadesk.main backfill --hours 168
   python -m alphadesk.main earnings       # refresh the calendar, show it
 
@@ -104,6 +105,9 @@ def main() -> None:
     p_back = sub.add_parser("backfill")
     p_back.add_argument("--hours", type=float, default=72)
     sub.add_parser("earnings", help="refresh the earnings calendar and show upcoming / recent")
+    p_mcp = sub.add_parser("mcp", help="serve the terminal's data to agents over MCP")
+    p_mcp.add_argument("--http", action="store_true",
+                       help="streamable HTTP instead of stdio")
     args = parser.parse_args()
 
     if args.cmd == "dashboard":
@@ -117,6 +121,15 @@ def main() -> None:
         from alphadesk.ingest.earnings import refresh_calendar
         n = refresh_calendar(days_back=int(args.hours / 24) or 5)
         print(f"earnings calendar refreshed: {n} reporters")
+    elif args.cmd == "mcp":
+        # stdio is the transport most clients use, and it carries the protocol
+        # on stdout — so logging must NOT go there or it corrupts the stream.
+        if not args.http:
+            logging.getLogger().handlers.clear()
+            logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
+        from alphadesk.mcp_server import serve
+        serve(http=args.http)
+        return
     elif args.cmd == "earnings":
         from alphadesk.ingest import earnings
         from alphadesk.ledger import store

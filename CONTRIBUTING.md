@@ -50,6 +50,13 @@ Use the shared query hooks in `lib/queries.ts`. Two tiles asking for the same
 endpoint share one request and one cache entry; a hand-rolled `setInterval`
 would re-fetch it separately.
 
+## Adding a data source? Document it
+
+Any new upstream goes in [docs/data-sources.md](docs/data-sources.md) with its
+collection method and terms. This project redistributes other people's data;
+a source that arrives undocumented hands every self-hoster a licensing
+question they don't know they have.
+
 ## House rules
 
 **Attribution is not negotiable.** If a change lets the AI render a claim whose

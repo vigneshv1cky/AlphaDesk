@@ -88,7 +88,11 @@ ledger/store.py  SQLite/WAL: news_articles, enrichment_cache, symbol_digests,
                nothing reads them — kept so existing ledgers don't lose their
                history. Don't "clean up" by dropping them.
 app/dashboard.py FastAPI: screener(+ask), filings(+ask), research/ask, chart,
-               earnings, tokens, system, + the SPA
+               quote, movers, tape, earnings, tokens, system, + the SPA
+mcp_server.py  the same data as 11 read-only MCP tools. The *_ask tools return
+               their citations, so an agent inherits the verification rather
+               than reproducing it. Read-only by construction — there is no
+               write surface to expose.
 main.py        two ingest loops (news, earnings) + the web server
 ui/            React 19 + Vite. Dense terminal styling, NO component library —
                hand-rolled primitives in components/terminal.tsx. Dashboard
@@ -101,6 +105,7 @@ ui/            React 19 + Vite. Dense terminal styling, NO component library —
 pip install -r requirements.txt
 python -m alphadesk.main dashboard      # API + SPA on :8000
 python -m alphadesk.main earnings       # refresh the calendar, print it
+python -m alphadesk.main mcp            # serve the same data to agents
 python -m pytest -q                     # 34 tests
 
 cd alphadesk/ui && pnpm dev             # frontend HMR, proxies /api
@@ -125,6 +130,18 @@ project references, so it exits 0 on code that cannot compile. Use `tsc -b`.
   `DashboardPage`.
 - **Without `tailwind-merge`, a caller's `w-24` does not beat a base `w-full`.**
   Shared class constants must not ship widths.
+
+## Licensing (unresolved)
+
+`openbb-core` / `openbb-sec` are **AGPL-3.0-only**; `pyproject.toml` declares
+MIT. AGPL §13 covers software users reach over a network, which is exactly what
+this is. Options are in `docs/data-sources.md` — make OpenBB an optional extra,
+read Form 4 straight from EDGAR instead, or relicense. Don't ship a public
+instance assuming MIT governs until one is picked.
+
+Two upstreams are also unofficial endpoints rather than licensed APIs
+(`yfinance` scrapes Yahoo; the earnings calendar reads an undocumented
+`api.nasdaq.com` route). Both are documented in `docs/data-sources.md`.
 
 ## Known gaps
 

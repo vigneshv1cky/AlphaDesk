@@ -85,6 +85,37 @@ existing name replaces the built-in. See **[docs/providers.md](docs/providers.md
 Dashboard tiles work the same way: a widget registers itself
 (`ui/src/widgets/registry.ts`), and the page renders whatever is registered.
 
+## Agent access (MCP)
+
+The same data the UI reads is exposed to agents over
+[MCP](https://modelcontextprotocol.io):
+
+```bash
+python -m alphadesk.main mcp           # stdio
+python -m alphadesk.main mcp --http    # streamable HTTP
+```
+
+```json
+{"mcpServers": {"alphadesk": {"command": "python", "args": ["-m", "alphadesk.main", "mcp"]}}}
+```
+
+Eleven read-only tools: `market_tape`, `quote`, `movers`, `price_chart`,
+`screener_window`, `screener_ask`, `list_filings`, `filing_ask`,
+`research_ask`, `earnings_calendar`, `recently_reported`.
+
+The three `*_ask` tools return their **citations**, so an agent calling them
+inherits the verification instead of having to reproduce it — a claim whose
+source could not be checked was already dropped before the tool returned.
+
+## Run the model locally
+
+Nothing here requires a hosted LLM. Point it at Ollama and no key is needed:
+
+```ini
+LLM_BASE_URL=http://localhost:11434/v1
+LLM_MODEL=llama3.1
+```
+
 ## Layout
 
 ```
@@ -115,6 +146,15 @@ in the numbers above.
 See [CONTRIBUTING.md](CONTRIBUTING.md). New data sources should be providers,
 not edits to `ingest/`.
 
+## Data sources and terms
+
+**[docs/data-sources.md](docs/data-sources.md)** lists every upstream, how it is
+collected, and what its terms are. Read it before running a public instance —
+two sources are unofficial endpoints rather than licensed APIs, and one
+dependency's licence conflicts with the one declared below.
+
 ## Licence
 
-MIT.
+MIT — **but see [docs/data-sources.md](docs/data-sources.md)**: `openbb-core`
+and `openbb-sec` are AGPL-3.0-only, which is not consistent with an MIT
+declaration for the combined work. That is unresolved.
