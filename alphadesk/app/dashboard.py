@@ -296,6 +296,46 @@ def api_earnings():
     return {"upcoming": upcoming, "reported": reported}
 
 
+@app.get("/api/earnings/week")
+def api_earnings_week(start: str | None = None):
+    """One calendar week, day by day — the shape the Earnings page renders.
+
+    `start` is any YYYY-MM-DD inside the wanted week; the week is normalised to
+    the Sunday that contains it, so the caller can just pass "today" or step by
+    seven days without doing calendar arithmetic itself. Omitted means this
+    week.
+
+    Every day is returned, including weekends and days with nothing on them —
+    the strip across the top shows seven cells whatever the market did, and a
+    missing day would silently shift the ones after it.
+    """
+    from datetime import date, timedelta
+
+    from alphadesk.config import now_et
+
+    try:
+        anchor = date.fromisoformat(start) if start else now_et().date()
+    except ValueError:
+        raise HTTPException(400, "start must be YYYY-MM-DD") from None
+    # Sunday-first, matching how the calendar is read: isoweekday() is Mon=1..Sun=7.
+    sunday = anchor - timedelta(days=anchor.isoweekday() % 7)
+    saturday = sunday + timedelta(days=6)
+
+    rows = store.earnings_between(sunday.isoformat(), saturday.isoformat())
+    by_day: dict[str, list[dict]] = {}
+    for r in rows:
+        by_day.setdefault(r["report_date"][:10], []).append(r)
+
+    days = []
+    for i in range(7):
+        d = sunday + timedelta(days=i)
+        key = d.isoformat()
+        days.append({"date": key, "weekday": d.strftime("%a"),
+                     "count": len(by_day.get(key, [])), "rows": by_day.get(key, [])})
+    return {"start": sunday.isoformat(), "end": saturday.isoformat(),
+            "today": now_et().date().isoformat(), "days": days}
+
+
 @app.get("/{path:path}", include_in_schema=False)
 def spa(path: str):
     if path:

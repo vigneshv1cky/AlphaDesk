@@ -1,7 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react"
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom"
-import { type EarningsRow } from "@/lib/api"
-import { useEarnings, useSystem } from "@/lib/queries"
+import { useSystem } from "@/lib/queries"
 import { useTheme } from "@/lib/theme"
 import { Header } from "@/components/Header"
 import { Sidebar } from "@/components/Sidebar"
@@ -64,13 +63,8 @@ function Shell() {
   const { pathname } = useLocation()
   const [theme, toggleTheme] = useTheme()
 
-  // Earnings stays lazy — it is the most expensive endpoint, so it is not
-  // fetched until the Earnings page has been visited at least once.
-  const [earningsVisited, setEarningsVisited] = useState(false)
-  useEffect(() => { if (pathname === "/earnings") setEarningsVisited(true) }, [pathname])
-  const earningsQuery = useEarnings(earningsVisited)
-  const earnings: { upcoming: EarningsRow[]; reported: EarningsRow[] } | null =
-    earningsVisited ? (earningsQuery.data ?? { upcoming: [], reported: [] }) : null
+  // The Earnings page fetches its own week now, so nothing is threaded through
+  // here and the endpoint is only hit once that route mounts.
 
   // Per-page document title
   useEffect(() => { document.title = TITLES[pathname] ?? "AlphaDesk" }, [pathname])
@@ -118,7 +112,7 @@ function Shell() {
               <Route path="/research" element={<Navigate to="/dashboard" replace />} />
               <Route path="/chart" element={<ChartPage />} />
               <Route path="/trade" element={<Navigate to="/chart" replace />} />
-              <Route path="/earnings" element={<EarningsPage earnings={earnings} />} />
+              <Route path="/earnings" element={<EarningsPage />} />
               <Route path="/system" element={<SystemPage />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>

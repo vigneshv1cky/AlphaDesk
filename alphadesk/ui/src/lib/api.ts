@@ -56,6 +56,7 @@ export interface TokenRow {
 
 export interface EarningsRow {
   symbol: string
+  company_name?: string | null
   report_date: string
   session: string | null
   eps_estimate: number | null
@@ -156,6 +157,22 @@ export interface Movers {
   most_active: MoverRow[]
   gainers: MoverRow[]
   losers: MoverRow[]
+}
+
+/** One day of the week strip. Present even when empty — seven cells is what
+ * makes the strip read as a week. */
+export interface EarningsDay {
+  date: string
+  weekday: string
+  count: number
+  rows: EarningsRow[]
+}
+
+export interface EarningsWeek {
+  start: string
+  end: string
+  today: string
+  days: EarningsDay[]
 }
 
 export interface TapeEntry {
@@ -338,6 +355,8 @@ export const api = {
   askScreener: (question: string) =>
     post<ScreenerAnswer>("/api/screener/ask", { question }),
   system: () => get<SystemInfo>("/api/system"),
+  earningsWeek: (start?: string) =>
+    get<EarningsWeek>(`/api/earnings/week${start ? `?start=${start}` : ""}`),
   tape: () => get<{ tape: TapeEntry[] }>("/api/tape"),
   quote: (symbol: string) => get<Quote>(`/api/quote/${encodeURIComponent(symbol)}`),
   movers: (top = 20) => get<Movers>(`/api/movers?top=${top}`),

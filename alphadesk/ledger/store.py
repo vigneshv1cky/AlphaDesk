@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS earnings (
     eps_actual   REAL,              -- NULL until reported
     surprise_pct REAL,              -- NULL until reported
     market_cap   REAL,              -- for ranking big names in the reporting-soon view
+    company_name TEXT,              -- Nasdaq supplies it; a calendar of bare tickers is unreadable
     fetched_at   TEXT,
     UNIQUE(symbol, report_date) ON CONFLICT REPLACE
 );
@@ -204,6 +205,10 @@ def init() -> None:
                 pass  # already migrated
         try:
             conn.execute("ALTER TABLE earnings ADD COLUMN low_liquidity INTEGER")
+        except sqlite3.OperationalError:
+            pass  # already migrated
+        try:
+            conn.execute("ALTER TABLE earnings ADD COLUMN company_name TEXT")
         except sqlite3.OperationalError:
             pass  # already migrated
         try:
@@ -474,18 +479,23 @@ def upsert_earnings(rows: list[dict]) -> None:
     already run — that data loss is what this UPSERT prevents."""
     data = [(r["symbol"].upper(), r["report_date"], r.get("session"),
              r.get("eps_estimate"), r.get("eps_actual"), r.get("surprise_pct"),
-             r.get("market_cap"), _now())
+             r.get("market_cap"), r.get("company_name"), _now())
             for r in (rows or []) if r.get("symbol") and r.get("report_date")]
     if not data:
         return
     with _lock, _connect() as conn:
         conn.executemany(
             "INSERT INTO earnings (symbol, report_date, session, eps_estimate,"
-            " eps_actual, surprise_pct, market_cap, fetched_at) VALUES (?,?,?,?,?,?,?,?)"
+            " eps_actual, surprise_pct, market_cap, company_name, fetched_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?)"
             " ON CONFLICT(symbol, report_date) DO UPDATE SET"
             " session=excluded.session, eps_estimate=excluded.eps_estimate,"
             " eps_actual=excluded.eps_actual, surprise_pct=excluded.surprise_pct,"
-            " market_cap=excluded.market_cap, fetched_at=excluded.fetched_at", data)
+            " market_cap=excluded.market_cap,"
+            # COALESCE, not a plain overwrite: a later refresh that happens to
+            # omit the name must not blank one we already have.
+            " company_name=COALESCE(excluded.company_name, earnings.company_name),"
+            " fetched_at=excluded.fetched_at", data)
 
 
 def update_earnings_arm(symbol: str, report_date: str,
@@ -517,6 +527,36 @@ def update_earnings_liquidity(low_liquidity: dict[str, bool]) -> int:
         return cur.rowcount or 0
 
 
+def prune_delisted_earnings(seen: dict[str, set[str]]) -> int:
+    """Drop calendar rows upstream no longer lists.
+
+    upsert_earnings only ever inserts and updates, so a report Nasdaq later
+    reschedules or withdraws stays in the table forever. It then shows up as a
+    ghost reporter and, worse, inflates the per-day call count the calendar
+    leads with — measured on 2026-08-19: 37 rows on the Monday of which 11 had
+    not been seen upstream since the 17th.
+
+    `seen` maps a report date to EVERY symbol the upstream calendar returned
+    for it, INCLUDING ones the tradability screen then dropped. Pruning against
+    the pre-screen set means this only removes what upstream genuinely stopped
+    listing, never something we merely chose not to store.
+
+    A date whose fetch failed must not appear in `seen` at all — an empty set
+    would read as "nothing reports that day" and delete a good day's rows.
+    """
+    removed = 0
+    with _lock, _connect() as conn:
+        for day, symbols in seen.items():
+            if not symbols:
+                continue                     # a failed fetch proves nothing
+            ph = ",".join("?" * len(symbols))
+            cur = conn.execute(
+                f"DELETE FROM earnings WHERE report_date = ? AND symbol NOT IN ({ph})",
+                (day, *(s.upper() for s in symbols)))
+            removed += cur.rowcount or 0
+    return removed
+
+
 def purge_legacy_earnings() -> int:
     """Drop stale rows keyed by the OLD full-timestamp report_date (e.g.
     '2026-07-22T16:00:00-04:00'). The market-wide calendar now stores date-only
@@ -535,8 +575,8 @@ def recently_reported(days: int = 3) -> list[dict]:
     reaction, not the result, so we don't wait for it."""
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT symbol, report_date, session, eps_estimate, eps_actual, surprise_pct,"
-            " market_cap, pre_report_close, implied_move_pct, low_liquidity"
+            "SELECT symbol, company_name, report_date, session, eps_estimate, eps_actual,"
+            " surprise_pct, market_cap, pre_report_close, implied_move_pct, low_liquidity"
             " FROM earnings WHERE report_date >= ? AND report_date <= ?"
             # PRIORITY into the scout's capped window: freshest day first, then BIGGEST
             # by market cap. On a heavy day (~200 reporters) the scout only sees the top
@@ -560,11 +600,32 @@ def earnings_window(days_back: int = 4, days_fwd: int = 14) -> list[dict]:
     not by whether Nasdaq has backfilled the actual EPS yet."""
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT symbol, report_date, session, eps_estimate, eps_actual, surprise_pct,"
-            " market_cap, pre_report_close, implied_move_pct, low_liquidity FROM earnings"
-            " WHERE report_date >= ? AND report_date <= ?"
+            "SELECT symbol, company_name, report_date, session, eps_estimate, eps_actual,"
+            " surprise_pct, market_cap, pre_report_close, implied_move_pct, low_liquidity"
+            " FROM earnings WHERE report_date >= ? AND report_date <= ?"
             " ORDER BY report_date", (_et_date(-int(days_back)), _et_date(int(days_fwd))),
         ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def earnings_between(start: str, end: str) -> list[dict]:
+    """Every calendar row in [start, end], both YYYY-MM-DD and inclusive.
+
+    Unlike earnings_window() this takes absolute dates rather than offsets from
+    today, because the week view navigates away from today and "today ± N"
+    cannot express "the week of the 16th".
+
+    Ordered biggest-first within each day: a reporting day runs to ~50 names
+    and the ones a reader is scanning for are at the top of that distribution.
+    NULLS LAST so an unknown cap never outranks a known one.
+    """
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT symbol, company_name, report_date, session, eps_estimate, eps_actual,"
+            " surprise_pct, market_cap, low_liquidity FROM earnings"
+            " WHERE report_date >= ? AND report_date <= ?"
+            " ORDER BY report_date, market_cap IS NULL, market_cap DESC, symbol",
+            (start, end)).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -582,7 +643,7 @@ def upcoming_earnings(days: int = 7) -> list[dict]:
     up here off a stale 08-13 row)."""
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT symbol, report_date, session, eps_estimate, market_cap,"
+            "SELECT symbol, company_name, report_date, session, eps_estimate, market_cap,"
             " pre_report_close, implied_move_pct, low_liquidity FROM earnings e1"
             " WHERE eps_actual IS NULL AND report_date >= ?"
             "   AND report_date <= ?"

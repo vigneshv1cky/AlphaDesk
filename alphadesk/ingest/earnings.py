@@ -122,12 +122,21 @@ def refresh_calendar(days_back: int = 5, days_fwd: int = 14) -> int:
     today = now_et().date()
     rows: list[dict] = []
     seen: set[tuple[str, str]] = set()
+    # date -> every symbol upstream listed for it, BEFORE the tradability
+    # screen. Only dates that actually returned something are recorded, so a
+    # failed fetch can never be mistaken for an empty day (see
+    # store.prune_delisted_earnings).
+    upstream: dict[str, set[str]] = {}
     for offset in range(-days_back, days_fwd + 1):
         day = today + timedelta(days=offset)
         if day.weekday() >= 5:                       # markets closed — skip
             continue
         date_str = day.isoformat()
-        for r in _fetch_calendar_date(date_str):
+        fetched = _fetch_calendar_date(date_str)
+        if fetched:
+            upstream[date_str] = {(r.get("symbol") or "").strip().upper()
+                                  for r in fetched if (r.get("symbol") or "").strip()}
+        for r in fetched:
             sym = (r.get("symbol") or "").strip().upper()
             if not sym or not in_universe(sym):      # factual tradability screen
                 continue
@@ -150,13 +159,18 @@ def refresh_calendar(days_back: int = 5, days_fwd: int = 14) -> int:
                 "eps_actual": act,
                 "surprise_pct": surp,
                 "market_cap": _f(r.get("marketCap")),
+                # Nasdaq has always sent this; it simply was not stored. A
+                # calendar of bare tickers is not readable at 50 rows a day.
+                "company_name": (r.get("name") or "").strip() or None,
             })
         time.sleep(0.4)                               # be polite to the endpoint
     store.upsert_earnings(rows)
     purged = store.purge_legacy_earnings()            # drop old full-timestamp dupes
+    dropped = store.prune_delisted_earnings(upstream)  # reports upstream withdrew
     log.info("earnings calendar refreshed: %d tradable reporters across %d days"
-             "%s", len(rows), days_back + days_fwd + 1,
-             f" (purged {purged} legacy rows)" if purged else "")
+             "%s%s", len(rows), days_back + days_fwd + 1,
+             f" (purged {purged} legacy rows)" if purged else "",
+             f" (dropped {dropped} delisted)" if dropped else "")
     return len(rows)
 
 

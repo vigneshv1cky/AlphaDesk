@@ -111,3 +111,52 @@ def test_upcoming_earnings_window(store):
     ])
     got = {e["symbol"] for e in store.upcoming_earnings(days=5)}
     assert "AAA" in got and "ZZZ" not in got
+
+
+class TestPruneDelistedEarnings:
+    """Rows upstream withdrew must go; rows we simply failed to fetch must not.
+
+    The second half is the dangerous one — treating a failed fetch as "nothing
+    reports that day" would delete a good day's calendar and the next refresh
+    would put it straight back, so the damage would flicker rather than show.
+    """
+
+    def _seed(self, store):
+        store.upsert_earnings([
+            {"symbol": "AAA", "report_date": "2026-08-17", "company_name": "A Corp"},
+            {"symbol": "BBB", "report_date": "2026-08-17", "company_name": "B Corp"},
+            {"symbol": "CCC", "report_date": "2026-08-18", "company_name": "C Corp"},
+        ])
+
+    def test_a_withdrawn_report_is_dropped(self, store):
+        self._seed(store)
+        removed = store.prune_delisted_earnings({"2026-08-17": {"AAA"}})
+        assert removed == 1
+        left = {r["symbol"] for r in store.earnings_between("2026-08-17", "2026-08-17")}
+        assert left == {"AAA"}, "BBB was no longer listed upstream"
+
+    def test_other_days_are_untouched(self, store):
+        self._seed(store)
+        store.prune_delisted_earnings({"2026-08-17": {"AAA"}})
+        assert [r["symbol"] for r in store.earnings_between("2026-08-18", "2026-08-18")] == ["CCC"]
+
+    def test_a_failed_fetch_deletes_nothing(self, store):
+        """An empty symbol set means the fetch told us nothing, NOT that the
+        day is empty. Deleting on it would wipe a real day."""
+        self._seed(store)
+        assert store.prune_delisted_earnings({"2026-08-17": set()}) == 0
+        assert len(store.earnings_between("2026-08-17", "2026-08-17")) == 2
+
+    def test_a_day_absent_from_the_pull_is_untouched(self, store):
+        self._seed(store)
+        store.prune_delisted_earnings({"2026-08-18": {"CCC"}})
+        assert len(store.earnings_between("2026-08-17", "2026-08-17")) == 2
+
+    def test_company_name_survives_a_refresh_that_omits_it(self, store):
+        """COALESCE, not overwrite — a later pull without the name must not
+        blank one we already stored."""
+        self._seed(store)
+        store.upsert_earnings([{"symbol": "AAA", "report_date": "2026-08-17",
+                                "eps_actual": 1.5}])
+        row = store.earnings_between("2026-08-17", "2026-08-17")[0]
+        assert row["company_name"] == "A Corp"

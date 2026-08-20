@@ -17,10 +17,21 @@ export const keys = {
   tape: ["tape"] as const,
   movers: ["movers"] as const,
   quote: (symbol: string) => ["quote", symbol] as const,
+  earningsWeek: (start?: string) => ["earnings-week", start ?? "current"] as const,
 }
 
 export const useEarnings = (enabled = true) =>
   useQuery({ queryKey: keys.earnings, queryFn: api.earnings, refetchInterval: 300_000, enabled })
+
+/** One week of the calendar. Keyed by week, so stepping back and forth is
+ * instant after the first visit — a calendar week that has already been read
+ * does not change while you look at the next one. */
+export const useEarningsWeek = (start?: string) =>
+  useQuery({
+    queryKey: keys.earningsWeek(start),
+    queryFn: () => api.earningsWeek(start),
+    refetchInterval: 300_000,
+  })
 
 export const useScreener = () =>
   useQuery({ queryKey: keys.screener, queryFn: api.screener, refetchInterval: 60_000 })
