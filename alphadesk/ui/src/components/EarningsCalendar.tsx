@@ -96,24 +96,23 @@ function DayTable({ day }: { day: EarningsDay }) {
           {day.count} {day.count === 1 ? "call" : "calls"}
         </span>
       </h3>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[640px] border-collapse">
+      <table className="w-full min-w-[640px] border-collapse">
           <thead>
-            <tr className="text-[12px] uppercase tracking-[0.06em] text-muted-foreground">
-              <th className="px-3 py-1 text-left font-normal">Symbol</th>
-              <th className="px-3 py-1 text-left font-normal" />
-              <th className="px-3 py-1 text-right font-normal">Estimated EPS</th>
-              <th className="px-3 py-1 text-right font-normal">Actual EPS</th>
-              <th className="px-3 py-1 text-right font-normal">Surprise</th>
-              <th className="px-3 py-1 text-right font-normal">Market cap</th>
+            <tr className="text-[10px] font-medium uppercase tracking-[1px] text-muted-foreground">
+              <th className="sticky top-0 z-10 bg-panel px-[12px] py-[14px] text-left font-medium">Symbol</th>
+              <th className="sticky top-0 z-10 bg-panel px-[12px] py-[14px] text-left font-medium" />
+              <th className="sticky top-0 z-10 bg-panel px-[12px] py-[14px] text-right font-medium">Estimated EPS</th>
+              <th className="sticky top-0 z-10 bg-panel px-[12px] py-[14px] text-right font-medium">Actual EPS</th>
+              <th className="sticky top-0 z-10 bg-panel px-[12px] py-[14px] text-right font-medium">Surprise</th>
+              <th className="sticky top-0 z-10 bg-panel px-[12px] py-[14px] text-right font-medium">Market cap</th>
             </tr>
           </thead>
           <tbody>
             {day.rows.map(r => {
               const surprise = r.surprise_pct
               return (
-                <tr key={`${r.symbol}-${r.report_date}`} className="border-b border-grid-line last:border-b-0 hover:bg-muted/50">
-                  <td className="px-3 py-[6px] text-[14px]">
+                <tr key={`${r.symbol}-${r.report_date}`} className="hover:bg-muted/50">
+                  <td className="px-[12px] py-[6px] text-[14px]">
                     <Link
                       to={`/analysis?symbol=${encodeURIComponent(r.symbol)}`}
                       className="num font-semibold text-accent hover:underline"
@@ -121,26 +120,25 @@ function DayTable({ day }: { day: EarningsDay }) {
                       {r.symbol}
                     </Link>
                   </td>
-                  <td className="max-w-[280px] truncate px-3 py-[6px] text-[14px] text-muted-foreground">
+                  <td className="max-w-[280px] truncate px-[12px] py-[6px] text-[14px] text-muted-foreground">
                     {r.company_name ?? ""}
                   </td>
-                  <td className="num px-3 py-[6px] text-right text-[14px]">{eps(r.eps_estimate)}</td>
-                  <td className="num px-3 py-[6px] text-right text-[14px]">{eps(r.eps_actual)}</td>
-                  <td className={`num px-3 py-[6px] text-right text-[14px] ${
+                  <td className="num px-[12px] py-[6px] text-right text-[14px]">{eps(r.eps_estimate)}</td>
+                  <td className="num px-[12px] py-[6px] text-right text-[14px]">{eps(r.eps_actual)}</td>
+                  <td className={`num px-[12px] py-[6px] text-right text-[14px] ${
                     surprise == null ? "text-muted-foreground"
                       : surprise >= 0 ? "text-gain" : "text-loss"
                   }`}>
                     {surprise == null ? "—" : `${surprise >= 0 ? "+" : ""}${surprise.toFixed(2)}%`}
                   </td>
-                  <td className="num px-3 py-[6px] text-right text-[14px] text-muted-foreground">
+                  <td className="num px-[12px] py-[6px] text-right text-[14px] text-muted-foreground">
                     {money(r.market_cap)}
                   </td>
                 </tr>
               )
             })}
           </tbody>
-        </table>
-      </div>
+      </table>
     </section>
   )
 }

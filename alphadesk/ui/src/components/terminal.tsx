@@ -222,7 +222,11 @@ export function TH({
   return (
     <th
       className={cn(
-        "h-[28px] whitespace-nowrap px-3 text-[12px] font-medium uppercase tracking-[0.06em] text-muted-foreground",
+        // Measured off their board: 10px at weight 500 with 1px tracking and
+        // 14px of vertical air. Sticky, so scrolling a 250-row window keeps
+        // the column names — theirs does this and it is why long lists stay
+        // readable without a rule under every row.
+        "sticky top-0 z-10 whitespace-nowrap bg-panel px-[12px] py-[14px] text-[10px] font-medium uppercase tracking-[1px] text-muted-foreground",
         align === "left" && "text-left",
         align === "right" && "text-right",
         align === "center" && "text-center",
@@ -241,7 +245,10 @@ export function TR({
     <tr
       onClick={onClick}
       className={cn(
-        "border-b border-grid-line last:border-b-0 hover:bg-muted/60",
+        // No border. Theirs draws nothing between rows — 33px of height and a
+        // hover wash do the separating. Ruling every row is what made this
+        // read as a spreadsheet rather than a board.
+        "hover:bg-muted/60",
         onClick && "cursor-pointer",
         className,
       )}
@@ -265,7 +272,7 @@ export function TD({
     <td
       colSpan={colSpan}
       className={cn(
-        "h-[33px] whitespace-nowrap px-3",
+        "h-[33px] whitespace-nowrap px-[12px] py-[6px]",
         align === "left" && "text-left",
         align === "right" && "text-right",
         align === "center" && "text-center",

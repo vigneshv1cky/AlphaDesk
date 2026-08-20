@@ -108,7 +108,7 @@ function MoversTable({ rows }: { rows: MoverRow[] }) {
   }
   return (
     <div>
-      <div className="flex items-center border-b border-grid-line px-3 py-1 text-[12px] uppercase tracking-[0.06em] text-muted-foreground">
+      <div className="sticky top-0 z-10 flex items-center bg-panel px-[12px] py-[14px] text-[10px] font-medium uppercase tracking-[1px] text-muted-foreground">
         <span className="flex-1">Symbol</span>
         <span className="w-[72px]" />
         <span className="w-20 text-right">Price</span>
@@ -121,7 +121,7 @@ function MoversTable({ rows }: { rows: MoverRow[] }) {
           <Link
             key={r.symbol}
             to={`/analysis?symbol=${encodeURIComponent(r.symbol)}`}
-            className="flex items-center border-b border-grid-line px-3 py-[6px] text-[14px] last:border-b-0 hover:bg-muted/60"
+            className="flex h-[33px] items-center px-[12px] text-[14px] hover:bg-muted/60"
           >
             <span className="num flex-1 font-semibold text-accent">{r.symbol}</span>
             {/* Tinted by direction, same as the change cell — the line and the

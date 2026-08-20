@@ -23,7 +23,7 @@ function Row({ symbol, onRemove }: { symbol: string; onRemove: () => void }) {
   const chg = data?.change_pct ?? null
   const up = (chg ?? 0) >= 0
   return (
-    <tr className="border-b border-grid-line last:border-b-0 hover:bg-muted/50">
+    <tr className="hover:bg-muted/50">
       <td className="px-3 py-[6px]">
         <Link
           to={`/analysis?symbol=${encodeURIComponent(symbol)}`}
@@ -35,10 +35,10 @@ function Row({ symbol, onRemove }: { symbol: string; onRemove: () => void }) {
       <td className="max-w-[240px] truncate px-3 py-[6px] text-[14px] text-muted-foreground">
         {isPending ? "…" : data?.name ?? ""}
       </td>
-      <td className="num px-3 py-[6px] text-right text-[14px]">
+      <td className="num px-[12px] py-[6px] text-right text-[14px]">
         {data?.price == null ? "—" : data.price.toFixed(2)}
       </td>
-      <td className={`num px-3 py-[6px] text-right text-[14px] ${
+      <td className={`num px-[12px] py-[6px] text-right text-[14px] ${
         chg == null ? "text-muted-foreground" : up ? "text-gain" : "text-loss"
       }`}>
         {chg == null ? "—" : `${up ? "+" : ""}${chg.toFixed(2)}%`}
@@ -67,6 +67,8 @@ export default function PortfolioPage() {
         span={12}
         title="My Portfolio"
         subtitle="the symbols you follow · saved in this browser — AlphaDesk holds no positions"
+        scroll="calc(100vh - 150px)"
+        bodyClassName="overflow-x-auto"
       >
         <form
           className="flex flex-wrap items-center gap-1.5 border-b border-border p-1"
@@ -90,15 +92,14 @@ export default function PortfolioPage() {
             nothing on the list yet — add a symbol above, or star one from Analysis
           </Empty>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[520px] border-collapse">
+          <table className="w-full min-w-[520px] border-collapse">
               <thead>
-                <tr className="text-[12px] uppercase tracking-[0.06em] text-muted-foreground">
-                  <th className="px-3 py-1 text-left font-normal">Symbol</th>
-                  <th className="px-3 py-1 text-left font-normal" />
-                  <th className="px-3 py-1 text-right font-normal">Price</th>
-                  <th className="px-3 py-1 text-right font-normal">Chg %</th>
-                  <th className="px-3 py-1 text-right font-normal" />
+                <tr className="text-[10px] font-medium uppercase tracking-[1px] text-muted-foreground">
+                  <th className="sticky top-0 z-10 bg-panel px-[12px] py-[14px] text-left font-normal">Symbol</th>
+                  <th className="sticky top-0 z-10 bg-panel px-[12px] py-[14px] text-left font-normal" />
+                  <th className="sticky top-0 z-10 bg-panel px-[12px] py-[14px] text-right font-normal">Price</th>
+                  <th className="sticky top-0 z-10 bg-panel px-[12px] py-[14px] text-right font-normal">Chg %</th>
+                  <th className="sticky top-0 z-10 bg-panel px-[12px] py-[14px] text-right font-normal" />
                 </tr>
               </thead>
               <tbody>
@@ -106,8 +107,7 @@ export default function PortfolioPage() {
                   <Row key={s} symbol={s} onRemove={() => remove(s)} />
                 ))}
               </tbody>
-            </table>
-          </div>
+          </table>
         )}
       </Widget>
     </div>
