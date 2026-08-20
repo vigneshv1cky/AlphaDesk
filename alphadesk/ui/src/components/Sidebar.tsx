@@ -4,8 +4,12 @@ import {
 } from "lucide-react"
 
 /** Left rail — sectioned, icon-led, with an identity card pinned to the
- * bottom. Mirrors AlphaSpace's shape: a VIEWS group of surfaces, a THEMES
- * group of saved symbol sets, and account chrome underneath.
+ * bottom: a VIEWS group of surfaces, then account chrome.
+ *
+ * There was a THEMES group of preset symbol sets here. It was removed because
+ * the links carried a ?q= the window never read — three buttons that looked
+ * like filters and filtered nothing. Worth rebuilding on top of a real filter,
+ * not before one.
  *
  * Vertical rather than top tabs because a terminal's horizontal band is spoken
  * for by the ticker strip, and a list grows without wrapping.
@@ -19,14 +23,6 @@ const VIEWS = [
   { to: "/news", label: "News", Icon: Newspaper },
   { to: "/portfolio", label: "My Portfolio", Icon: Star },
   { to: "/earnings", label: "Earnings Hub", Icon: CalendarDays },
-]
-
-/** Themes are pre-set symbol groups. They deep-link into the news window's
- * filter rather than being a separate surface — the same list, narrowed. */
-const THEMES = [
-  { q: "NVDA", label: "AI & Semis", Icon: Newspaper },
-  { q: "AAPL", label: "Mega Cap", Icon: Newspaper },
-  { q: "XL", label: "Sector ETFs", Icon: Newspaper },
 ]
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -62,19 +58,6 @@ export function Sidebar() {
                 {label}
               </>
             )}
-          </NavLink>
-        ))}
-      </Section>
-
-      <Section title="Themes">
-        {THEMES.map(({ q, label, Icon }) => (
-          <NavLink
-            key={label}
-            to={`/news?q=${encodeURIComponent(q)}`}
-            className="mx-2 flex items-center gap-2.5 rounded-md px-2 py-[7px] text-[12px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-          >
-            <Icon className="h-[15px] w-[15px] shrink-0" />
-            {label}
           </NavLink>
         ))}
       </Section>
