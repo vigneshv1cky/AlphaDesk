@@ -246,8 +246,11 @@ export type ChartRange = "1D" | "5D" | "1M" | "3M" | "6M" | "YTD" | "1Y" | "5Y" 
 
 export interface ChartSeries {
   symbol: string
-  /** "intraday" or "1d" — which series this actually is. */
+  /** The bar interval actually served — may be coarser than the one asked
+   * for, when the range outruns it. See ingest/prices.resolve_interval. */
   interval?: string
+  interval_label?: string
+  interval_requested?: string | null
   range?: string | null
   bars: ChartBar[]
   rsi_9: (number | null)[]
@@ -370,8 +373,10 @@ export const api = {
     post<ResearchAnswer>("/api/research/ask", { symbol, question }),
   chart: (symbol: string, days = 2) =>
     get<ChartSeries>(`/api/chart/${encodeURIComponent(symbol)}?days=${days}`),
-  chartRange: (symbol: string, range: ChartRange) =>
-    get<ChartSeries>(`/api/chart/${encodeURIComponent(symbol)}?range=${range}`),
+  chartRange: (symbol: string, range: ChartRange, interval?: string) =>
+    get<ChartSeries>(
+      `/api/chart/${encodeURIComponent(symbol)}?range=${range}` +
+      (interval ? `&interval=${interval}` : "")),
   screener: () => get<{ symbols: ScreenerRow[] }>("/api/screener"),
   askScreener: (question: string) =>
     post<ScreenerAnswer>("/api/screener/ask", { question }),

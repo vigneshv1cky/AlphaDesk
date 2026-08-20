@@ -549,7 +549,7 @@ def liquidity_batch(symbols: list[str], ttl: int = 3600) -> dict[str, bool]:
     return out
 
 
-def intraday_bars(symbol: str, start) -> list[dict]:
+def intraday_bars(symbol: str, start, interval: str = "1m") -> list[dict]:
     """Minute bars for `symbol` from `start` (a tz-aware datetime) to now, via Alpaca
     (free IEX feed). The bar series behind get_chart_series() and the coverage
     statistics that gate its indicators. Chronological (oldest first); empty list on
@@ -560,9 +560,11 @@ def intraday_bars(symbol: str, start) -> list[dict]:
     try:
         from alpaca.data.enums import DataFeed
         from alpaca.data.requests import StockBarsRequest
-        from alpaca.data.timeframe import TimeFrame
+        from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+        spec = CHART_INTERVALS.get(interval, CHART_INTERVALS["1m"])
+        tf = TimeFrame(spec["n"], TimeFrameUnit(spec["unit"]))
         resp = client.get_stock_bars(StockBarsRequest(
-            symbol_or_symbols=symbol.upper(), timeframe=TimeFrame.Minute,
+            symbol_or_symbols=symbol.upper(), timeframe=tf,
             start=start, feed=DataFeed.IEX))
         data = resp.data.get(symbol.upper(), []) if hasattr(resp, "data") else []
         bars = [{"ts": b.timestamp, "open": float(b.open), "high": float(b.high),
@@ -615,7 +617,7 @@ _chart_cache: dict[str, tuple[float, Optional[dict]]] = {}
 _CHART_TTL_S = 30
 
 
-def daily_bars(symbol: str, period: str) -> list[dict]:
+def daily_bars(symbol: str, period: str, interval: str = "1d") -> list[dict]:
     """Daily OHLCV via yfinance, for ranges past the minute feed's reach.
 
     Alpaca's minute bars stop at ~30 days, so 3M and beyond need a different
@@ -627,7 +629,8 @@ def daily_bars(symbol: str, period: str) -> list[dict]:
     """
     try:
         import yfinance as yf
-        df = yf.Ticker(symbol.upper()).history(period=period, interval="1d")
+        yf_interval = CHART_INTERVALS.get(interval, {}).get("yf", "1d")
+        df = yf.Ticker(symbol.upper()).history(period=period, interval=yf_interval)
         if df is None or df.empty:
             return []
         out = []
@@ -644,9 +647,54 @@ def daily_bars(symbol: str, period: str) -> list[dict]:
         return []
 
 
-# The ranges the UI offers, mapped to how each is actually sourced. 1D/5D come
-# from the minute feed; everything longer is daily. Kept here rather than in the
-# UI so the two can never disagree about what "3M" means.
+# Bar intervals the chart offers. `unit` is Alpaca's; `yf` is the yfinance
+# equivalent for the ones that outrun the minute feed. `max_days` is how far
+# back that interval can actually be fetched — Alpaca thins minute history and
+# yfinance caps intraday at 60 days, so asking for 1-minute bars across five
+# years is not a slow request, it is an impossible one.
+CHART_INTERVALS: dict[str, dict] = {
+    "1m":  {"n": 1,  "unit": "Min",  "max_days": 30,   "label": "1 min"},
+    "2m":  {"n": 2,  "unit": "Min",  "max_days": 30,   "label": "2 mins"},
+    "5m":  {"n": 5,  "unit": "Min",  "max_days": 60,   "label": "5 mins"},
+    "15m": {"n": 15, "unit": "Min",  "max_days": 60,   "label": "15 mins"},
+    "30m": {"n": 30, "unit": "Min",  "max_days": 60,   "label": "30 mins"},
+    "1h":  {"n": 1,  "unit": "Hour", "max_days": 730,  "label": "1 hour"},
+    "4h":  {"n": 4,  "unit": "Hour", "max_days": 730,  "label": "4 hours"},
+    "1d":  {"n": 1,  "unit": "Day",  "max_days": None, "yf": "1d",  "label": "1 day"},
+    "1wk": {"n": 1,  "unit": "Week", "max_days": None, "yf": "1wk", "label": "1 week"},
+    "1mo": {"n": 1,  "unit": "Month","max_days": None, "yf": "1mo", "label": "1 month"},
+}
+
+# Roughly how many calendar days each range spans, for deciding whether a
+# requested interval can actually cover it.
+RANGE_DAYS = {"1D": 1, "5D": 5, "1M": 31, "3M": 93, "6M": 186,
+              "YTD": 365, "1Y": 365, "5Y": 1825, "MAX": 20000}
+
+
+def resolve_interval(range_key: str, wanted: str | None) -> str:
+    """The finest interval that can actually cover `range_key`.
+
+    Returned rather than enforced silently: the caller reports what it got, so
+    a reader who asked for 1-minute bars over a year can see they were served
+    daily instead of quietly believing the chart is minute data.
+    """
+    span = RANGE_DAYS.get((range_key or "1D").upper(), 1)
+    want = (wanted or "").lower()
+    if want not in CHART_INTERVALS:
+        # No preference: minute bars for a day or a week, daily beyond.
+        return "1m" if span <= 5 else "1d"
+    cap = CHART_INTERVALS[want]["max_days"]
+    if cap is not None and span > cap:
+        for key in ("1h", "4h", "1d", "1wk", "1mo"):
+            c = CHART_INTERVALS[key]["max_days"]
+            if c is None or span <= c:
+                return key
+        return "1mo"
+    return want
+
+
+# The ranges the UI offers, mapped to how each is actually sourced. Kept here
+# rather than in the UI so the two can never disagree about what "3M" means.
 CHART_RANGES: dict[str, dict] = {
     "1D":  {"kind": "intraday", "days": 1},
     "5D":  {"kind": "intraday", "days": 5},
@@ -674,7 +722,8 @@ def _daily_coverage(bars: list[dict]) -> dict:
             "median_gap_min": None, "indicators_reliable": n >= 35}
 
 
-def get_chart_series(symbol: str, days: int = 2, range_key: str | None = None) -> Optional[dict]:
+def get_chart_series(symbol: str, days: int = 2, range_key: str | None = None,
+                     interval: str | None = None) -> Optional[dict]:
     """OHLC + full RSI-9 and MACD(12,26,9) SERIES for the human chart.
 
     Indicators are computed over the whole fetched window but only marked
@@ -683,7 +732,8 @@ def get_chart_series(symbol: str, days: int = 2, range_key: str | None = None) -
     """
     sym = symbol.upper()
     spec = CHART_RANGES.get((range_key or "").upper())
-    key = f"{sym}:{range_key or days}"
+    used = resolve_interval(range_key or "1D", interval)
+    key = f"{sym}:{range_key or days}:{used}"
     with _cache_lock:
         hit = _chart_cache.get(key)
         if hit and time.time() - hit[0] < _CHART_TTL_S:
@@ -691,13 +741,20 @@ def get_chart_series(symbol: str, days: int = 2, range_key: str | None = None) -
     result: Optional[dict] = None
     try:
         from datetime import timedelta
-        if spec and spec["kind"] == "daily":
-            bars = daily_bars(sym, spec["period"])
+        # The INTERVAL decides the feed, not the range: hour bars over three
+        # months still come from Alpaca, and daily bars over five days still
+        # come from yfinance if that is what was asked for.
+        if CHART_INTERVALS[used].get("yf"):
+            period = spec["period"] if spec and spec["kind"] == "daily" else f"{max(1, spec['days'] if spec else days)}d"
+            bars = daily_bars(sym, period, used)
             stats = _daily_coverage(bars)
         else:
-            look = spec["days"] if spec else days
-            bars = intraday_bars(sym, now_et() - timedelta(days=max(1, min(look, 30)) + 3))
-            stats = None
+            span = RANGE_DAYS.get((range_key or "1D").upper(), days)
+            bars = intraday_bars(sym, now_et() - timedelta(days=span + 3), used)
+            # The coverage gate measures MINUTE density. It only means anything
+            # for minute bars; an hourly series is complete by construction the
+            # same way a daily one is.
+            stats = None if used in ("1m", "2m") else _daily_coverage(bars)
         if len(bars) >= 2:
             import pandas as pd
             closes = pd.Series([b["close"] for b in bars])
@@ -727,7 +784,9 @@ def get_chart_series(symbol: str, days: int = 2, range_key: str | None = None) -
                 "macd_hist": [_pt(a - b) for a, b in zip(macd_line, signal_line)],
                 "thresholds": {"rsi_oversold": RSI_CROSS_OVERSOLD,
                                "rsi_overbought": RSI_CROSS_OVERBOUGHT},
-                "interval": "1d" if (spec and spec["kind"] == "daily") else "intraday",
+                "interval": used,
+                "interval_label": CHART_INTERVALS[used]["label"],
+                "interval_requested": (interval or "").lower() or None,
                 "range": (range_key or "").upper() or None,
                 **(stats if stats is not None else _coverage_stats(bars)),
             }

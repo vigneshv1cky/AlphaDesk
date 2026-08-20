@@ -148,7 +148,8 @@ def api_screener_ask(body: ScreenerQuestion):
 
 
 @app.get("/api/chart/{symbol}")
-def api_chart(symbol: str, days: int = 2, range: str | None = None):
+def api_chart(symbol: str, days: int = 2, range: str | None = None,
+              interval: str | None = None):
     """OHLC + RSI-9 + MACD(12,26,9) series for the human decision chart.
 
     Always returns the data-quality block (coverage / median_gap_min /
@@ -164,10 +165,14 @@ def api_chart(symbol: str, days: int = 2, range: str | None = None):
     # length: 1D and 5D come off the minute feed, everything longer off daily
     # bars, because the minute feed reaches about 30 days. `days` stays for
     # callers that predate ranges.
-    from alphadesk.ingest.prices import CHART_RANGES
+    from alphadesk.ingest.prices import CHART_INTERVALS, CHART_RANGES
     if range and range.upper() not in CHART_RANGES:
         raise HTTPException(400, f"range must be one of {', '.join(CHART_RANGES)}")
-    series = get_prices().chart_series(sym, days=days, range_key=range)
+    if interval and interval.lower() not in CHART_INTERVALS:
+        raise HTTPException(400, f"interval must be one of {', '.join(CHART_INTERVALS)}")
+    # A too-fine interval for the span is downgraded rather than refused, and
+    # the response reports what was actually served — see resolve_interval.
+    series = get_prices().chart_series(sym, days=days, range_key=range, interval=interval)
     if not series:
         raise HTTPException(404, f"no bars for {sym}")
     return series

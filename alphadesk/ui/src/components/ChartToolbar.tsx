@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { OVERLAYS, type OverlayId } from "@/lib/indicators"
-import type { SeriesKind } from "@/components/PriceChart"
+import type { ScaleMode, SeriesKind } from "@/components/PriceChart"
 import type { ChartRange } from "@/lib/api"
 
 /** The chart's controls: series type, range, scale, indicators, expand.
@@ -20,10 +20,29 @@ import type { ChartRange } from "@/lib/api"
  */
 
 const TYPES: { id: SeriesKind; label: string }[] = [
-  { id: "candles", label: "Candles" },
-  { id: "bars", label: "Bars" },
+  { id: "candles", label: "Candlestick" },
   { id: "line", label: "Line" },
-  { id: "area", label: "Area" },
+  { id: "bars", label: "Bar" },
+  // Their name for a filled line. Kept because "Area" and "Mountain" describe
+  // the same chart and theirs is the one a reader coming from it will look for.
+  { id: "area", label: "Mountain" },
+]
+
+/** Bar intervals. The server owns which are actually reachable for a given
+ * range (ingest/prices.resolve_interval) and reports what it served, so this
+ * list is what can be ASKED for rather than what will always be granted. */
+export const INTERVALS: { id: string; label: string }[] = [
+  { id: "1m", label: "1 min" }, { id: "2m", label: "2 mins" },
+  { id: "5m", label: "5 mins" }, { id: "15m", label: "15 mins" },
+  { id: "30m", label: "30 mins" }, { id: "1h", label: "1 hour" },
+  { id: "4h", label: "4 hours" }, { id: "1d", label: "1 day" },
+  { id: "1wk", label: "1 week" }, { id: "1mo", label: "1 month" },
+]
+
+const SCALES: { id: ScaleMode; label: string }[] = [
+  { id: "linear", label: "Linear" },
+  { id: "log", label: "Logarithmic" },
+  { id: "percent", label: "Percent" },
 ]
 
 /** Their exact set. 1D/5D are intraday, the rest daily — the server decides
@@ -37,9 +56,10 @@ const off = "text-muted-foreground hover:bg-muted hover:text-foreground"
 /** A menu that closes on outside click and on Escape. Hand-rolled for the same
  * reason the rest of the primitives are — one popover does not justify a
  * dependency, and this one has to sit inside a 440px tile without clipping. */
-function Menu({ label, active, children }: {
+function Menu({ label, active, wide, children }: {
   label: string
   active?: boolean
+  wide?: boolean
   children: (close: () => void) => React.ReactNode
 }) {
   const [open, setOpen] = useState(false)
@@ -68,7 +88,9 @@ function Menu({ label, active, children }: {
         {label} <span className="text-[9px]">▾</span>
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-1 min-w-[168px] rounded-md border border-border bg-popover py-1 shadow-lg">
+        <div className={`absolute left-0 top-full z-50 mt-1 rounded-md border border-border bg-popover py-1 shadow-lg ${
+          wide ? "w-[320px]" : "min-w-[168px]"
+        }`}>
           {children(() => setOpen(false))}
         </div>
       )}
@@ -94,14 +116,19 @@ function Item({ selected, onClick, children }: {
 }
 
 export function ChartToolbar({
-  type, onType, logScale, onLogScale,
+  type, onType, scale, onScale,
   overlays, onOverlays, panes, onPanes, expanded, onExpand, indicatorsReliable,
-  interval, drawOpen, onDrawOpen,
+  interval, onInterval, servedInterval, servedLabel, drawOpen, onDrawOpen,
 }: {
   type: SeriesKind
   onType: (t: SeriesKind) => void
-  logScale: boolean
-  onLogScale: (v: boolean) => void
+  scale: ScaleMode
+  onScale: (v: ScaleMode) => void
+  interval: string
+  onInterval: (v: string) => void
+  /** What the server actually served — may be coarser than asked. */
+  servedInterval?: string
+  servedLabel?: string
   overlays: OverlayId[]
   onOverlays: (v: OverlayId[]) => void
   panes: boolean
@@ -111,8 +138,6 @@ export function ChartToolbar({
   drawOpen: boolean
   onDrawOpen: () => void
   indicatorsReliable: boolean
-  /** "intraday" | "1d", straight off the series. */
-  interval?: string
 }) {
   const toggle = (id: OverlayId) =>
     onOverlays(overlays.includes(id) ? overlays.filter(o => o !== id) : [...overlays, id])
@@ -127,39 +152,42 @@ export function ChartToolbar({
         ))}
       </Menu>
 
-      <span className="mx-1 h-4 w-px bg-border" />
-
-      <span className="px-2 py-[3px] text-[12px] text-muted-foreground" title="bar interval for this range">
-        {interval === "1d" ? "1D bars" : "1m bars"}
-      </span>
-
-      <span className="mx-1 h-4 w-px bg-border" />
-
-      <button type="button" onClick={() => onLogScale(!logScale)} className={`${btn} ${logScale ? on : off}`}>
-        {logScale ? "Log" : "Lin"}
-      </button>
-
-      <Menu label="Ind" active={overlays.length > 0 || panes}>
-        {() => (
+      <Menu label={INTERVALS.find(i => i.id === interval)?.label ?? interval}
+            active={!!servedInterval && servedInterval !== interval}>
+        {close => (
           <>
-            {OVERLAYS.map(o => (
-              <Item key={o.id} selected={overlays.includes(o.id)} onClick={() => toggle(o.id)}>
-                <span className="h-[2px] w-3 shrink-0" style={{ background: o.color }} />
-                {o.label}
+            {INTERVALS.map(i => (
+              <Item key={i.id} selected={i.id === interval} onClick={() => { onInterval(i.id); close() }}>
+                {i.label}
               </Item>
             ))}
-            <div className="my-1 h-px bg-border" />
-            <Item selected={panes} onClick={() => onPanes(!panes)}>
-              RSI / MACD panes
-            </Item>
-            {!indicatorsReliable && (
-              // The server measured this feed too sparse to support them, and
-              // it hides them rather than draw something that looks right.
+            {servedInterval && servedInterval !== interval && (
+              // Say so rather than silently redrawing at a coarser interval —
+              // a chart that quietly changes what a bar means is the same
+              // failure as an indicator drawn on data too sparse for it.
               <p className="px-3 py-1 text-[11px] leading-snug text-muted-foreground">
-                Panes stay hidden — this feed is too sparse to compute them honestly.
+                This range cannot reach that interval; showing {servedLabel} instead.
               </p>
             )}
           </>
+        )}
+      </Menu>
+
+      <Menu label={SCALES.find(x => x.id === scale)!.label.slice(0, 3)}>
+        {close => SCALES.map(x => (
+          <Item key={x.id} selected={x.id === scale} onClick={() => { onScale(x.id); close() }}>
+            {x.label}
+          </Item>
+        ))}
+      </Menu>
+
+      <Menu label="Ind" active={overlays.length > 0 || panes} wide>
+        {() => (
+          <IndicatorMenu
+            overlays={overlays} toggle={toggle}
+            panes={panes} onPanes={onPanes}
+            indicatorsReliable={indicatorsReliable}
+          />
         )}
       </Menu>
 
@@ -210,5 +238,67 @@ export function ChartRanges({ range, onRange }: {
         </button>
       ))}
     </div>
+  )
+}
+
+/** The indicator picker: a search box over a grouped list, the way theirs is.
+ * With a dozen entries a flat list is already hard to scan, and the groups are
+ * how a reader thinks about them — averages, then bands, then volume. */
+function IndicatorMenu({ overlays, toggle, panes, onPanes, indicatorsReliable }: {
+  overlays: OverlayId[]
+  toggle: (id: OverlayId) => void
+  panes: boolean
+  onPanes: (v: boolean) => void
+  indicatorsReliable: boolean
+}) {
+  const [q, setQ] = useState("")
+  const groups = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    const hits = OVERLAYS.filter(o => !needle || o.label.toLowerCase().includes(needle))
+    const by = new Map<string, typeof OVERLAYS>()
+    for (const o of hits) by.set(o.group, [...(by.get(o.group) ?? []), o])
+    return [...by.entries()]
+  }, [q])
+
+  return (
+    <>
+      <input
+        autoFocus
+        value={q}
+        onChange={e => setQ(e.target.value)}
+        placeholder="Search indicators…"
+        aria-label="Search indicators"
+        className="mb-1 w-full border-b border-grid-line bg-transparent px-3 py-2 text-[13px] outline-none placeholder:text-muted-foreground"
+      />
+      <div className="max-h-[280px] overflow-y-auto">
+        {groups.length === 0 && (
+          <p className="px-3 py-3 text-[12px] text-muted-foreground">No indicator matches “{q}”.</p>
+        )}
+        {groups.map(([group, items]) => (
+          <div key={group}>
+            <div className="bg-panel-header px-3 py-1 text-[10px] font-medium uppercase tracking-[1px] text-muted-foreground">
+              {group}
+            </div>
+            {items.map(o => (
+              <Item key={o.id} selected={overlays.includes(o.id)} onClick={() => toggle(o.id)}>
+                <span className="h-[2px] w-3 shrink-0" style={{ background: o.color }} />
+                <span className="truncate">{o.label}</span>
+              </Item>
+            ))}
+          </div>
+        ))}
+        <div className="bg-panel-header px-3 py-1 text-[10px] font-medium uppercase tracking-[1px] text-muted-foreground">
+          Panes
+        </div>
+        <Item selected={panes} onClick={() => onPanes(!panes)}>RSI / MACD</Item>
+        {!indicatorsReliable && (
+          // The server measured this feed too sparse to support them, and it
+          // hides them rather than draw something that looks right.
+          <p className="px-3 py-1 text-[11px] leading-snug text-muted-foreground">
+            Hidden for this symbol — the feed is too sparse to compute them honestly.
+          </p>
+        )}
+      </div>
+    </>
   )
 }

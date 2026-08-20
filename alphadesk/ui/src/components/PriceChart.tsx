@@ -12,7 +12,10 @@ import {
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts"
-import { bollinger, ema, OVERLAYS, sma, vwap, type OverlayId } from "@/lib/indicators"
+import {
+  bollinger, dema, ema, envelopes, keltner, OVERLAYS, priceChannel,
+  sma, tema, vwap, wma, type OverlayId, type Point,
+} from "@/lib/indicators"
 import { ChartDrawings, type Drawing, type Tool } from "@/components/ChartDrawings"
 import type { ChartBar, ChartSeries } from "@/lib/api"
 
@@ -110,10 +113,11 @@ function fade(color: string, alpha: number): string {
  * five sessions renders exactly like one computed on 1,950 real minute bars,
  * and the whole point of this app is to not fool its own operator. */
 export type SeriesKind = "candles" | "line" | "area" | "bars"
+export type ScaleMode = "linear" | "log" | "percent"
 
 export function PriceChart({
   data, dark, compact = false, height = 320, series = "candles",
-  overlays = [], logScale = false, showIndicatorPanes = true,
+  overlays = [], scale = "linear", showIndicatorPanes = true,
   drawings, onDrawingsChange, tool = "none", onToolDone, drawingsVisible = true,
 }: {
   data: ChartSeries
@@ -131,9 +135,10 @@ export function PriceChart({
    * were hardcoded because the retired strategy read them, and a general
    * chart lets the reader pick what to see. */
   overlays?: OverlayId[]
-  /** Log price scale. Meaningful over months, noise intraday — offered rather
-   * than assumed. */
-  logScale?: boolean
+  /** "linear" | "log" | "percent". Percent rebases the pane to the change from
+   * the first visible bar, which is the only fair way to compare two names of
+   * different price. */
+  scale?: ScaleMode
   /** Show the RSI and MACD panes. Ignored in compact mode, which has no room. */
   showIndicatorPanes?: boolean
   /** Hand-drawn annotations. Passed in rather than owned here so they survive
@@ -175,7 +180,9 @@ export function PriceChart({
     const base = {
       layout: { background: { color: "transparent" }, textColor: text, attributionLogo: false },
       grid: { vertLines: { color: grid }, horzLines: { color: grid } },
-      rightPriceScale: { borderColor: grid, mode: logScale ? 1 : 0 },
+      // lightweight-charts price scale modes: 0 normal, 1 logarithmic,
+      // 2 percentage.
+      rightPriceScale: { borderColor: grid, mode: scale === "log" ? 1 : scale === "percent" ? 2 : 0 },
       timeScale: { borderColor: grid, timeVisible: true, secondsVisible: false },
       autoSize: true,
     }
@@ -236,17 +243,30 @@ export function PriceChart({
         line.setData(points.map(p => ({ time: t(p.t), value: p.v })))
       }
       const colorOf = (id: OverlayId) => OVERLAYS.find(o => o.id === id)!.color
+      /** A band draws its rails solid-ish and its centre faint, so the channel
+       * reads as one object rather than three unrelated lines. */
+      const band = (c: string, parts: { upper: Point[]; middle?: Point[]; lower: Point[] }) => {
+        add(parts.upper, fade(c, 0.75))
+        if (parts.middle) add(parts.middle, fade(c, 0.45))
+        add(parts.lower, fade(c, 0.75))
+      }
+      const SIMPLE: Partial<Record<OverlayId, () => Point[]>> = {
+        sma20: () => sma(visible, 20),
+        sma50: () => sma(visible, 50),
+        ema20: () => ema(visible, 20),
+        ema50: () => ema(visible, 50),
+        wma20: () => wma(visible, 20),
+        dema20: () => dema(visible, 20),
+        tema20: () => tema(visible, 20),
+        vwap: () => vwap(visible),
+      }
       for (const id of overlays) {
-        if (id === "sma20") add(sma(visible, 20), colorOf(id))
-        else if (id === "sma50") add(sma(visible, 50), colorOf(id))
-        else if (id === "ema20") add(ema(visible, 20), colorOf(id))
-        else if (id === "vwap") add(vwap(visible), colorOf(id))
-        else if (id === "bb") {
-          const b = bollinger(visible, 20, 2)
-          add(b.upper, fade(colorOf(id), 0.75))
-          add(b.middle, fade(colorOf(id), 0.45))
-          add(b.lower, fade(colorOf(id), 0.75))
-        }
+        const simple = SIMPLE[id]
+        if (simple) { add(simple(), colorOf(id)); continue }
+        if (id === "bb") band(colorOf(id), bollinger(visible, 20, 2))
+        else if (id === "keltner") band(colorOf(id), keltner(visible, 20, 2))
+        else if (id === "envelopes") band(colorOf(id), envelopes(visible, 20, 2.5))
+        else if (id === "channel") band(colorOf(id), priceChannel(visible, 20))
       }
     }
 
@@ -351,7 +371,7 @@ export function PriceChart({
       setApi(null)
       charts.forEach(c => c.remove())
     }
-  }, [data, dark, compact, height, series, overlays, logScale, showIndicatorPanes])
+  }, [data, dark, compact, height, series, overlays, scale, showIndicatorPanes])
 
   if (compact) {
     return (

@@ -31,7 +31,7 @@ class FakeResp:
 @pytest.fixture()
 def stub_bars(monkeypatch):
     """Every intraday bar carries a volume, as the real feed does."""
-    monkeypatch.setattr(prices, "intraday_bars", lambda sym, start: [
+    monkeypatch.setattr(prices, "intraday_bars", lambda sym, start, interval="1m": [
         {"ts": FakeBar(i, 100.0).timestamp, "open": 100.0, "high": 101.0,
          "low": 99.0, "close": 100.5, "volume": 1234.0 + i} for i in range(60)])
     prices._chart_cache.clear()
@@ -39,18 +39,18 @@ def stub_bars(monkeypatch):
 
 class TestChartVolume:
     def test_bars_carry_volume(self, stub_bars):
-        series = prices.get_chart_series("TEST", days=2)
+        series = prices.get_chart_series("TEST", days=2, range_key="1D")
         assert series is not None
         assert set(series["bars"][0]) == {"t", "o", "h", "l", "c", "v"}
         assert series["bars"][0]["v"] == 1234.0
 
     def test_a_feed_without_volume_reports_zero_not_a_missing_key(self, monkeypatch):
         """The histogram reads `v` on every bar; absent is worse than zero."""
-        monkeypatch.setattr(prices, "intraday_bars", lambda sym, start: [
+        monkeypatch.setattr(prices, "intraday_bars", lambda sym, start, interval="1m": [
             {"ts": FakeBar(i, 100.0).timestamp, "open": 100.0, "high": 101.0,
              "low": 99.0, "close": 100.5} for i in range(60)])
         prices._chart_cache.clear()
-        series = prices.get_chart_series("TEST", days=2)
+        series = prices.get_chart_series("TEST", days=2, range_key="1D")
         assert all("v" in b for b in series["bars"])
         assert series["bars"][0]["v"] == 0.0
 
@@ -129,3 +129,36 @@ class TestMoversCarrySparks:
         assert all("spark" in r for r in rows)
         assert rows[0]["spark"] == [1.0, 2.0]
         assert next(r for r in rows if r["symbol"] == "BBB")["spark"] == []
+
+
+class TestIntervalResolution:
+    """A too-fine interval for the span is DOWNGRADED, not refused — and the
+    response says what was actually served, so nobody reads an hourly chart
+    believing it is minute data."""
+
+    def test_a_short_range_keeps_the_fine_interval(self):
+        assert prices.resolve_interval("1D", "1m") == "1m"
+
+    def test_minute_bars_over_a_year_fall_back(self):
+        got = prices.resolve_interval("1Y", "1m")
+        assert got == "1h", "the finest interval that actually covers a year"
+
+    def test_a_five_year_range_falls_all_the_way_to_daily(self):
+        assert prices.resolve_interval("5Y", "15m") == "1d"
+
+    def test_no_preference_picks_by_span(self):
+        assert prices.resolve_interval("1D", None) == "1m"
+        assert prices.resolve_interval("1Y", None) == "1d"
+
+    def test_an_unknown_interval_is_treated_as_no_preference(self):
+        assert prices.resolve_interval("1D", "banana") == "1m"
+
+    def test_the_series_reports_what_it_served(self, monkeypatch):
+        monkeypatch.setattr(prices, "intraday_bars", lambda sym, start, interval="1m": [
+            {"ts": FakeBar(i, 100.0).timestamp, "open": 100.0, "high": 101.0,
+             "low": 99.0, "close": 100.5, "volume": 1.0} for i in range(60)])
+        prices._chart_cache.clear()
+        series = prices.get_chart_series("TEST", range_key="1D", interval="15m")
+        assert series["interval"] == "15m"
+        assert series["interval_label"] == "15 mins"
+        assert series["interval_requested"] == "15m"

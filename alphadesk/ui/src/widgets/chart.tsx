@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { api, type ChartRange, type ChartSeries } from "@/lib/api"
-import { PriceChart, type SeriesKind } from "@/components/PriceChart"
+import { PriceChart, type ScaleMode, type SeriesKind } from "@/components/PriceChart"
 import { ChartRanges, ChartToolbar } from "@/components/ChartToolbar"
 import { DrawingToolbar, type Drawing, type Tool } from "@/components/ChartDrawings"
 import { useIsDark } from "@/lib/theme"
@@ -32,7 +32,8 @@ function MarketChart() {
   const [err, setErr] = useState<string | null>(null)
   const [range, setRange] = useState<ChartRange>("1D")
   const [type, setType] = useState<SeriesKind>("line")
-  const [logScale, setLogScale] = useState(false)
+  const [scale, setScale] = useState<ScaleMode>("linear")
+  const [interval, setInterval] = useState("1m")
   const [overlays, setOverlays] = useState<OverlayId[]>([])
   const [panes, setPanes] = useState(false)
   const [expanded, setExpanded] = useState(false)
@@ -43,15 +44,15 @@ function MarketChart() {
   const [drawOpen, setDrawOpen] = useState(false)
   const [drawVisible, setDrawVisible] = useState(true)
 
-  const load = useCallback((sym: string, r: ChartRange) => {
+  const load = useCallback((sym: string, r: ChartRange, iv: string) => {
     if (!sym) return
     setErr(null)
-    api.chartRange(sym, r).then(setData).catch(e => { setData(null); setErr(String(e.message ?? e)) })
+    api.chartRange(sym, r, iv).then(setData).catch(e => { setData(null); setErr(String(e.message ?? e)) })
   }, [])
 
   // eslint-disable-next-line react-hooks/exhaustive-deps -- follow the scoped
-  // symbol and the chosen range, not this component's own identity
-  useEffect(() => { setData(null); load(symbol, range) }, [symbol, range])
+  // symbol, range and interval, not this component's own identity
+  useEffect(() => { setData(null); load(symbol, range, interval) }, [symbol, range, interval])
 
   if (!symbol) {
     return (
@@ -74,8 +75,10 @@ function MarketChart() {
     >
       <ChartToolbar
         type={type} onType={setType}
-        interval={data?.interval}
-        logScale={logScale} onLogScale={setLogScale}
+        scale={scale} onScale={setScale}
+        interval={interval} onInterval={setInterval}
+        servedInterval={data?.interval}
+        servedLabel={data?.interval_label}
         overlays={overlays} onOverlays={setOverlays}
         panes={panes} onPanes={setPanes}
         expanded={expanded} onExpand={() => setExpanded(e => !e)}
@@ -93,7 +96,7 @@ function MarketChart() {
             height={priceHeight}
             series={type}
             overlays={overlays}
-            logScale={logScale}
+            scale={scale}
             showIndicatorPanes={showPanes}
             drawings={drawings}
             onDrawingsChange={setDrawings}
