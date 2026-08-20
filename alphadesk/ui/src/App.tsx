@@ -1,6 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react"
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom"
-import { useSystem } from "@/lib/queries"
 import { useTheme } from "@/lib/theme"
 import { Header } from "@/components/Header"
 import { Sidebar } from "@/components/Sidebar"
@@ -25,36 +24,29 @@ const TITLES: Record<string, string> = {
   "/system": "System Health · AlphaDesk",
 }
 
-/** ET clock + market session, pinned in the header. The market runs on US
- * Eastern; showing the viewer's local time would make every other timestamp on
- * the terminal ambiguous. */
+/** ET clock, pinned in the header. Timestamps across the terminal are ET, so
+ * the clock anchors them; showing the viewer's local time would make every
+ * other time on screen ambiguous.
+ *
+ * No session badge. It said CLOSED for two-thirds of the day while the tape
+ * above it carried crypto that never stops and futures that barely do — a
+ * status line contradicted by the data beside it is worse than none. */
 function MarketClock() {
   const [now, setNow] = useState(() => new Date())
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 30_000)
     return () => clearInterval(t)
   }, [])
-  const { data } = useSystem()
   const time = now.toLocaleTimeString("en-US", {
     timeZone: "America/New_York", hour: "numeric", minute: "2-digit",
   })
   const day = now.toLocaleDateString("en-US", {
     timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric",
   })
-  const sess = data?.market ?? ""
-  const label = sess === "OPEN" ? "Open" : sess === "PRE" ? "Pre-Mkt"
-    : sess === "AFTER" ? "After-Hrs" : sess === "CLOSED" ? "Closed" : ""
   return (
     <div className="flex shrink-0 items-center gap-2 px-2">
       <span className="num text-[11px]">{time} ET</span>
       <span className="text-[10px] text-muted-foreground">· {day}</span>
-      {label && (
-        <span className={`border px-1 text-[9px] font-semibold uppercase tracking-[0.06em] ${
-          sess === "OPEN" ? "border-gain/40 text-gain" : "border-border text-muted-foreground"
-        }`}>
-          {label}
-        </span>
-      )}
     </div>
   )
 }

@@ -18,8 +18,7 @@ function StatusStrip() {
   const withNews = symbols.filter(s => s.article_count > 0)
   const reporting = symbols.filter(s => s.report_date)
   return (
-  <Widget span={12} bodyClassName="grid grid-cols-3 md:grid-cols-6">
-    <Stat label="Market" value={sys?.market ?? "—"} />
+  <Widget span={12} bodyClassName="grid grid-cols-3 md:grid-cols-5">
     <Stat label="In window" value={symbols.length || "—"} sub="symbols" />
     <Stat label="With news" value={withNews.length || "—"} sub="last 36h" />
     <Stat label="Reporting" value={reporting.length || "—"} sub="inside the horizon" />

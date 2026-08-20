@@ -183,15 +183,10 @@ export interface TapeEntry {
 }
 
 export interface SystemInfo {
-  // last_run/runs_today/funnel_today are frozen dead fields — nothing has
-  // written to those tables since the autonomous entry engine was deleted
-  // 2026-08-16. Kept only so old API consumers don't break; not rendered.
-  last_run: string | null
-  runs_today: { total: number; with_picks: number; last_ts: string | null }
-  funnel_today: { candidates: number; picked: number; skipped: number }
-  open_positions: number
-  graded: number
-  exited: number
+  // The trading counters (last_run, runs_today, funnel_today, open_positions,
+  // graded, exited) were declared here long after /api/system stopped
+  // returning them, so anything rendering one got `undefined` — which the
+  // Health page duly printed. Removed: the type now matches the payload.
   uptime_s: number
   market: string
   news: {
@@ -200,6 +195,10 @@ export interface SystemInfo {
     tokens_today_in: number
     tokens_today_out: number
     calls_today: number
+  }
+  providers?: {
+    available: Record<string, string[]>
+    selected: { llm: string; news: string; prices: string }
   }
 }
 
@@ -414,19 +413,3 @@ export function etDateTime(ts: string): string {
   }).format(new Date(ts))
 }
 
-export function fmtAlpha(a: number | null): string {
-  if (a === null || a === undefined) return "…"
-  return `${a > 0 ? "+" : ""}${a.toFixed(2)}%`
-}
-
-export function exitDate(ts: string, session: string, horizonDays: number): string {
-  const d = new Date(ts)
-  if (session === "CLOSED") d.setDate(d.getDate() + 1)   // only overnight picks wait for next open
-  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1)
-  let remaining = horizonDays
-  while (remaining > 0) {
-    d.setDate(d.getDate() + 1)
-    if (d.getDay() !== 0 && d.getDay() !== 6) remaining -= 1
-  }
-  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
-}

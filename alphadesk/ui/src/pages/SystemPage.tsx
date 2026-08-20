@@ -17,10 +17,14 @@ function StatCard({ label, value, sub, tone }: { label: string; value: string; s
 }
 
 /** Is the terminal alive, and is the one thing that still runs unattended —
- * the news/AI pipeline — actually working? Deliberately does NOT show
- * "runs today" / "candidates scored" / risk rails: those described the
- * autonomous entry engine, deleted 2026-08-16, and would now be permanently
- * frozen numbers pretending to be live. */
+ * the news/AI pipeline — actually working?
+ *
+ * Shows no trading counters. It used to claim as much in this comment while
+ * rendering "open positions" and "graded" anyway; the API stopped returning
+ * those with the execution layer, so the page had been printing the literal
+ * string "undefined" ever since. Their slots now carry the selected providers,
+ * which is the question this page actually gets asked — "why is there no
+ * news" is usually "the feed you configured is not the one you think". */
 export default function SystemPage() {
   const { data: info } = useSystem()
 
@@ -43,13 +47,15 @@ export default function SystemPage() {
       <Widget
         span={12}
         title="System health"
-        subtitle="nothing here trades — this is the terminal's own pulse: is your book watched, is news still feeding the Screener"
+        subtitle="nothing here trades — this is the terminal's own pulse: is data still arriving, and from where"
         bodyClassName="grid grid-cols-4"
       >
-        <StatCard label="Open" value={String(info.open_positions)} sub="positions now" tone={info.open_positions > 0 ? 1 : null} />
-        <StatCard label="Graded" value={String(info.graded)} sub={`${info.exited} exited`} />
         <StatCard label="Uptime" value={`${uptimeH}h ${uptimeM}m`} sub="since last deploy" />
-        <StatCard label="Market" value={info.market} sub="current session" />
+        {/* Kept here and nowhere else: on a diagnostics page this is server state
+            (it explains a quiet ingest loop), not a claim about what can be traded. */}
+        <StatCard label="US equity session" value={info.market} sub="equities only — crypto and futures run around the clock" />
+        <StatCard label="Model" value={info.providers?.selected.llm ?? "—"} sub="LLM_PROVIDER" />
+        <StatCard label="News feed" value={info.providers?.selected.news ?? "—"} sub="NEWS_PROVIDER" />
       </Widget>
 
       <Widget span={12} title="News / AI pipeline">
@@ -69,10 +75,10 @@ export default function SystemPage() {
             <StatCard label="Tokens Today" value={`${((news.tokens_today_in + news.tokens_today_out) / 1000).toFixed(1)}k`} />
           </div>
           <p className="text-[11px] text-muted-foreground">
-            Polls Polygon for ticker news and enriches it with DeepSeek. Nothing is
-            summarized in the background any more — the Screener asks only when you do, so
-            an idle terminal spends nothing. A DeepSeek outage leaves the window and its
-            real source links intact and fails only the ask. See{" "}
+            Polls the configured news feed and labels each article with the configured
+            model. Nothing is summarized in the background — the AI runs only when you
+            ask, so an idle terminal spends nothing, and a model outage leaves the window
+            and its real source links intact while failing only the ask. See{" "}
             <code className="text-foreground">/api/tokens</code> for the full spend breakdown.
           </p>
         </div>
