@@ -81,14 +81,6 @@ function MarketChart() {
   // symbol, range and interval, not this component's own identity
   useEffect(() => { setData(null); load(symbol, range, interval) }, [symbol, range, interval])
 
-  if (!symbol) {
-    return (
-      <Widget span={8} title="Chart" scroll={TILE_BODY_HEIGHT}>
-        <Empty>Pick a symbol to scope this board — use the chip in the header, or a movers row.</Empty>
-      </Widget>
-    )
-  }
-
   const priceHeight = expanded ? 620 : COLLAPSED
 
   /** Volume always; the oscillators only once expanded, because at tile height
@@ -121,6 +113,17 @@ function MarketChart() {
     }
     return out.filter(Boolean) as Pane[]
   }, [data, expanded, panes, metrics, fundamentals, metricStyle, priceHeight, theme])
+
+  // The early return comes AFTER every hook. Returning before one makes the
+  // hook order differ between renders, which React cannot recover from — lint
+  // caught this, not the build, and not the running page.
+  if (!symbol) {
+    return (
+      <Widget span={8} title="Chart" scroll={TILE_BODY_HEIGHT}>
+        <Empty>Pick a symbol to scope this board — use the chip in the header, or a movers row.</Empty>
+      </Widget>
+    )
+  }
 
   return (
     <Widget
