@@ -2,7 +2,7 @@ import { useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import type { MoverRow } from "@/lib/api"
 import { useMovers, useQuote } from "@/lib/queries"
-import { Empty, Widget } from "@/components/terminal"
+import { Empty, Sparkline, Widget } from "@/components/terminal"
 import { registerWidget } from "@/widgets/registry"
 
 /** Equity Overview and Movers — the two tiles that make a markets board feel
@@ -108,8 +108,9 @@ function MoversTable({ rows }: { rows: MoverRow[] }) {
   }
   return (
     <div>
-      <div className="flex border-b border-grid-line px-3 py-1 text-[10px] uppercase tracking-[0.06em] text-muted-foreground">
+      <div className="flex items-center border-b border-grid-line px-3 py-1 text-[10px] uppercase tracking-[0.06em] text-muted-foreground">
         <span className="flex-1">Symbol</span>
+        <span className="w-[72px]" />
         <span className="w-20 text-right">Price</span>
         <span className="w-20 text-right">Chg %</span>
         <span className="w-24 text-right">Volume</span>
@@ -120,9 +121,14 @@ function MoversTable({ rows }: { rows: MoverRow[] }) {
           <Link
             key={r.symbol}
             to={`/chart?symbol=${encodeURIComponent(r.symbol)}`}
-            className="flex border-b border-grid-line px-3 py-[6px] text-[11px] last:border-b-0 hover:bg-muted/60"
+            className="flex items-center border-b border-grid-line px-3 py-[6px] text-[11px] last:border-b-0 hover:bg-muted/60"
           >
             <span className="num flex-1 font-semibold text-accent">{r.symbol}</span>
+            {/* Tinted by direction, same as the change cell — the line and the
+                number should never disagree about which way the day went. */}
+            <span className={`w-[72px] ${up ? "text-gain" : "text-loss"}`}>
+              <Sparkline points={r.spark} />
+            </span>
             <span className="num w-20 text-right">{r.price?.toFixed(2) ?? "—"}</span>
             <span className={`num w-20 text-right ${up ? "text-gain" : "text-loss"}`}>
               {r.change_pct == null ? "—" : `${up ? "+" : ""}${r.change_pct.toFixed(2)}%`}

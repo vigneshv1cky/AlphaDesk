@@ -564,7 +564,8 @@ def intraday_bars(symbol: str, start) -> list[dict]:
             start=start, feed=DataFeed.IEX))
         data = resp.data.get(symbol.upper(), []) if hasattr(resp, "data") else []
         bars = [{"ts": b.timestamp, "open": float(b.open), "high": float(b.high),
-                 "low": float(b.low), "close": float(b.close)} for b in data]
+                 "low": float(b.low), "close": float(b.close),
+                 "volume": float(getattr(b, "volume", 0) or 0)} for b in data]
         bars.sort(key=lambda x: x["ts"])
         return bars
     except Exception as exc:
@@ -650,7 +651,8 @@ def get_chart_series(symbol: str, days: int = 2) -> Optional[dict]:
             result = {
                 "symbol": sym,
                 "bars": [{"t": b["ts"].isoformat(), "o": b["open"], "h": b["high"],
-                          "l": b["low"], "c": b["close"]} for b in bars],
+                          "l": b["low"], "c": b["close"], "v": b.get("volume", 0.0)}
+                         for b in bars],
                 "rsi_9": [_pt(v) for v in rsi],
                 "macd": [_pt(v) for v in macd_line],
                 "macd_signal": [_pt(v) for v in signal_line],
@@ -934,8 +936,50 @@ def _snapshot_prices(symbols: list[str]) -> dict[str, dict]:
     return out
 
 
+_SPARK_POINTS = 40
+
+
+def _spark_series(symbols: list[str]) -> dict[str, list[float]]:
+    """One batched bars call -> a short close series per symbol, for the
+    sparkline on each movers row.
+
+    Deliberately coarse — 15-minute bars over the last few sessions. A
+    sparkline is 64 pixels wide, so minute resolution across ~60 symbols would
+    be a far heavier request than the picture can show. Returns {} on any
+    failure: a row without a spark renders without one, which is the same
+    honesty rule the chart's indicator gate follows.
+    """
+    if not symbols:
+        return {}
+    client = _alpaca_data_client()
+    if client is None:
+        return {}
+    try:
+        from datetime import timedelta
+
+        from alpaca.data.enums import DataFeed
+        from alpaca.data.requests import StockBarsRequest
+        from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+        resp = client.get_stock_bars(StockBarsRequest(
+            symbol_or_symbols=symbols,
+            timeframe=TimeFrame(15, TimeFrameUnit.Minute),
+            start=now_et() - timedelta(days=4),
+            feed=DataFeed.IEX))
+        data = resp.data if hasattr(resp, "data") else {}
+    except Exception as exc:
+        log.debug("spark batch failed: %s", exc)
+        return {}
+    out: dict[str, list[float]] = {}
+    for sym, rows in (data or {}).items():
+        closes = [float(b.close) for b in rows][-_SPARK_POINTS:]
+        if len(closes) >= 2:            # one point draws nothing
+            out[sym] = [round(c, 4) for c in closes]
+    return out
+
+
 def movers(top: int = 20) -> dict:
-    """{most_active, gainers, losers}, each [{symbol, price, change_pct, volume}].
+    """{most_active, gainers, losers}, each
+    [{symbol, price, change_pct, volume, spark}].
 
     Alpaca's screener, then filtered and priced. Cached 2 minutes: this is a
     board you glance at, and the list barely moves minute to minute.
@@ -1005,6 +1049,13 @@ def movers(top: int = 20) -> dict:
         return out
 
     result = {k: _build(v) for k, v in raw.items()}
+    # Sparks are fetched AFTER filtering, for the union of rows that actually
+    # render — the candidate pool going in is ~150 symbols and most are dropped
+    # by the price and turnover floors.
+    sparks = _spark_series(sorted({r["symbol"] for rows in result.values() for r in rows}))
+    for rows in result.values():
+        for r in rows:
+            r["spark"] = sparks.get(r["symbol"], [])
     if any(result.values()):
         _movers_cache = (time.time(), result)
     return result

@@ -11,6 +11,60 @@ import { cn } from "@/lib/utils"
  * animates, because motion in a data grid is noise unless it encodes a
  * change in the data. */
 
+/* ── Sparkline: a row-scale trend, not a chart ──────────────────────────── */
+
+/** A bare trend line sized for a table cell.
+ *
+ * Inline SVG rather than a charting library: at 64x18 there is no axis, no
+ * scale and no interaction to justify one, and this renders dozens of times
+ * per movers table. Stroke is `currentColor`, so the caller tints it with a
+ * gain/loss text class and it stays correct in both themes for free.
+ *
+ * Renders nothing at all below two points. A single point would draw a flat
+ * line, which reads as "this did not move" rather than the truth, "we do not
+ * have the data" — the same distinction the chart's indicator gate makes. */
+export function Sparkline({
+  points, className, width = 64, height = 18,
+}: {
+  points: number[]
+  className?: string
+  width?: number
+  height?: number
+}) {
+  if (!points || points.length < 2) {
+    return <span className="inline-block" style={{ width, height }} aria-hidden="true" />
+  }
+  const min = Math.min(...points)
+  const max = Math.max(...points)
+  const span = max - min
+  // Inset by the stroke width so the extremes are not clipped at the edges.
+  const pad = 1
+  const h = height - pad * 2
+  const d = points
+    .map((p, i) => {
+      const x = (i / (points.length - 1)) * width
+      // A flat series has no span to scale against. Centre it rather than
+      // letting the divide-by-zero guard pin it to the floor — a line along
+      // the bottom edge reads as a collapse, which is the opposite of what
+      // "unchanged" means.
+      const y = span === 0 ? height / 2 : pad + h - ((p - min) / span) * h
+      return `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`
+    })
+    .join(" ")
+  return (
+    <svg
+      width={width}
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      className={cn("overflow-visible", className)}
+      role="img"
+      aria-label="recent trend"
+    >
+      <path d={d} fill="none" stroke="currentColor" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+    </svg>
+  )
+}
+
 /* ── Widget: the tiled panel every surface is built from ────────────────── */
 
 export function Widget({

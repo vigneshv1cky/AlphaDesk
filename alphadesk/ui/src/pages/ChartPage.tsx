@@ -5,14 +5,26 @@ import { PriceChart } from "@/components/PriceChart"
 import { useIsDark } from "@/lib/theme"
 import { Badge, Btn, Widget, fieldCls } from "@/components/terminal"
 
-/** Where a human decides. Chart + indicators on the left, the booking form on
- * the right. Booked trades go into the same ledger as the bot's with
- * trigger_src="HUMAN", pick up the same automated exit management, and get
- * graded forward against SPY on identical terms.
+/** The chart surface: candles, volume, RSI and MACD over one symbol.
  *
  * Accepts ?symbol=XYZ so the Screener page can hand off a candidate directly
- * — "here's where to look" (Screener) → "now decide" (this page) is meant to
- * be one click, not a re-typed ticker. */
+ * — "here's where to look" (Screener) → "now look at it" (this page) is meant
+ * to be one click, not a re-typed ticker.
+ *
+ * Ranges stop at one month because the series underneath is INTRADAY bars
+ * from the minute feed, which only reaches ~30 days. Offering 3M/1Y/MAX here
+ * would mean a daily-bar path and a second answer to "are these indicators
+ * trustworthy" — see CHART_MIN_COVERAGE. Better no button than a button that
+ * quietly changes what the numbers mean. */
+/** Intraday only — see the note above on why this stops at 1M. */
+const RANGES = [
+  { days: 1, label: "1D" },
+  { days: 2, label: "2D" },
+  { days: 5, label: "5D" },
+  { days: 10, label: "10D" },
+  { days: 30, label: "1M" },
+] as const
+
 export default function ChartPage() {
   const dark = useIsDark()
   const [params] = useSearchParams()
@@ -43,7 +55,7 @@ export default function ChartPage() {
       <Widget
         span={12}
         title="Chart"
-        subtitle="candles + RSI-9 + MACD · indicators hide themselves when the feed is too sparse to trust"
+        subtitle="candles + volume + RSI-9 + MACD · indicators hide themselves when the feed is too sparse to trust"
       >
       <form
         className="flex flex-wrap items-center gap-1.5 border-b border-border p-1"
@@ -55,19 +67,25 @@ export default function ChartPage() {
           placeholder="Symbol"
           className={`${fieldCls} w-24 font-mono uppercase`}
         />
-        <select
-          value={days}
-          onChange={e => { const d = Number(e.target.value); setDays(d); load(symbol || query, d) }}
-          className={`${fieldCls} w-auto`}
-        >
-          <option value={1}>1 day</option>
-          <option value={2}>2 days</option>
-          <option value={5}>5 days</option>
-          <option value={10}>10 days</option>
-        </select>
         <Btn type="submit" variant="accent" disabled={loading}>
           {loading ? "Loading…" : "Load"}
         </Btn>
+        <div className="flex items-center gap-px">
+          {RANGES.map(r => (
+            <button
+              key={r.days}
+              type="button"
+              onClick={() => { setDays(r.days); load(symbol || query, r.days) }}
+              className={`px-2 py-[3px] text-[11px] tabular-nums transition-colors ${
+                days === r.days
+                  ? "bg-accent/15 font-semibold text-accent"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
         {err && <span className="text-[11px] text-loss">{err}</span>}
       </form>
 

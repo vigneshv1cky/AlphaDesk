@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   CandlestickSeries,
   createChart,
@@ -8,7 +8,7 @@ import {
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts"
-import type { ChartSeries } from "@/lib/api"
+import type { ChartBar, ChartSeries } from "@/lib/api"
 
 // Distinct accent colors for RSI/MACD/signal — these read fine on both
 // themes already, so unlike grid/text/candle colors (which come from the
@@ -55,6 +55,11 @@ export function PriceChart({ data, dark }: { data: ChartSeries; dark: boolean })
   const priceRef = useRef<HTMLDivElement>(null)
   const rsiRef = useRef<HTMLDivElement>(null)
   const macdRef = useRef<HTMLDivElement>(null)
+  // Which bar the OHLCV strip describes. null = not hovering, and the strip
+  // falls back to the most recent bar so it is never blank.
+  const [hovered, setHovered] = useState<ChartBar | null>(null)
+  const lastBar = data.bars.length ? data.bars[data.bars.length - 1] : null
+  const readout = hovered ?? lastBar
 
   useEffect(() => {
     if (!priceRef.current || !rsiRef.current || !macdRef.current) return
@@ -93,6 +98,27 @@ export function PriceChart({ data, dark }: { data: ChartSeries; dark: boolean })
     candles.setData(idx.map(i => {
       const b = data.bars[i]
       return { time: t(b.t), open: b.o, high: b.h, low: b.l, close: b.c }
+    }))
+
+    // Volume as an overlay in the price pane's bottom fifth, the way every
+    // terminal draws it — its own price scale ("" means overlay), so the
+    // candles keep the full height of the right axis.
+    const volume = priceChart.addSeries(HistogramSeries, {
+      priceFormat: { type: "volume" },
+      priceScaleId: "",
+      lastValueVisible: false,
+      priceLineVisible: false,
+    })
+    volume.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } })
+    volume.setData(idx.map(i => {
+      const b = data.bars[i]
+      return {
+        time: t(b.t),
+        value: b.v ?? 0,
+        // Tinted by the bar's own direction, so the volume bar under a red
+        // candle is red — volume alone says nothing about which way it went.
+        color: b.c >= b.o ? gain : loss,
+      }
     }))
 
     const rsiChart = createChart(rsiRef.current, { ...base, height: 120 })
@@ -151,9 +177,19 @@ export function PriceChart({ data, dark }: { data: ChartSeries; dark: boolean })
       return { src, handler }
     })
 
+    // Feed the OHLCV strip from the price pane's crosshair. Keyed by second,
+    // matching the timestamps handed to setData above.
+    const byTime = new Map<number, ChartBar>()
+    idx.forEach(i => byTime.set(Date.parse(data.bars[i].t) / 1000, data.bars[i]))
+    const readoutHandler = (param: { time?: Time }) => {
+      setHovered(param.time ? byTime.get(param.time as number) ?? null : null)
+    }
+    priceChart.subscribeCrosshairMove(readoutHandler)
+
     priceChart.timeScale().fitContent()
 
     return () => {
+      priceChart.unsubscribeCrosshairMove(readoutHandler)
       subs.forEach(s => s.src.timeScale().unsubscribeVisibleLogicalRangeChange(s.handler))
       crosshairs.forEach(c => c.src.unsubscribeCrosshairMove(c.handler))
       charts.forEach(c => c.remove())
@@ -162,6 +198,7 @@ export function PriceChart({ data, dark }: { data: ChartSeries; dark: boolean })
 
   return (
     <div className="space-y-1">
+      <OhlcvStrip bar={readout} live={hovered == null} />
       <div ref={priceRef} className="w-full" />
       <div className="px-1 text-[11px] font-medium text-muted-foreground">
         RSI-9 {data.indicators_reliable ? "" : "— suppressed, data too sparse"}
@@ -171,6 +208,39 @@ export function PriceChart({ data, dark }: { data: ChartSeries; dark: boolean })
         MACD(12,26,9) {data.indicators_reliable ? "" : "— suppressed, data too sparse"}
       </div>
       <div ref={macdRef} className="w-full" />
+    </div>
+  )
+}
+
+/** The O/H/L/C/V line every terminal puts above its chart. Follows the
+ * crosshair; falls back to the latest bar so it always says something. */
+function OhlcvStrip({ bar, live }: { bar: ChartBar | null; live: boolean }) {
+  const compact = useMemo(
+    () => new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }),
+    [],
+  )
+  if (!bar) return null
+  const up = bar.c >= bar.o
+  const stamp = new Date(bar.t).toLocaleString("en-US", {
+    timeZone: "America/New_York", month: "short", day: "numeric",
+    hour: "numeric", minute: "2-digit",
+  })
+  const Cell = ({ k, v }: { k: string; v: string }) => (
+    <span className="whitespace-nowrap">
+      <span className="text-muted-foreground">{k}</span>{" "}
+      <span className={`num ${up ? "text-gain" : "text-loss"}`}>{v}</span>
+    </span>
+  )
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-1 text-[11px]">
+      <Cell k="O" v={bar.o.toFixed(2)} />
+      <Cell k="H" v={bar.h.toFixed(2)} />
+      <Cell k="L" v={bar.l.toFixed(2)} />
+      <Cell k="C" v={bar.c.toFixed(2)} />
+      <Cell k="V" v={bar.v == null ? "—" : compact.format(bar.v)} />
+      <span className="num text-[10px] text-muted-foreground">
+        {stamp}{live ? " · latest" : ""}
+      </span>
     </div>
   )
 }

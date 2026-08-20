@@ -146,6 +146,10 @@ export interface MoverRow {
   price: number | null
   change_pct: number | null
   volume: number
+  /** Recent closes, coarse (15-minute bars). Empty when the feed had too
+   * little to draw — the row then renders without a spark rather than with a
+   * flat line, which would read as "no movement" instead of "no data". */
+  spark: number[]
 }
 
 export interface Movers {
@@ -196,6 +200,9 @@ export interface ChartBar {
   h: number
   l: number
   c: number
+  /** Bar volume. Optional: a response cached before this field existed has no
+   * `v`, and the histogram treats that as zero rather than crashing. */
+  v?: number
 }
 
 /** OHLC + indicator series for the decision chart.
