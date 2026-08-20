@@ -5,12 +5,18 @@ on:
     branches: [main]
     paths:
       - "alphadesk/**"
+      - "tests/**"
       - "requirements.txt"
+      # pyproject is a build input now that the backend job installs the
+      # package; a change here can break CI without touching alphadesk/.
+      - "pyproject.toml"
       - ".github/workflows/alphadesk.yml"
   pull_request:
     paths:
       - "alphadesk/**"
+      - "tests/**"
       - "requirements.txt"
+      - "pyproject.toml"
 
 jobs:
   backend:
