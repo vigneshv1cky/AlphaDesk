@@ -69,6 +69,7 @@
     --panel: #ffffff;
     --panel-header: #f0f3f5;
     --grid-line: #e0e4e9;
+    --chart-grid: rgba(0, 0, 0, 0.06);
     --popover: #ffffff;
     --popover-foreground: #232a31;
     --primary: oklch(0.205 0 0);
@@ -116,6 +117,7 @@
     --panel: #16161a;             /* a card on the page */
     --panel-header: #1c1c20;      /* a band inside the card */
     --grid-line: #23232a;
+    --chart-grid: rgba(255, 255, 255, 0.06);
     --popover: #1c1c20;
     --popover-foreground: #e0e5ea;
     --primary: #e0e5ea;
@@ -199,9 +201,13 @@
      widgets with space, not with shared hairlines. */
   .collage {
     display: grid;
+    /* Still twelve tracks, but the board is read as THREE columns: a tile is
+       span 4, and the chart takes span 8 (their 629:309 split is 66%, which is
+       8/12 to within a pixel). Twelve keeps halves and thirds both expressible.
+       10px gutter, measured off their grid. */
     grid-template-columns: repeat(12, minmax(0, 1fr));
-    gap: 8px;
-    padding: 8px;
+    gap: 10px;
+    padding: 10px;
     background: transparent;
     }
   /* Below tablet the 12-col grid collapses to one column — a widget grid that

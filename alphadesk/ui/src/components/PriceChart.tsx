@@ -45,13 +45,34 @@ function cssVar(name: string): string {
   return `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`
 }
 
+/** Drop a resolved rgb/rgba string to a given alpha. cssVar() always hands
+ * back a concrete rgba() (it rasterizes to get there), so this only has to
+ * handle that one shape. */
+function fade(color: string, alpha: number): string {
+  const parts = color.match(/[\d.]+/g)
+  if (!parts || parts.length < 3) return color
+  return `rgba(${parts[0]}, ${parts[1]}, ${parts[2]}, ${alpha})`
+}
+
 /** Candles + RSI-9 + MACD(12,26,9), in three stacked panes.
  *
  * Indicators are drawn ONLY when the series says they're trustworthy — see
  * `indicators_reliable` in api.ts. A MACD computed on 61 prints spread across
  * five sessions renders exactly like one computed on 1,950 real minute bars,
  * and the whole point of this app is to not fool its own operator. */
-export function PriceChart({ data, dark }: { data: ChartSeries; dark: boolean }) {
+export function PriceChart({ data, dark, compact = false, height = 320, series = "candles" }: {
+  data: ChartSeries
+  dark: boolean
+  /** Price and volume only — no RSI or MACD panes. Their markets tile is
+   * 440px tall and shows exactly this; the indicator panes belong on the
+   * Analysis view where there is room to read them. */
+  compact?: boolean
+  height?: number
+  /** "line" matches their board exactly — measured: a 1.5px stroke in the
+   * accent blue with no fill. Candles carry more per bar and stay the default
+   * on Analysis, where the chart is the point rather than one tile of six. */
+  series?: "candles" | "line"
+}) {
   const priceRef = useRef<HTMLDivElement>(null)
   const rsiRef = useRef<HTMLDivElement>(null)
   const macdRef = useRef<HTMLDivElement>(null)
@@ -62,10 +83,17 @@ export function PriceChart({ data, dark }: { data: ChartSeries; dark: boolean })
   const readout = hovered ?? lastBar
 
   useEffect(() => {
-    if (!priceRef.current || !rsiRef.current || !macdRef.current) return
+    // Compact mode renders no indicator panes, so those refs are null by
+    // design — requiring them here bailed before a chart was ever created.
+    if (!priceRef.current) return
+    if (!compact && (!rsiRef.current || !macdRef.current)) return
 
     const text = cssVar("--muted-foreground")
-    const grid = cssVar("--border")
+    // Their grid is barely there — rgba(255,255,255,0.06) measured. A chart
+    // whose gridlines compete with its series reads as a spreadsheet with a
+    // line on it, the same mistake the row rules were. Via a token, not a
+    // literal: a hardcoded white-alpha would be invisible on the light theme.
+    const grid = cssVar("--chart-grid")
     const gain = cssVar("--gain")
     const loss = cssVar("--loss")
     const base = {
@@ -90,15 +118,25 @@ export function PriceChart({ data, dark }: { data: ChartSeries; dark: boolean })
       }
     })
 
-    const priceChart = createChart(priceRef.current, { ...base, height: 320 })
-    const candles = priceChart.addSeries(CandlestickSeries, {
-      upColor: gain, downColor: loss,
-      wickUpColor: gain, wickDownColor: loss, borderVisible: false,
-    })
-    candles.setData(idx.map(i => {
-      const b = data.bars[i]
-      return { time: t(b.t), open: b.o, high: b.h, low: b.l, close: b.c }
-    }))
+    const priceChart = createChart(priceRef.current, { ...base, height })
+    if (series === "line") {
+      const line = priceChart.addSeries(LineSeries, {
+        color: cssVar("--accent"),
+        lineWidth: 2,          // the API takes whole pixels; theirs is 1.5
+        priceLineVisible: true,
+        lastValueVisible: true,
+      })
+      line.setData(idx.map(i => ({ time: t(data.bars[i].t), value: data.bars[i].c })))
+    } else {
+      const candles = priceChart.addSeries(CandlestickSeries, {
+        upColor: gain, downColor: loss,
+        wickUpColor: gain, wickDownColor: loss, borderVisible: false,
+      })
+      candles.setData(idx.map(i => {
+        const b = data.bars[i]
+        return { time: t(b.t), open: b.o, high: b.h, low: b.l, close: b.c }
+      }))
+    }
 
     // Volume as an overlay in the price pane's bottom fifth, the way every
     // terminal draws it — its own price scale ("" means overlay), so the
@@ -117,15 +155,17 @@ export function PriceChart({ data, dark }: { data: ChartSeries; dark: boolean })
         value: b.v ?? 0,
         // Tinted by the bar's own direction, so the volume bar under a red
         // candle is red — volume alone says nothing about which way it went.
-        color: b.c >= b.o ? gain : loss,
+        // 0.5 alpha, measured on theirs — volume is context under the price,
+        // not a second series competing with it.
+        color: fade(b.c >= b.o ? gain : loss, 0.5),
       }
     }))
 
-    const rsiChart = createChart(rsiRef.current, { ...base, height: 120 })
-    const macdChart = createChart(macdRef.current, { ...base, height: 120 })
-    const charts: IChartApi[] = [priceChart, rsiChart, macdChart]
+    const rsiChart = compact ? null : createChart(rsiRef.current!, { ...base, height: 120 })
+    const macdChart = compact ? null : createChart(macdRef.current!, { ...base, height: 120 })
+    const charts: IChartApi[] = [priceChart, rsiChart, macdChart].filter(Boolean) as IChartApi[]
 
-    if (data.indicators_reliable) {
+    if (!compact && rsiChart && macdChart && data.indicators_reliable) {
       const rsi = rsiChart.addSeries(LineSeries, { color: RSI_COLOR, lineWidth: 2 })
       rsi.setData(idx.filter(i => data.rsi_9[i] != null)
         .map(i => ({ time: t(data.bars[i].t), value: data.rsi_9[i] as number })))
@@ -194,7 +234,18 @@ export function PriceChart({ data, dark }: { data: ChartSeries; dark: boolean })
       crosshairs.forEach(c => c.src.unsubscribeCrosshairMove(c.handler))
       charts.forEach(c => c.remove())
     }
-  }, [data, dark])
+  }, [data, dark, compact, height, series])
+
+  if (compact) {
+    return (
+      <div className="space-y-1">
+        <OhlcvStrip bar={readout} live={hovered == null} />
+        {/* Explicit height: the chart is configured autoSize, which measures
+            the container — and a bare div has none to measure. */}
+        <div ref={priceRef} className="w-full" style={{ height }} />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-1">

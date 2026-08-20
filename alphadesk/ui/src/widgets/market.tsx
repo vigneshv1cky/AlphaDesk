@@ -4,6 +4,7 @@ import type { MoverRow } from "@/lib/api"
 import { useMovers, useQuote } from "@/lib/queries"
 import { Empty, Sparkline, Widget } from "@/components/terminal"
 import { registerWidget } from "@/widgets/registry"
+import { TILE_BODY_HEIGHT } from "@/widgets/tile"
 
 /** Equity Overview and Movers — the two tiles that make a markets board feel
  * like a quote terminal rather than a news reader. */
@@ -39,13 +40,13 @@ function EquityOverview() {
 
   if (!symbol) {
     return (
-      <Widget span={4} title="Equity Overview">
+      <Widget span={4} title="Equity Overview" scroll={TILE_BODY_HEIGHT}>
         <Empty>Pick a symbol to scope this board — use the chip in the header, or open a chart.</Empty>
       </Widget>
     )
   }
   if (error) {
-    return <Widget span={4} symbol={symbol} title="Equity Overview"><Empty>no quote for {symbol}</Empty></Widget>
+    return <Widget span={4} symbol={symbol} title="Equity Overview" scroll={TILE_BODY_HEIGHT}><Empty>no quote for {symbol}</Empty></Widget>
   }
   if (isPending || !q) {
     return <Widget span={4} symbol={symbol} title="Equity Overview"><Empty>loading…</Empty></Widget>
@@ -53,7 +54,7 @@ function EquityOverview() {
 
   const up = (q.change ?? 0) >= 0
   return (
-    <Widget span={4} symbol={q.symbol} title="Equity Overview" scroll={420}>
+    <Widget span={4} symbol={q.symbol} title="Equity Overview" scroll={TILE_BODY_HEIGHT}>
       <div className="px-3 pb-2">
         <div className="text-[12px] text-muted-foreground">
           {q.exchange} · {q.currency}
@@ -149,10 +150,10 @@ function StockMovers() {
   const { data, isPending } = useMovers()
   return (
     <Widget
-      span={8}
+      span={4}
       title="Stock Movers"
       subtitle="≥ $5 and ≥ $1M turnover — a percentage screen without a liquidity floor is all pumps"
-      scroll={420}
+      scroll={TILE_BODY_HEIGHT}
     >
       <div className="flex gap-1 px-3 pb-2">
         {TABS.map(t => (

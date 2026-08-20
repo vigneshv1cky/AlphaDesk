@@ -1,4 +1,5 @@
 import "@/widgets/builtin"          // registers the shipped tiles
+import "@/widgets/chart"            // the price tile
 import "@/widgets/market"           // quote + movers
 import { widgets } from "@/widgets/registry"
 import { ViewHeader } from "@/components/ViewHeader"
