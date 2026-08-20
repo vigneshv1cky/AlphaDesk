@@ -21,15 +21,20 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -r requirements.txt
-      - run: |
+      # The old step here import-checked MODEL_MAP / alphadesk.llm.call_role,
+      # which went with the v1 multi-agent system on 2026-08-07 — so this job
+      # (and therefore deploy, which needs it) had been red ever since. The
+      # test suite subsumes what that check was for: tests/test_smoke.py
+      # imports every module, which is the failure it was written to catch.
+      - run: pip install -e ".[dev]"
+      - run: python -m pytest -q
+      - name: Report the registered providers
+        run: |
           python -c "
-          from alphadesk.config import MODEL_MAP, MODEL_PROVIDER, in_universe
-          from alphadesk.llm import call_role, wrap_data, LLMError
-          from alphadesk.ledger.store import init as store_init
-          store_init()
-          print('AlphaDesk imports OK')
-          print(f'Provider: {MODEL_PROVIDER}')
+          import os
+          from alphadesk.providers import available
+          print('registered:', available())
+          print('selected llm:', os.environ.get('LLM_PROVIDER', 'openai-compatible'))
           "
 
   frontend:
