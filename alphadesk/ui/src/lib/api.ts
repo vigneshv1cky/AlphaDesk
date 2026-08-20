@@ -230,8 +230,16 @@ export interface ChartBar {
  * percent of consolidated volume, so an illiquid name's "1-minute" series can
  * be a handful of prints stretched over days — and it renders identically to a
  * real one. Never draw RSI/MACD without surfacing this. */
+/** 1D and 5D come off the minute feed; everything longer off daily bars,
+ * because the minute feed only reaches about 30 days. The server owns this
+ * mapping (ingest/prices.CHART_RANGES) so the two cannot disagree. */
+export type ChartRange = "1D" | "5D" | "1M" | "3M" | "6M" | "YTD" | "1Y" | "5Y" | "MAX"
+
 export interface ChartSeries {
   symbol: string
+  /** "intraday" or "1d" — which series this actually is. */
+  interval?: string
+  range?: string | null
   bars: ChartBar[]
   rsi_9: (number | null)[]
   macd: (number | null)[]
@@ -353,6 +361,8 @@ export const api = {
     post<ResearchAnswer>("/api/research/ask", { symbol, question }),
   chart: (symbol: string, days = 2) =>
     get<ChartSeries>(`/api/chart/${encodeURIComponent(symbol)}?days=${days}`),
+  chartRange: (symbol: string, range: ChartRange) =>
+    get<ChartSeries>(`/api/chart/${encodeURIComponent(symbol)}?range=${range}`),
   screener: () => get<{ symbols: ScreenerRow[] }>("/api/screener"),
   askScreener: (question: string) =>
     post<ScreenerAnswer>("/api/screener/ask", { question }),

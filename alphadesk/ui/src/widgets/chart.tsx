@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
-import { api, type ChartSeries } from "@/lib/api"
+import { api, type ChartRange, type ChartSeries } from "@/lib/api"
 import { PriceChart, type SeriesKind } from "@/components/PriceChart"
-import { ChartToolbar } from "@/components/ChartToolbar"
+import { ChartRanges, ChartToolbar } from "@/components/ChartToolbar"
 import { useIsDark } from "@/lib/theme"
 import { Empty, Widget } from "@/components/terminal"
 import { registerWidget } from "@/widgets/registry"
@@ -29,22 +29,22 @@ function MarketChart() {
 
   const [data, setData] = useState<ChartSeries | null>(null)
   const [err, setErr] = useState<string | null>(null)
-  const [days, setDays] = useState(2)
+  const [range, setRange] = useState<ChartRange>("1D")
   const [type, setType] = useState<SeriesKind>("line")
   const [logScale, setLogScale] = useState(false)
   const [overlays, setOverlays] = useState<OverlayId[]>([])
   const [panes, setPanes] = useState(false)
   const [expanded, setExpanded] = useState(false)
 
-  const load = useCallback((sym: string, d: number) => {
+  const load = useCallback((sym: string, r: ChartRange) => {
     if (!sym) return
     setErr(null)
-    api.chart(sym, d).then(setData).catch(e => { setData(null); setErr(String(e.message ?? e)) })
+    api.chartRange(sym, r).then(setData).catch(e => { setData(null); setErr(String(e.message ?? e)) })
   }, [])
 
   // eslint-disable-next-line react-hooks/exhaustive-deps -- follow the scoped
   // symbol and the chosen range, not this component's own identity
-  useEffect(() => { setData(null); load(symbol, days) }, [symbol, days])
+  useEffect(() => { setData(null); load(symbol, range) }, [symbol, range])
 
   if (!symbol) {
     return (
@@ -67,7 +67,7 @@ function MarketChart() {
     >
       <ChartToolbar
         type={type} onType={setType}
-        days={days} onDays={setDays}
+        interval={data?.interval}
         logScale={logScale} onLogScale={setLogScale}
         overlays={overlays} onOverlays={setOverlays}
         panes={panes} onPanes={setPanes}
@@ -90,6 +90,7 @@ function MarketChart() {
           />
         </div>
       )}
+      <ChartRanges range={range} onRange={setRange} />
     </Widget>
   )
 }

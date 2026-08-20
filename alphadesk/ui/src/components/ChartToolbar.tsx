@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState } from "react"
 import { OVERLAYS, type OverlayId } from "@/lib/indicators"
 import type { SeriesKind } from "@/components/PriceChart"
+import type { ChartRange } from "@/lib/api"
 
 /** The chart's controls: series type, range, scale, indicators, expand.
  *
  * Modelled on the toolbar their board carries (type · interval · Lin · Ind ·
- * Metrics) rather than invented. Two deliberate differences:
+ * Metrics) rather than invented.
  *
- * Ranges stop at 1M because the series underneath is intraday bars from the
- * minute feed, which reaches ~30 days. A 1Y button would need a daily-bar path
- * and a second answer to whether the indicators can be trusted.
+ * The interval readout is not a control. It reports which SERIES the range
+ * selected — minute bars for 1D/5D, daily past that — because the reader
+ * should be able to see that "3M" is not the same kind of data as "1D". The
+ * server owns that mapping; offering it as a picker here would let the two
+ * disagree.
  *
  * There is no "Metrics" menu. It would need fundamentals plotted against
  * price, and this chart is fed by the bars endpoint alone — a menu that opened
@@ -23,13 +26,9 @@ const TYPES: { id: SeriesKind; label: string }[] = [
   { id: "area", label: "Area" },
 ]
 
-export const RANGES = [
-  { days: 1, label: "1D" },
-  { days: 2, label: "2D" },
-  { days: 5, label: "5D" },
-  { days: 10, label: "10D" },
-  { days: 30, label: "1M" },
-] as const
+/** Their exact set. 1D/5D are intraday, the rest daily — the server decides
+ * which, so this is only a label. */
+export const RANGES: ChartRange[] = ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y", "MAX"]
 
 const btn = "px-2 py-[3px] text-[12px] transition-colors"
 const on = "bg-accent/15 font-semibold text-accent"
@@ -95,13 +94,12 @@ function Item({ selected, onClick, children }: {
 }
 
 export function ChartToolbar({
-  type, onType, days, onDays, logScale, onLogScale,
+  type, onType, logScale, onLogScale,
   overlays, onOverlays, panes, onPanes, expanded, onExpand, indicatorsReliable,
+  interval,
 }: {
   type: SeriesKind
   onType: (t: SeriesKind) => void
-  days: number
-  onDays: (d: number) => void
   logScale: boolean
   onLogScale: (v: boolean) => void
   overlays: OverlayId[]
@@ -111,6 +109,8 @@ export function ChartToolbar({
   expanded: boolean
   onExpand: () => void
   indicatorsReliable: boolean
+  /** "intraday" | "1d", straight off the series. */
+  interval?: string
 }) {
   const toggle = (id: OverlayId) =>
     onOverlays(overlays.includes(id) ? overlays.filter(o => o !== id) : [...overlays, id])
@@ -127,12 +127,9 @@ export function ChartToolbar({
 
       <span className="mx-1 h-4 w-px bg-border" />
 
-      {RANGES.map(r => (
-        <button key={r.days} type="button" onClick={() => onDays(r.days)}
-          className={`${btn} tabular-nums ${days === r.days ? on : off}`}>
-          {r.label}
-        </button>
-      ))}
+      <span className="px-2 py-[3px] text-[12px] text-muted-foreground" title="bar interval for this range">
+        {interval === "1d" ? "1D bars" : "1m bars"}
+      </span>
 
       <span className="mx-1 h-4 w-px bg-border" />
 
@@ -174,6 +171,32 @@ export function ChartToolbar({
       >
         {expanded ? "⤡" : "⤢"}
       </button>
+    </div>
+  )
+}
+
+/** The range strip. Theirs runs along the BOTTOM of the chart, under the time
+ * axis, which is where a reader reaches for it — the top toolbar is for what
+ * the chart IS, the bottom for how much of it you are looking at. */
+export function ChartRanges({ range, onRange }: {
+  range: ChartRange
+  onRange: (r: ChartRange) => void
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-1 border-t border-grid-line px-[12px] py-1">
+      {RANGES.map(r => (
+        <button
+          key={r}
+          type="button"
+          onClick={() => onRange(r)}
+          className={`px-2 py-[3px] text-[12px] tabular-nums transition-colors ${
+            range === r ? "bg-accent/15 font-semibold text-accent"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          }`}
+        >
+          {r}
+        </button>
+      ))}
     </div>
   )
 }

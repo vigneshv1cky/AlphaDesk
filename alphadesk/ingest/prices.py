@@ -615,7 +615,66 @@ _chart_cache: dict[str, tuple[float, Optional[dict]]] = {}
 _CHART_TTL_S = 30
 
 
-def get_chart_series(symbol: str, days: int = 2) -> Optional[dict]:
+def daily_bars(symbol: str, period: str) -> list[dict]:
+    """Daily OHLCV via yfinance, for ranges past the minute feed's reach.
+
+    Alpaca's minute bars stop at ~30 days, so 3M and beyond need a different
+    series entirely rather than a longer request. yfinance periods are its own
+    vocabulary ("3mo", "ytd", "max"), passed straight through.
+
+    Empty list on any failure — the caller renders "no bars" rather than a
+    half-drawn chart.
+    """
+    try:
+        import yfinance as yf
+        df = yf.Ticker(symbol.upper()).history(period=period, interval="1d")
+        if df is None or df.empty:
+            return []
+        out = []
+        for ts, row in df.iterrows():
+            out.append({
+                "ts": ts.to_pydatetime(),
+                "open": float(row["Open"]), "high": float(row["High"]),
+                "low": float(row["Low"]), "close": float(row["Close"]),
+                "volume": float(row.get("Volume") or 0),
+            })
+        return out
+    except Exception as exc:
+        log.debug("daily bars failed for %s (%s): %s", symbol, period, exc)
+        return []
+
+
+# The ranges the UI offers, mapped to how each is actually sourced. 1D/5D come
+# from the minute feed; everything longer is daily. Kept here rather than in the
+# UI so the two can never disagree about what "3M" means.
+CHART_RANGES: dict[str, dict] = {
+    "1D":  {"kind": "intraday", "days": 1},
+    "5D":  {"kind": "intraday", "days": 5},
+    "1M":  {"kind": "daily", "period": "1mo"},
+    "3M":  {"kind": "daily", "period": "3mo"},
+    "6M":  {"kind": "daily", "period": "6mo"},
+    "YTD": {"kind": "daily", "period": "ytd"},
+    "1Y":  {"kind": "daily", "period": "1y"},
+    "5Y":  {"kind": "daily", "period": "5y"},
+    "MAX": {"kind": "daily", "period": "max"},
+}
+
+
+def _daily_coverage(bars: list[dict]) -> dict:
+    """Coverage for a DAILY series.
+
+    The intraday gate asks "did the feed print in most minutes", which is
+    meaningless here — a daily bar per trading day is complete by construction.
+    What can still be true is having too few bars to seed the indicators, so
+    that is what this reports. MACD needs 26+9 before its signal line means
+    anything; below that the panes stay hidden for the same reason as ever.
+    """
+    n = len(bars)
+    return {"bar_count": n, "sessions": n, "coverage": 1.0 if n else 0.0,
+            "median_gap_min": None, "indicators_reliable": n >= 35}
+
+
+def get_chart_series(symbol: str, days: int = 2, range_key: str | None = None) -> Optional[dict]:
     """OHLC + full RSI-9 and MACD(12,26,9) SERIES for the human chart.
 
     Indicators are computed over the whole fetched window but only marked
@@ -623,7 +682,8 @@ def get_chart_series(symbol: str, days: int = 2) -> Optional[dict]:
     expected to surface that, not silently draw.
     """
     sym = symbol.upper()
-    key = f"{sym}:{days}"
+    spec = CHART_RANGES.get((range_key or "").upper())
+    key = f"{sym}:{range_key or days}"
     with _cache_lock:
         hit = _chart_cache.get(key)
         if hit and time.time() - hit[0] < _CHART_TTL_S:
@@ -631,7 +691,13 @@ def get_chart_series(symbol: str, days: int = 2) -> Optional[dict]:
     result: Optional[dict] = None
     try:
         from datetime import timedelta
-        bars = intraday_bars(sym, now_et() - timedelta(days=max(1, min(days, 30)) + 3))
+        if spec and spec["kind"] == "daily":
+            bars = daily_bars(sym, spec["period"])
+            stats = _daily_coverage(bars)
+        else:
+            look = spec["days"] if spec else days
+            bars = intraday_bars(sym, now_et() - timedelta(days=max(1, min(look, 30)) + 3))
+            stats = None
         if len(bars) >= 2:
             import pandas as pd
             closes = pd.Series([b["close"] for b in bars])
@@ -661,7 +727,9 @@ def get_chart_series(symbol: str, days: int = 2) -> Optional[dict]:
                 "macd_hist": [_pt(a - b) for a, b in zip(macd_line, signal_line)],
                 "thresholds": {"rsi_oversold": RSI_CROSS_OVERSOLD,
                                "rsi_overbought": RSI_CROSS_OVERBOUGHT},
-                **_coverage_stats(bars),
+                "interval": "1d" if (spec and spec["kind"] == "daily") else "intraday",
+                "range": (range_key or "").upper() or None,
+                **(stats if stats is not None else _coverage_stats(bars)),
             }
     except Exception as exc:
         log.debug("chart series failed %s: %s", sym, exc)

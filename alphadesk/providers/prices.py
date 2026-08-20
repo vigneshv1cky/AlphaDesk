@@ -24,9 +24,10 @@ class BuiltinPrices:
         from alphadesk.ingest import prices
         return prices.get_context(symbol)
 
-    def chart_series(self, symbol: str, days: int = 2) -> dict | None:
+    def chart_series(self, symbol: str, days: int = 2,
+                     range_key: str | None = None) -> dict | None:
         from alphadesk.ingest import prices
-        return prices.get_chart_series(symbol, days=days)
+        return prices.get_chart_series(symbol, days=days, range_key=range_key)
 
     def fundamentals(self, symbol: str) -> dict | None:
         from alphadesk.ingest import prices

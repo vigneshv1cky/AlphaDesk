@@ -148,7 +148,7 @@ def api_screener_ask(body: ScreenerQuestion):
 
 
 @app.get("/api/chart/{symbol}")
-def api_chart(symbol: str, days: int = 2):
+def api_chart(symbol: str, days: int = 2, range: str | None = None):
     """OHLC + RSI-9 + MACD(12,26,9) series for the human decision chart.
 
     Always returns the data-quality block (coverage / median_gap_min /
@@ -160,9 +160,16 @@ def api_chart(symbol: str, days: int = 2):
     sym = "".join(c for c in symbol.upper() if c.isalnum() or c in ".-")[:12]
     if not sym:
         raise HTTPException(400, "bad symbol")
-    series = get_prices().chart_series(sym, days=days)
+    # `range` (1D/5D/1M/3M/6M/YTD/1Y/5Y/MAX) picks the SERIES, not just its
+    # length: 1D and 5D come off the minute feed, everything longer off daily
+    # bars, because the minute feed reaches about 30 days. `days` stays for
+    # callers that predate ranges.
+    from alphadesk.ingest.prices import CHART_RANGES
+    if range and range.upper() not in CHART_RANGES:
+        raise HTTPException(400, f"range must be one of {', '.join(CHART_RANGES)}")
+    series = get_prices().chart_series(sym, days=days, range_key=range)
     if not series:
-        raise HTTPException(404, f"no intraday bars for {sym}")
+        raise HTTPException(404, f"no bars for {sym}")
     return series
 
 

@@ -120,10 +120,16 @@ class PriceProvider(Protocol):
         """Last price, change, volume, ATR%, liquidity flags."""
         ...
 
-    def chart_series(self, symbol: str, days: int = 2) -> dict | None:
+    def chart_series(self, symbol: str, days: int = 2,
+                     range_key: str | None = None) -> dict | None:
         """OHLC plus indicator series AND the coverage statistics that say
         whether those indicators can be trusted. A provider that cannot report
-        coverage should report it as unreliable rather than omit it."""
+        coverage should report it as unreliable rather than omit it.
+
+        `range_key` is one of 1D/5D/1M/3M/6M/YTD/1Y/5Y/MAX and selects the
+        SERIES, not merely its length — a provider is expected to switch from
+        intraday to daily bars past the reach of its minute feed rather than
+        return a sparse intraday series stretched over a year."""
         ...
 
     def fundamentals(self, symbol: str) -> dict | None: ...
