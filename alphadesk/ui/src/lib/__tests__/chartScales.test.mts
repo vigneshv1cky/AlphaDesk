@@ -9,6 +9,7 @@
  *
  *     npx tsx src/lib/__tests__/chartScales.test.mts
  */
+import { paneExtent } from "../../components/chart/panes"
 import {
   indexToX, xToIndex, priceToY, yToPrice, niceStep, priceTicks,
   padRange, zoomAt, visibleExtent,
@@ -73,6 +74,21 @@ const bars = Array.from({ length: 50 }, (_, i) => ({ h: 100 + i, l: 90 + i }))
 const e = visibleExtent(bars, 10, 20)
 ok("tracks only what is on screen", e.min === 100 && e.max === 120, JSON.stringify(e))
 ok("an empty series does not explode", (() => { const x = visibleExtent([], 0, 10); return Number.isFinite(x.min) })())
+
+console.log("pane extents")
+const hist = (vals) => ({ id: "x", height: 60, series: [{ kind: "histogram", color: "#000",
+  points: vals.map((v, i) => ({ t: String(i), v })) }] })
+const lineP = (vals) => ({ id: "x", height: 60, series: [{ kind: "line", color: "#000",
+  points: vals.map((v, i) => ({ t: String(i), v })) }] })
+const a = paneExtent(hist([100, 500, 900]))
+ok("a positive histogram floors at exactly zero", a.min === 0, JSON.stringify(a))
+ok("and still pads its top", a.max > 900)
+const b = paneExtent(hist([-50, 20, 80]))
+ok("a signed histogram (MACD) pads both ways", b.min < -50 && b.max > 80)
+ok("a line pane pads both sides", (() => { const c = paneExtent(lineP([10, 20])); return c.min < 10 && c.max > 20 })())
+ok("a fixed range (RSI 0-100) is untouched",
+   (() => { const d = paneExtent({ id: "rsi", height: 60, range: { min: 0, max: 100 }, series: [] })
+            return d.min === 0 && d.max === 100 })())
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

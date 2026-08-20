@@ -3,6 +3,7 @@ import { api, type ChartBar, type ChartRange, type ChartSeries } from "@/lib/api
 import { ChartCanvas, type Projection } from "@/components/chart/ChartCanvas"
 import { OhlcvStrip } from "@/components/chart/OhlcvStrip"
 import { useChartTheme } from "@/lib/theme"
+import { volumePane } from "@/components/chart/panes"
 import { Badge, Widget } from "@/components/terminal"
 
 /** Candles and volume for one symbol, on the Analysis view.
@@ -61,7 +62,8 @@ export function SymbolChart({ symbol: requested }: { symbol: string }) {
               first={data.bars[0] ?? null} at={at} />
             <ChartCanvas
               bars={data.bars} kind="candles" scale="linear"
-              height={420} volumeHeight={96}
+              height={420}
+              panes={[volumePane(data.bars, 96, theme.gain, theme.loss)].filter(Boolean) as never}
               onProjection={setProjection}
               onHover={(b, p) => { setHovered(b); setAt(p) }}
               {...theme}

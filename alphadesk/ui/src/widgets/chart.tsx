@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import {
   api, type ChartRange, type ChartSeries, type Fundamentals,
@@ -9,6 +9,7 @@ import { OhlcvStrip } from "@/components/chart/OhlcvStrip"
 import { ChartDrawings } from "@/components/ChartDrawings"
 import { useChartTheme } from "@/lib/theme"
 import { buildOverlays } from "@/lib/indicators"
+import { macdPane, metricsPane, rsiPane, volumePane, type Pane } from "@/components/chart/panes"
 import { ChartRanges, ChartToolbar } from "@/components/ChartToolbar"
 import { DrawingToolbar, type Drawing, type Tool } from "@/components/ChartDrawings"
 import type { ChartBar } from "@/lib/api"
@@ -90,6 +91,37 @@ function MarketChart() {
 
   const priceHeight = expanded ? 620 : COLLAPSED
 
+  /** Volume always; the oscillators only once expanded, because at tile height
+   * they would be two 40px slivers and an indicator you cannot read still
+   * invites you to read it. Metrics whenever something is selected. */
+  const stacked: Pane[] = useMemo(() => {
+    if (!data) return []
+    const out: (Pane | null)[] = [
+      volumePane(data.bars, Math.round(priceHeight * 0.22), theme.gain, theme.loss),
+    ]
+    if (expanded && panes && data.indicators_reliable) {
+      out.push(rsiPane(data.bars, data.rsi_9, 90, "#7c3aed", {
+        oversold: data.thresholds.rsi_oversold, overbought: data.thresholds.rsi_overbought,
+      }))
+      out.push(macdPane(data.bars, data.macd, data.macd_signal, data.macd_hist,
+                        90, "#2563eb", "#f59e0b", theme.gain, theme.loss))
+    }
+    if (metrics.length && fundamentals) {
+      out.push(metricsPane(
+        metrics
+          .map(id => {
+            const meta = fundamentals.metrics.find(m => m.id === id)
+            const pts = fundamentals.series[id]
+            return meta && pts ? { id, label: meta.label, points: pts } : null
+          })
+          .filter(Boolean) as { id: string; label: string; points: { t: string; v: number }[] }[],
+        Math.round(priceHeight * 0.3), metricStyle,
+        ["#4c8dff", "#34d98c", "#f5a524", "#9353d3", "#f31260"],
+      ))
+    }
+    return out.filter(Boolean) as Pane[]
+  }, [data, expanded, panes, metrics, fundamentals, metricStyle, priceHeight, theme])
+
   return (
     <Widget
       span={expanded ? 12 : 8}
@@ -128,7 +160,7 @@ function MarketChart() {
               kind={type}
               scale={scale}
               height={priceHeight}
-              volumeHeight={Math.round(priceHeight * 0.22)}
+              panes={stacked}
               overlays={buildOverlays(data.bars, overlays)}
               onProjection={setProjection}
               onHover={(b, at) => { setHovered(b); setHoverAt(at) }}

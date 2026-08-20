@@ -4,6 +4,7 @@ import {
   indexToX, padRange, priceDecimals, priceTicks, priceToY,
   visibleExtent, xToIndex, yToPrice, zoomAt, type Scale,
 } from "@/lib/chartScales"
+import { paneAxisLabel, paneExtent, type Pane } from "@/components/chart/panes"
 
 /** The chart renderer.
  *
@@ -37,7 +38,7 @@ const AXIS_W = 62      // right price gutter
 const AXIS_H = 22      // bottom time gutter
 
 export function ChartCanvas({
-  bars, kind, scale: scaleMode, height, volumeHeight = 0,
+  bars, kind, scale: scaleMode, height, panes = [],
   gain, loss, accent, grid, text,
   onProjection, onHover, overlays = [],
 }: {
@@ -45,8 +46,9 @@ export function ChartCanvas({
   kind: SeriesKind
   scale: ScaleMode
   height: number
-  /** Height of the volume band beneath the price pane. 0 hides it. */
-  volumeHeight?: number
+  /** Bands stacked under the price, each with its own y scale but sharing the
+   * x scale — volume, RSI, MACD, fundamentals. */
+  panes?: Pane[]
   gain: string
   loss: string
   accent: string
@@ -78,7 +80,8 @@ export function ChartCanvas({
   // should — keeping a stale zoom across a range change strands the reader.
   useEffect(() => { setView(bars.length ? { from: 0, to: bars.length } : null) }, [bars])
 
-  const priceH = Math.max(40, box.h - AXIS_H - volumeHeight)
+  const panesH = panes.reduce((n, p) => n + p.height, 0)
+  const priceH = Math.max(40, box.h - AXIS_H - panesH)
   const plotW = Math.max(10, box.w - AXIS_W)
   const from = view?.from ?? 0
   const to = view?.to ?? Math.max(1, bars.length)
@@ -165,11 +168,8 @@ export function ChartCanvas({
     const upBody: string[] = [], downBody: string[] = []
     const upWick: string[] = [], downWick: string[] = []
     const line: string[] = []
-    const volUp: string[] = [], volDown: string[] = []
-    let volMax = 0
     const lo = Math.max(0, Math.floor(from) - 1)
     const hi = Math.min(bars.length - 1, Math.ceil(to) + 1)
-    for (let i = lo; i <= hi; i++) if (bars[i]?.v) volMax = Math.max(volMax, bars[i].v!)
 
     for (let i = lo; i <= hi; i++) {
       const b = bars[i]
@@ -195,21 +195,64 @@ export function ChartCanvas({
       } else {
         line.push(`${line.length ? "L" : "M"}${x.toFixed(1)},${yC.toFixed(1)}`)
       }
-      if (volumeHeight && volMax > 0 && b.v) {
-        const vh = (b.v / volMax) * (volumeHeight - 4)
-        const top = priceH + (volumeHeight - vh)
-        ;(up ? volUp : volDown).push(
-          `M${(x - half).toFixed(1)},${top.toFixed(1)}h${barW.toFixed(1)}v${vh.toFixed(1)}h${(-barW).toFixed(1)}Z`)
-      }
     }
     return {
       upBody: upBody.join(""), downBody: downBody.join(""),
       upWick: upWick.join(""), downWick: downWick.join(""),
       line: line.join(""),
       area: line.length ? `${line.join("")}L${plotW},${priceH}L${indexToX(s, lo + 0.5).toFixed(1)},${priceH}Z` : "",
-      volUp: volUp.join(""), volDown: volDown.join(""),
     }
-  }, [bars, s, kind, yOf, barW, half, plotW, priceH, volumeHeight, from, to])
+  }, [bars, s, kind, yOf, barW, half, plotW, priceH, from, to])
+
+  /** Each pane's own geometry: offset, scale and batched paths. */
+  const paneLayout = useMemo(() => {
+    let offset = priceH
+    return panes.map(pane => {
+      const top = offset
+      offset += pane.height
+      const ext = paneExtent(pane)
+      const inner = Math.max(10, pane.height - 6)
+      const yIn = (v: number) => {
+        const r = ext.max - ext.min
+        return top + 3 + (r <= 0 ? inner / 2 : inner - ((v - ext.min) / r) * inner)
+      }
+      const zeroY = yIn(Math.min(Math.max(0, ext.min), ext.max))
+      const byTime = new Map(bars.map((b, i) => [b.t, i]))
+      const drawn = pane.series.map(ser => {
+        if (ser.kind === "histogram") {
+          const up: string[] = [], down: string[] = []
+          for (const p of ser.points) {
+            const i = byTime.get(p.t)
+            if (i == null) continue
+            const x = indexToX(s, i + 0.5)
+            if (x < -barW || x > plotW + barW) continue
+            const y = yIn(p.v)
+            const h = Math.max(1, Math.abs(zeroY - y))
+            const topY = Math.min(zeroY, y)
+            // `signs` decides what "up" means: the value's own sign for MACD
+            // and fundamentals, the bar's direction for volume.
+            const isUp = ser.signs ? p.v >= 0 : (bars[i].c >= bars[i].o)
+            ;(isUp ? up : down).push(
+              `M${(x - half).toFixed(1)},${topY.toFixed(1)}h${barW.toFixed(1)}v${h.toFixed(1)}h${(-barW).toFixed(1)}Z`)
+          }
+          return { kind: "histogram" as const, up: up.join(""), down: down.join(""),
+                   color: ser.color, downColor: ser.downColor ?? ser.color }
+        }
+        const d = ser.points.map((p, n) => {
+          const i = byTime.get(p.t)
+          if (i == null) return ""
+          return `${n === 0 ? "M" : "L"}${indexToX(s, i + 0.5).toFixed(1)},${yIn(p.v).toFixed(1)}`
+        }).filter(Boolean).join("")
+        const areaD = ser.kind === "area" && d
+          ? `${d}L${plotW},${top + pane.height}L0,${top + pane.height}Z` : ""
+        return { kind: ser.kind, d, areaD, color: ser.color, width: (ser as { width?: number }).width ?? 1.5 }
+      })
+      const levels = (pane.levels ?? []).map(v => ({ v, y: yIn(v) }))
+      const axis = [ext.min, (ext.min + ext.max) / 2, ext.max]
+        .map(v => ({ v, y: yIn(v) }))
+      return { pane, top, drawn, levels, axis }
+    })
+  }, [panes, priceH, bars, s, barW, half, plotW])
 
   const ticks = priceTicks(min, max)
   const decimals = priceDecimals(ticks.length > 1 ? Math.abs(ticks[1] - ticks[0]) : 1)
@@ -263,20 +306,12 @@ export function ChartCanvas({
         {/* vertical grid + time axis */}
         {timeTicks.map((t, i) => (
           <g key={i}>
-            <line x1={t.x} y1={0} x2={t.x} y2={priceH + volumeHeight} stroke={grid} strokeWidth={1} />
-            <text x={t.x} y={priceH + volumeHeight + 15} fill={text} fontSize={11} textAnchor="middle" className="tnum">
+            <line x1={t.x} y1={0} x2={t.x} y2={priceH + panesH} stroke={grid} strokeWidth={1} />
+            <text x={t.x} y={priceH + panesH + 15} fill={text} fontSize={11} textAnchor="middle" className="tnum">
               {t.label}
             </text>
           </g>
         ))}
-
-        {/* volume band */}
-        {volumeHeight > 0 && (
-          <>
-            <path d={paths.volUp} fill={gain} fillOpacity={0.5} />
-            <path d={paths.volDown} fill={loss} fillOpacity={0.5} />
-          </>
-        )}
 
         {/* the series */}
         {kind === "area" && <path d={paths.area} fill={accent} fillOpacity={0.14} />}
@@ -312,6 +347,37 @@ export function ChartCanvas({
           return <path key={i} d={d} fill="none" stroke={o.color} strokeWidth={o.width ?? 1} />
         })}
 
+        {/* the stacked panes */}
+        {paneLayout.map(({ pane, top, drawn, levels, axis }) => (
+          <g key={pane.id}>
+            <line x1={0} y1={top} x2={plotW} y2={top} stroke={grid} strokeWidth={1} />
+            {levels.map(l => (
+              <line key={l.v} x1={0} y1={l.y} x2={plotW} y2={l.y}
+                stroke={text} strokeOpacity={0.35} strokeWidth={1} strokeDasharray="3 3" />
+            ))}
+            {axis.map((a, i) => (
+              <text key={i} x={plotW + 6} y={a.y + 3.5} fill={text} fontSize={10} className="tnum">
+                {paneAxisLabel(a.v, pane.compact)}
+              </text>
+            ))}
+            {drawn.map((d, i) =>
+              d.kind === "histogram" ? (
+                <g key={i}>
+                  <path d={d.up} fill={d.color} fillOpacity={0.55} />
+                  <path d={d.down} fill={d.downColor} fillOpacity={0.55} />
+                </g>
+              ) : (
+                <g key={i}>
+                  {d.kind === "area" && d.areaD && <path d={d.areaD} fill={d.color} fillOpacity={0.16} />}
+                  <path d={d.d} fill="none" stroke={d.color} strokeWidth={d.width} />
+                </g>
+              ))}
+            {pane.label && (
+              <text x={4} y={top + 12} fill={text} fontSize={10}>{pane.label}</text>
+            )}
+          </g>
+        ))}
+
         {/* last price, tagged on the axis */}
         {last && (
           <g>
@@ -327,7 +393,7 @@ export function ChartCanvas({
         {/* crosshair */}
         {cursor && (
           <g pointerEvents="none">
-            <line x1={cursor.x} y1={0} x2={cursor.x} y2={priceH + volumeHeight}
+            <line x1={cursor.x} y1={0} x2={cursor.x} y2={priceH + panesH}
               stroke={text} strokeWidth={1} strokeDasharray="3 3" />
             <line x1={0} y1={cursor.y} x2={plotW} y2={cursor.y}
               stroke={text} strokeWidth={1} strokeDasharray="3 3" />
@@ -337,8 +403,8 @@ export function ChartCanvas({
             </text>
             {hovered && (
               <>
-                <rect x={cursor.x - 42} y={priceH + volumeHeight + 3} width={84} height={16} fill={text} rx={2} />
-                <text x={cursor.x} y={priceH + volumeHeight + 14.5} fill="#000" fontSize={11}
+                <rect x={cursor.x - 42} y={priceH + panesH + 3} width={84} height={16} fill={text} rx={2} />
+                <text x={cursor.x} y={priceH + panesH + 14.5} fill="#000" fontSize={11}
                   textAnchor="middle" className="tnum">
                   {new Date(hovered.t).toLocaleString("en-US", {
                     timeZone: "America/New_York", month: "short", day: "numeric",

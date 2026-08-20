@@ -104,6 +104,11 @@ main.py        two ingest loops (news, earnings) + the web server
 ui/            React 19 + Vite. Dense terminal styling, NO component library —
                hand-rolled primitives in components/terminal.tsx. Dashboard
                tiles come from widgets/registry.ts, not hardcoded JSX.
+               The chart is OURS: components/chart/ChartCanvas.tsx renders SVG
+               against lib/chartScales.ts. lightweight-charts was removed —
+               the reason was control, not appearance. Candles are batched
+               into four paths, so node count is constant in bar count; do not
+               "simplify" that to one element per bar.
 ```
 
 ## Commands
