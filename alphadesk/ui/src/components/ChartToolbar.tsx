@@ -96,7 +96,7 @@ function Item({ selected, onClick, children }: {
 export function ChartToolbar({
   type, onType, logScale, onLogScale,
   overlays, onOverlays, panes, onPanes, expanded, onExpand, indicatorsReliable,
-  interval,
+  interval, drawOpen, onDrawOpen,
 }: {
   type: SeriesKind
   onType: (t: SeriesKind) => void
@@ -108,6 +108,8 @@ export function ChartToolbar({
   onPanes: (v: boolean) => void
   expanded: boolean
   onExpand: () => void
+  drawOpen: boolean
+  onDrawOpen: () => void
   indicatorsReliable: boolean
   /** "intraday" | "1d", straight off the series. */
   interval?: string
@@ -162,6 +164,16 @@ export function ChartToolbar({
       </Menu>
 
       <div className="flex-1" />
+
+      <button
+        type="button"
+        onClick={onDrawOpen}
+        aria-label="Drawing tools"
+        title="Drawing tools"
+        className={`${btn} ${drawOpen ? on : off}`}
+      >
+        ✎
+      </button>
 
       <button
         type="button"

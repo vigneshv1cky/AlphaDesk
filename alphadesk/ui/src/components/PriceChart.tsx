@@ -7,10 +7,13 @@ import {
   HistogramSeries,
   LineSeries,
   type IChartApi,
+  type ISeriesApi,
+  type SeriesType,
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts"
 import { bollinger, ema, OVERLAYS, sma, vwap, type OverlayId } from "@/lib/indicators"
+import { ChartDrawings, type Drawing, type Tool } from "@/components/ChartDrawings"
 import type { ChartBar, ChartSeries } from "@/lib/api"
 
 // Distinct accent colors for RSI/MACD/signal — these read fine on both
@@ -68,6 +71,7 @@ export type SeriesKind = "candles" | "line" | "area" | "bars"
 export function PriceChart({
   data, dark, compact = false, height = 320, series = "candles",
   overlays = [], logScale = false, showIndicatorPanes = true,
+  drawings, onDrawingsChange, tool = "none", onToolDone, drawingsVisible = true,
 }: {
   data: ChartSeries
   dark: boolean
@@ -89,6 +93,14 @@ export function PriceChart({
   logScale?: boolean
   /** Show the RSI and MACD panes. Ignored in compact mode, which has no room. */
   showIndicatorPanes?: boolean
+  /** Hand-drawn annotations. Passed in rather than owned here so they survive
+   * a range change — the chart is torn down and rebuilt on every one of those,
+   * and drawings must not go with it. */
+  drawings?: Drawing[]
+  onDrawingsChange?: (next: Drawing[]) => void
+  tool?: Tool
+  onToolDone?: () => void
+  drawingsVisible?: boolean
 }) {
   const priceRef = useRef<HTMLDivElement>(null)
   const rsiRef = useRef<HTMLDivElement>(null)
@@ -96,6 +108,8 @@ export function PriceChart({
   // Which bar the OHLCV strip describes. null = not hovering, and the strip
   // falls back to the most recent bar so it is never blank.
   const [hovered, setHovered] = useState<ChartBar | null>(null)
+  // Held in state so the drawing overlay can project against the live chart.
+  const [api, setApi] = useState<{ chart: IChartApi; series: ISeriesApi<SeriesType> } | null>(null)
   const lastBar = data.bars.length ? data.bars[data.bars.length - 1] : null
   const readout = hovered ?? lastBar
 
@@ -137,6 +151,7 @@ export function PriceChart({
 
     const priceChart = createChart(priceRef.current, { ...base, height })
     const accent = cssVar("--accent")
+    let priceSeries: ISeriesApi<SeriesType> | null = null
     if (series === "line" || series === "area") {
       const kind = series === "area" ? AreaSeries : LineSeries
       const opts = series === "area"
@@ -144,12 +159,14 @@ export function PriceChart({
         : { color: accent, lineWidth: 2 as const }
       const line = priceChart.addSeries(kind, opts)
       line.setData(idx.map(i => ({ time: t(data.bars[i].t), value: data.bars[i].c })))
+      priceSeries = line
     } else if (series === "bars") {
       const bars = priceChart.addSeries(BarSeries, { upColor: gain, downColor: loss })
       bars.setData(idx.map(i => {
         const b = data.bars[i]
         return { time: t(b.t), open: b.o, high: b.h, low: b.l, close: b.c }
       }))
+      priceSeries = bars
     } else {
       const candles = priceChart.addSeries(CandlestickSeries, {
         upColor: gain, downColor: loss,
@@ -159,6 +176,7 @@ export function PriceChart({
         const b = data.bars[i]
         return { time: t(b.t), open: b.o, high: b.h, low: b.l, close: b.c }
       }))
+      priceSeries = candles
     }
 
     // Chosen overlays, drawn over the price series. Each is computed from the
@@ -187,16 +205,18 @@ export function PriceChart({
       }
     }
 
-    // Volume as an overlay in the price pane's bottom fifth, the way every
-    // terminal draws it — its own price scale ("" means overlay), so the
-    // candles keep the full height of the right axis.
-    const volume = priceChart.addSeries(HistogramSeries, {
+    // Volume in its OWN pane, not overlaid on the price. Overlaying puts two
+    // unrelated scales in one box: a tall volume bar and a low price sit at the
+    // same height and read as related when they are not. Theirs is a separate
+    // band under the price and this now matches.
+    const volumePane = priceChart.addPane()
+    const volume = volumePane.addSeries(HistogramSeries, {
       priceFormat: { type: "volume" },
-      priceScaleId: "",
       lastValueVisible: false,
       priceLineVisible: false,
     })
-    volume.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } })
+    // A quarter of the price pane's height, which is about what theirs gives it.
+    volumePane.setHeight(Math.max(60, Math.round(height * 0.26)))
     volume.setData(idx.map(i => {
       const b = data.bars[i]
       return {
@@ -206,7 +226,7 @@ export function PriceChart({
         // candle is red — volume alone says nothing about which way it went.
         // 0.5 alpha, measured on theirs — volume is context under the price,
         // not a second series competing with it.
-        color: fade(b.c >= b.o ? gain : loss, 0.5),
+        color: fade(b.c >= b.o ? gain : loss, 0.55),
       }
     }))
 
@@ -276,11 +296,13 @@ export function PriceChart({
     priceChart.subscribeCrosshairMove(readoutHandler)
 
     priceChart.timeScale().fitContent()
+    if (priceSeries) setApi({ chart: priceChart, series: priceSeries })
 
     return () => {
       priceChart.unsubscribeCrosshairMove(readoutHandler)
       subs.forEach(s => s.src.timeScale().unsubscribeVisibleLogicalRangeChange(s.handler))
       crosshairs.forEach(c => c.src.unsubscribeCrosshairMove(c.handler))
+      setApi(null)
       charts.forEach(c => c.remove())
     }
   }, [data, dark, compact, height, series, overlays, logScale, showIndicatorPanes])
@@ -291,7 +313,21 @@ export function PriceChart({
         <OhlcvStrip bar={readout} live={hovered == null} />
         {/* Explicit height: the chart is configured autoSize, which measures
             the container — and a bare div has none to measure. */}
-        <div ref={priceRef} className="w-full" style={{ height }} />
+        <div className="relative w-full">
+          <div ref={priceRef} className="w-full" style={{ height }} />
+          {onDrawingsChange && (
+            <ChartDrawings
+              chart={api?.chart ?? null}
+              series={api?.series ?? null}
+              tool={tool}
+              onToolDone={onToolDone ?? (() => {})}
+              drawings={drawings ?? []}
+              onChange={onDrawingsChange}
+              visible={drawingsVisible}
+              height={height}
+            />
+          )}
+        </div>
       </div>
     )
   }
@@ -299,7 +335,21 @@ export function PriceChart({
   return (
     <div className="space-y-1">
       <OhlcvStrip bar={readout} live={hovered == null} />
-      <div ref={priceRef} className="w-full" />
+      <div className="relative w-full">
+        <div ref={priceRef} className="w-full" style={{ height }} />
+        {onDrawingsChange && (
+          <ChartDrawings
+            chart={api?.chart ?? null}
+            series={api?.series ?? null}
+            tool={tool}
+            onToolDone={onToolDone ?? (() => {})}
+            drawings={drawings ?? []}
+            onChange={onDrawingsChange}
+            visible={drawingsVisible}
+            height={height}
+          />
+        )}
+      </div>
       <div className="px-1 text-[14px] font-medium text-muted-foreground">
         RSI-9 {data.indicators_reliable ? "" : "— suppressed, data too sparse"}
       </div>

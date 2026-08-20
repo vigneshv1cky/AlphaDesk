@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom"
 import { api, type ChartRange, type ChartSeries } from "@/lib/api"
 import { PriceChart, type SeriesKind } from "@/components/PriceChart"
 import { ChartRanges, ChartToolbar } from "@/components/ChartToolbar"
+import { DrawingToolbar, type Drawing, type Tool } from "@/components/ChartDrawings"
 import { useIsDark } from "@/lib/theme"
 import { Empty, Widget } from "@/components/terminal"
 import { registerWidget } from "@/widgets/registry"
@@ -35,6 +36,12 @@ function MarketChart() {
   const [overlays, setOverlays] = useState<OverlayId[]>([])
   const [panes, setPanes] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  // Drawings live here, not inside PriceChart: that component is torn down and
+  // rebuilt on every range or series change, and annotations must outlive both.
+  const [drawings, setDrawings] = useState<Drawing[]>([])
+  const [tool, setTool] = useState<Tool>("none")
+  const [drawOpen, setDrawOpen] = useState(false)
+  const [drawVisible, setDrawVisible] = useState(true)
 
   const load = useCallback((sym: string, r: ChartRange) => {
     if (!sym) return
@@ -72,12 +79,13 @@ function MarketChart() {
         overlays={overlays} onOverlays={setOverlays}
         panes={panes} onPanes={setPanes}
         expanded={expanded} onExpand={() => setExpanded(e => !e)}
+        drawOpen={drawOpen} onDrawOpen={() => setDrawOpen(o => !o)}
         indicatorsReliable={data?.indicators_reliable ?? false}
       />
       {err && <Empty>{err}</Empty>}
       {!err && !data && <Empty>loading…</Empty>}
       {!err && data && (
-        <div className="px-[12px] pt-1">
+        <div className="relative px-[12px] pt-1">
           <PriceChart
             data={data}
             dark={dark}
@@ -87,7 +95,21 @@ function MarketChart() {
             overlays={overlays}
             logScale={logScale}
             showIndicatorPanes={showPanes}
+            drawings={drawings}
+            onDrawingsChange={setDrawings}
+            tool={drawOpen ? tool : "none"}
+            onToolDone={() => setTool("none")}
+            drawingsVisible={drawVisible}
           />
+          {drawOpen && (
+            <DrawingToolbar
+              tool={tool} onTool={setTool}
+              visible={drawVisible} onVisible={setDrawVisible}
+              count={drawings.length}
+              onClear={() => setDrawings([])}
+              onClose={() => { setDrawOpen(false); setTool("none") }}
+            />
+          )}
         </div>
       )}
       <ChartRanges range={range} onRange={setRange} />
