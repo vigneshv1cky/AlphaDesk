@@ -4,12 +4,19 @@ import { cn } from "@/lib/utils"
 /** The terminal primitives — hand-rolled, dependency-free replacements for
  * the shadcn/ui set that used to live in components/ui/.
  *
- * The whole point is DENSITY. Every default here is tuned to put more real
- * data on screen than a general-purpose component library would: 24px table
- * rows, 11px type, 1px borders instead of shadows, square corners instead of
- * radii, and headers that cost 26px rather than a padded CardHeader. Nothing
- * animates, because motion in a data grid is noise unless it encodes a
- * change in the data. */
+ * Sized to match AlphaSpace after measuring it: 14px cell type and ~33px rows,
+ * not the 11px/24px this used to run. Measuring was the point — the assumption
+ * had been that they were denser than us, and the reverse was true, so "more
+ * terminal-like" was costing legibility for nothing.
+ *
+ * Still no shadows: separation comes from the four surface steps in index.css,
+ * which is where their board actually gets its depth. Nothing animates,
+ * because motion in a data grid is noise unless it encodes a change in the
+ * data.
+ *
+ * Primitives carry `data-slot`, the same hook they use — it names the part in
+ * the DOM, which makes both theme overrides and tests target intent rather
+ * than a class string that will drift. */
 
 /* ── Sparkline: a row-scale trend, not a chart ──────────────────────────── */
 
@@ -87,6 +94,7 @@ export function Widget({
 }) {
   return (
     <section
+      data-slot="widget"
       // Inline gridColumn, not a Tailwind class: `col-span-${n}` is built at
       // runtime and would be purged from the stylesheet.
       style={{ gridColumn: `span ${span} / span ${span}` }}
@@ -96,23 +104,23 @@ export function Widget({
       )}
     >
       {(title || actions) && (
-        <header className="flex h-[34px] shrink-0 items-center gap-2 px-3">
+        <header data-slot="widget-header" className="flex h-[38px] shrink-0 items-center gap-2 border-b border-grid-line bg-panel-header px-3">
           {symbol && (
-            <span className="shrink-0 text-[12px] font-semibold text-accent">{symbol}</span>
+            <span className="shrink-0 text-[15px] font-semibold text-accent">{symbol}</span>
           )}
           {title && (
-            <h2 className="truncate text-[11px] font-semibold uppercase tracking-[0.06em] text-foreground/90">
+            <h2 className="truncate text-[14px] font-semibold uppercase tracking-[0.06em] text-foreground/90">
               {title}
             </h2>
           )}
           {subtitle && (
-            <span className="truncate text-[11px] text-muted-foreground">{subtitle}</span>
+            <span className="truncate text-[14px] text-muted-foreground">{subtitle}</span>
           )}
           <div className="flex-1" />
           {actions}
           {/* The lock / expand affordances AlphaSpace puts on every widget.
               Inert for now — they mark where per-widget controls belong. */}
-          <span className="shrink-0 text-[11px] leading-none text-muted-foreground/40">⤢</span>
+          <span className="shrink-0 text-[14px] leading-none text-muted-foreground/40">⤢</span>
         </header>
       )}
       <div
@@ -135,9 +143,10 @@ export function Btn({
 }) {
   return (
     <button
+      data-slot="button"
       {...props}
       className={cn(
-        "inline-flex h-[24px] shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-2.5 text-[11px] font-medium transition-colors disabled:pointer-events-none disabled:opacity-40",
+        "inline-flex h-[28px] shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-2.5 text-[14px] font-medium transition-colors disabled:pointer-events-none disabled:opacity-40",
         variant === "default" && "border border-border bg-transparent hover:bg-muted",
         variant === "ghost" && "text-muted-foreground hover:bg-muted hover:text-foreground",
         variant === "accent" && "bg-accent text-accent-foreground hover:opacity-90",
@@ -153,10 +162,10 @@ export function Btn({
  * a base width silently wins and every field eats its own row. Callers state
  * their own width (`w-24`, `flex-1`, `w-full`). */
 export const fieldCls =
-  "h-[26px] rounded-md border border-input bg-background px-1.5 text-[11px] text-foreground placeholder:text-muted-foreground/60 focus:border-ring focus:outline-none"
+  "h-[30px] rounded-md border border-input bg-background px-1.5 text-[14px] text-foreground placeholder:text-muted-foreground/60 focus:border-ring focus:outline-none"
 
 export const areaCls =
-  "resize-y rounded-md border border-input bg-background px-1.5 py-1 text-[11px] leading-snug text-foreground placeholder:text-muted-foreground/60 focus:border-ring focus:outline-none"
+  "resize-y rounded-md border border-input bg-background px-1.5 py-1 text-[14px] leading-snug text-foreground placeholder:text-muted-foreground/60 focus:border-ring focus:outline-none"
 
 export function Tag({
   tone = "neutral", className, children,
@@ -168,7 +177,7 @@ export function Tag({
   return (
     <span
       className={cn(
-        "inline-flex items-center whitespace-nowrap border px-1 text-[9px] font-semibold uppercase leading-[14px] tracking-[0.06em]",
+        "inline-flex items-center whitespace-nowrap border px-1 text-[11px] font-semibold uppercase leading-[14px] tracking-[0.06em]",
         tone === "neutral" && "border-border text-muted-foreground",
         tone === "gain" && "border-gain/40 text-gain",
         tone === "loss" && "border-loss/40 text-loss",
@@ -193,7 +202,7 @@ export function Shimmer({ className }: { className?: string }) {
 export function Table({ className, children }: { className?: string; children: React.ReactNode }) {
   return (
     <div className="w-full overflow-x-auto">
-      <table className={cn("w-full border-collapse text-[11px]", className)}>{children}</table>
+      <table data-slot="table" className={cn("w-full border-collapse text-[14px]", className)}>{children}</table>
     </div>
   )
 }
@@ -213,7 +222,7 @@ export function TH({
   return (
     <th
       className={cn(
-        "h-[28px] whitespace-nowrap px-3 text-[10px] font-medium uppercase tracking-[0.06em] text-muted-foreground",
+        "h-[28px] whitespace-nowrap px-3 text-[12px] font-medium uppercase tracking-[0.06em] text-muted-foreground",
         align === "left" && "text-left",
         align === "right" && "text-right",
         align === "center" && "text-center",
@@ -256,7 +265,7 @@ export function TD({
     <td
       colSpan={colSpan}
       className={cn(
-        "h-[30px] whitespace-nowrap px-3",
+        "h-[33px] whitespace-nowrap px-3",
         align === "left" && "text-left",
         align === "right" && "text-right",
         align === "center" && "text-center",
@@ -272,7 +281,7 @@ export function TD({
 /** Centered filler for an empty/loading/error widget body. */
 export function Empty({ children }: { children: React.ReactNode }) {
   return (
-    <div className="px-2 py-4 text-center text-[11px] text-muted-foreground">{children}</div>
+    <div className="px-2 py-4 text-center text-[14px] text-muted-foreground">{children}</div>
   )
 }
 
@@ -287,7 +296,7 @@ export function Stat({
 }) {
   return (
     <div className="min-w-0 border-r border-grid-line px-2 py-1.5 last:border-r-0">
-      <div className="truncate text-[9px] uppercase tracking-[0.06em] text-muted-foreground">{label}</div>
+      <div className="truncate text-[11px] uppercase tracking-[0.06em] text-muted-foreground">{label}</div>
       <div
         className={cn(
           "num truncate text-[15px] leading-tight",
@@ -297,7 +306,7 @@ export function Stat({
       >
         {value}
       </div>
-      {sub && <div className="truncate text-[9px] text-muted-foreground">{sub}</div>}
+      {sub && <div className="truncate text-[11px] text-muted-foreground">{sub}</div>}
     </div>
   )
 }
@@ -329,7 +338,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center whitespace-nowrap border px-1 text-[9px] font-semibold uppercase leading-[14px] tracking-[0.06em]",
+        "inline-flex items-center whitespace-nowrap border px-1 text-[11px] font-semibold uppercase leading-[14px] tracking-[0.06em]",
         BADGE_TONE[variant] ?? BADGE_TONE.default,
         className,
       )}
@@ -346,7 +355,7 @@ export function Button({
     <button
       {...props}
       className={cn(
-        "inline-flex items-center justify-center gap-1 whitespace-nowrap text-[11px] font-medium transition-colors disabled:pointer-events-none disabled:opacity-40",
+        "inline-flex items-center justify-center gap-1 whitespace-nowrap text-[14px] font-medium transition-colors disabled:pointer-events-none disabled:opacity-40",
         // `h-auto` in a caller's className must win, so height is only applied
         // when the caller hasn't asked for its own.
         !className?.includes("h-auto") && "h-[22px]",

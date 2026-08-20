@@ -61,7 +61,7 @@ function WindowList() {
               </TD>
               <TD mono className="text-muted-foreground">{s.report_date ?? "—"}</TD>
               <TD align="right">
-                <Link to={`/chart?symbol=${encodeURIComponent(s.symbol)}`}>
+                <Link to={`/analysis?symbol=${encodeURIComponent(s.symbol)}`}>
                   <Btn variant="ghost">chart</Btn>
                 </Link>
               </TD>
@@ -92,9 +92,9 @@ function NewsTape() {
         {headlines.map((h, i) => (
           <li key={i} className="border-b border-grid-line last:border-b-0 hover:bg-muted/60">
             <a href={h.url} target="_blank" rel="noreferrer" className="block px-2 py-1">
-              <span className="num mr-1.5 text-[10px] font-semibold text-accent">{h.symbol}</span>
-              <span className="text-[11px]">{h.title}</span>
-              <span className="ml-1.5 text-[10px] text-muted-foreground">— {h.source}</span>
+              <span className="num mr-1.5 text-[12px] font-semibold text-accent">{h.symbol}</span>
+              <span className="text-[14px]">{h.title}</span>
+              <span className="ml-1.5 text-[12px] text-muted-foreground">— {h.source}</span>
             </a>
           </li>
         ))}
@@ -132,7 +132,7 @@ function ReportingSoon() {
               <TD className="text-muted-foreground">{e.session ?? "—"}</TD>
               <TD align="right" mono>{e.eps_estimate ?? "—"}</TD>
               <TD align="right">
-                <Link to={`/chart?symbol=${encodeURIComponent(e.symbol)}`}>
+                <Link to={`/analysis?symbol=${encodeURIComponent(e.symbol)}`}>
                   <Btn variant="ghost">chart</Btn>
                 </Link>
               </TD>

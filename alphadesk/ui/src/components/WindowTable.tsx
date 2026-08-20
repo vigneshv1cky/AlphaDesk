@@ -79,7 +79,7 @@ export function WindowTable({ rows }: { rows: ScreenerRow[] }) {
             title={h.title}
           >
             {h.title}
-            <span className="ml-1.5 text-[10px] text-muted-foreground/70">— {h.source}</span>
+            <span className="ml-1.5 text-[12px] text-muted-foreground/70">— {h.source}</span>
           </a>
         )
       },
@@ -92,7 +92,7 @@ export function WindowTable({ rows }: { rows: ScreenerRow[] }) {
           <Link to={`/filings?symbol=${encodeURIComponent(c.row.original.symbol)}`} onClick={e => e.stopPropagation()}>
             <Btn variant="ghost">filings</Btn>
           </Link>
-          <Link to={`/chart?symbol=${encodeURIComponent(c.row.original.symbol)}`} onClick={e => e.stopPropagation()}>
+          <Link to={`/analysis?symbol=${encodeURIComponent(c.row.original.symbol)}`} onClick={e => e.stopPropagation()}>
             <Btn>chart →</Btn>
           </Link>
         </div>
@@ -146,7 +146,7 @@ export function WindowTable({ rows }: { rows: ScreenerRow[] }) {
             reset
           </Btn>
         )}
-        <span className="num ml-auto text-[10px] text-muted-foreground">
+        <span className="num ml-auto text-[12px] text-muted-foreground">
           {modelRows.length} / {rows.length}
         </span>
       </div>
@@ -166,7 +166,7 @@ export function WindowTable({ rows }: { rows: ScreenerRow[] }) {
                 key={h.id}
                 style={{ width: size, flex: size ? "0 0 auto" : "1 1 0%" }}
                 onClick={h.column.getToggleSortingHandler()}
-                className={`flex h-[22px] min-w-0 select-none items-center truncate px-2 text-[9px] font-semibold uppercase tracking-[0.06em] text-muted-foreground ${
+                className={`flex h-[22px] min-w-0 select-none items-center truncate px-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground ${
                   h.column.getCanSort() ? "cursor-pointer hover:text-foreground" : ""
                 }`}
               >

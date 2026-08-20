@@ -9,8 +9,8 @@ import { useSystem } from "@/lib/queries"
 function Cell({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex shrink-0 items-baseline gap-1 border-l border-border px-2 first:border-l-0">
-      <span className="text-[9px] uppercase tracking-[0.06em] text-muted-foreground">{label}</span>
-      <span className="num text-[11px] font-semibold">{value}</span>
+      <span className="text-[11px] uppercase tracking-[0.06em] text-muted-foreground">{label}</span>
+      <span className="num text-[14px] font-semibold">{value}</span>
     </div>
   )
 }

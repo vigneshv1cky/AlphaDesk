@@ -38,7 +38,7 @@ export function SymbolFilings({ symbol: requested }: { symbol: string }) {
         subtitle="SEC EDGAR direct — every answer is a verbatim quote from the document, never a paraphrase passed off as fact"
       >
       {(loading || err) && (
-        <div className="border-b border-border p-1 text-[11px]">
+        <div className="border-b border-border p-1 text-[14px]">
           {loading && <span className="text-muted-foreground">loading…</span>}
           {err && <span className="text-loss">{err}</span>}
         </div>
@@ -68,7 +68,7 @@ export function SymbolFilings({ symbol: requested }: { symbol: string }) {
                 }`}
               >
                 <Badge variant={selected?.accession === f.accession ? "default" : "secondary"}>{f.form}</Badge>
-                <span className="num text-[10px] text-muted-foreground">{f.filing_date}</span>
+                <span className="num text-[12px] text-muted-foreground">{f.filing_date}</span>
               </button>
             ))}
           </div>
@@ -101,7 +101,7 @@ function FilingReader({ filing }: { filing: FilingRow }) {
         </a>
       </div>
 
-      <div className="px-2 pb-1 text-[10px] text-muted-foreground">
+      <div className="px-2 pb-1 text-[12px] text-muted-foreground">
         Ask this filing anything in the AI panel on the right — answers there are
         verbatim quotes verified against this document.
       </div>

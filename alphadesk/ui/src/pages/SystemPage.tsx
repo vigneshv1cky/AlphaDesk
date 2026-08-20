@@ -64,7 +64,7 @@ export default function SystemPage() {
             <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
               News → Screener pipeline
             </span>
-            <span className={`text-[11px] font-medium ${newsStale ? "text-amber-600 dark:text-amber-400" : "text-emerald-500"}`}>
+            <span className={`text-[14px] font-medium ${newsStale ? "text-amber-600 dark:text-amber-400" : "text-emerald-500"}`}>
               {newsStale ? "stale" : "healthy"}
             </span>
           </div>
@@ -74,7 +74,7 @@ export default function SystemPage() {
             <StatCard label="AI Calls Today" value={String(news.calls_today)} />
             <StatCard label="Tokens Today" value={`${((news.tokens_today_in + news.tokens_today_out) / 1000).toFixed(1)}k`} />
           </div>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-[14px] text-muted-foreground">
             Polls the configured news feed and labels each article with the configured
             model. Nothing is summarized in the background — the AI runs only when you
             ask, so an idle terminal spends nothing, and a model outage leaves the window
@@ -85,7 +85,7 @@ export default function SystemPage() {
       </Widget>
 
       <Widget span={12} title="What this is">
-        <div className="space-y-1.5 p-2 text-[11px] text-muted-foreground">
+        <div className="space-y-1.5 p-2 text-[14px] text-muted-foreground">
           <p>
             AlphaDesk is a consumption terminal: it fetches, reads and presents market
             information. It holds no positions, books no trades and keeps no score — the

@@ -133,7 +133,7 @@ export function AiRail() {
       onClick={() => setOpen(true)}
       title="Open the AI panel"
       className={cn(
-        "w-[28px] shrink-0 flex-col items-center gap-2 border-l border-border bg-panel py-2 text-[10px] uppercase tracking-[0.12em] text-muted-foreground hover:text-foreground",
+        "w-[28px] shrink-0 flex-col items-center gap-2 border-l border-border bg-panel py-2 text-[12px] uppercase tracking-[0.12em] text-muted-foreground hover:text-foreground",
         // Below xl the canvas cannot afford a 360px rail — sidebar + rail
         // would leave the data less room than the chrome. Collapsed is forced
         // there regardless of the stored preference.
@@ -152,8 +152,8 @@ export function AiRail() {
     {Collapsed}
     <aside className="hidden w-[360px] shrink-0 flex-col border-l border-border bg-background xl:flex">
       <header className="flex h-[42px] shrink-0 items-center gap-2 px-3">
-        <span className="text-[13px] text-accent">✦</span>
-        <h2 className="text-[12px] font-semibold uppercase tracking-[0.06em]">Ask AlphaDesk</h2>
+        <span className="text-[16px] text-accent">✦</span>
+        <h2 className="text-[15px] font-semibold uppercase tracking-[0.06em]">Ask AlphaDesk</h2>
         <div className="flex-1" />
         {turns.length > 0 && <Btn variant="ghost" onClick={() => setTurns([])}>clear</Btn>}
         <Btn variant="ghost" onClick={() => setOpen(false)} title="Collapse">▶</Btn>
@@ -165,7 +165,7 @@ export function AiRail() {
             key={m.id}
             onClick={() => setPinned(m.id)}
             title={m.blurb}
-            className={`flex-1 border-b-2 px-1 py-1 text-[10px] font-medium uppercase tracking-[0.04em] transition-colors ${
+            className={`flex-1 border-b-2 px-1 py-1 text-[12px] font-medium uppercase tracking-[0.04em] transition-colors ${
               mode === m.id
                 ? "border-accent text-foreground"
                 : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -207,7 +207,7 @@ export function AiRail() {
             <h3 className="text-[20px] font-semibold leading-tight">
               What would you<br />like to know?
             </h3>
-            <p className="mt-1.5 text-[11px] text-muted-foreground">
+            <p className="mt-1.5 text-[14px] text-muted-foreground">
               {mode === "window"
                 ? "Reads every article and upcoming report at once."
                 : mode === "symbol"
@@ -230,7 +230,7 @@ export function AiRail() {
                 <button
                   key={q}
                   onClick={() => setQuestion(q)}
-                  className="block w-full rounded-full border border-border px-3 py-2 text-left text-[11px] text-foreground/90 transition-colors hover:bg-muted"
+                  className="block w-full rounded-full border border-border px-3 py-2 text-left text-[14px] text-foreground/90 transition-colors hover:bg-muted"
                 >
                   {q}
                 </button>
@@ -242,14 +242,14 @@ export function AiRail() {
           <div key={i} className="border-b border-grid-line px-2 py-1.5">
             <div className="mb-1 flex items-center gap-1.5">
               <Tag tone="accent">{t.scope}</Tag>
-              <span className="truncate text-[11px] font-medium">{t.question}</span>
+              <span className="truncate text-[14px] font-medium">{t.question}</span>
             </div>
-            <p className="whitespace-pre-wrap text-[11px] leading-snug">{t.answer}</p>
-            {t.note && <p className="mt-1 text-[10px] text-muted-foreground">{t.note}</p>}
+            <p className="whitespace-pre-wrap text-[14px] leading-snug">{t.answer}</p>
+            {t.note && <p className="mt-1 text-[12px] text-muted-foreground">{t.note}</p>}
             {t.cites.length > 0 && (
               <div className="mt-1 space-y-0.5 border-t border-grid-line pt-1">
                 {t.cites.map((c, j) => (
-                  <div key={j} className="text-[10px] text-muted-foreground">
+                  <div key={j} className="text-[12px] text-muted-foreground">
                     <span className="num mr-1">[{j + 1}]</span>
                     {c.url ? (
                       <a href={c.url} target="_blank" rel="noreferrer" className="underline decoration-dotted hover:text-foreground">
@@ -266,7 +266,7 @@ export function AiRail() {
           </div>
         ))}
         {busy && <Empty>thinking…</Empty>}
-        {err && <div className="px-2 py-1 text-[11px] text-loss">{err}</div>}
+        {err && <div className="px-2 py-1 text-[14px] text-loss">{err}</div>}
         <div ref={endRef} />
       </div>
 
@@ -288,7 +288,7 @@ export function AiRail() {
           className={`${areaCls} w-full`}
         />
         <div className="mt-1 flex items-center gap-1">
-          <span className="truncate text-[9px] text-muted-foreground">
+          <span className="truncate text-[11px] text-muted-foreground">
             AI can make mistakes. Every claim is cited — check the sources.
           </span>
           <div className="flex-1" />

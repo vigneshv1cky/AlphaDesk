@@ -71,15 +71,15 @@ function DayCell({
         active ? "bg-muted" : "hover:bg-muted/50"
       }`}
     >
-      <span className={`text-[10px] uppercase tracking-[0.08em] ${
+      <span className={`text-[12px] uppercase tracking-[0.08em] ${
         isToday ? "font-semibold text-accent" : "text-muted-foreground"
       }`}>
         {day.weekday}
       </span>
-      <span className={`num text-[13px] ${isToday ? "font-semibold text-accent" : "text-foreground"}`}>
+      <span className={`num text-[16px] ${isToday ? "font-semibold text-accent" : "text-foreground"}`}>
         {day.date.slice(8)}
       </span>
-      <span className="truncate text-[10px] text-muted-foreground">
+      <span className="truncate text-[12px] text-muted-foreground">
         {day.count === 0 ? "No calls" : `${day.count} ${day.count === 1 ? "call" : "calls"}`}
       </span>
     </button>
@@ -90,7 +90,7 @@ function DayTable({ day }: { day: EarningsDay }) {
   if (!day.rows.length) return null
   return (
     <section id={`day-${day.date}`} className="scroll-mt-2">
-      <h3 className="border-b border-grid-line bg-panel-header px-3 py-1.5 text-[11px] font-semibold">
+      <h3 className="border-b border-grid-line bg-panel-header px-3 py-1.5 text-[14px] font-semibold">
         {longDay(day.date)}
         <span className="ml-2 font-normal text-muted-foreground">
           {day.count} {day.count === 1 ? "call" : "calls"}
@@ -99,7 +99,7 @@ function DayTable({ day }: { day: EarningsDay }) {
       <div className="overflow-x-auto">
         <table className="w-full min-w-[640px] border-collapse">
           <thead>
-            <tr className="text-[10px] uppercase tracking-[0.06em] text-muted-foreground">
+            <tr className="text-[12px] uppercase tracking-[0.06em] text-muted-foreground">
               <th className="px-3 py-1 text-left font-normal">Symbol</th>
               <th className="px-3 py-1 text-left font-normal" />
               <th className="px-3 py-1 text-right font-normal">Estimated EPS</th>
@@ -113,26 +113,26 @@ function DayTable({ day }: { day: EarningsDay }) {
               const surprise = r.surprise_pct
               return (
                 <tr key={`${r.symbol}-${r.report_date}`} className="border-b border-grid-line last:border-b-0 hover:bg-muted/50">
-                  <td className="px-3 py-[6px] text-[11px]">
+                  <td className="px-3 py-[6px] text-[14px]">
                     <Link
-                      to={`/chart?symbol=${encodeURIComponent(r.symbol)}`}
+                      to={`/analysis?symbol=${encodeURIComponent(r.symbol)}`}
                       className="num font-semibold text-accent hover:underline"
                     >
                       {r.symbol}
                     </Link>
                   </td>
-                  <td className="max-w-[280px] truncate px-3 py-[6px] text-[11px] text-muted-foreground">
+                  <td className="max-w-[280px] truncate px-3 py-[6px] text-[14px] text-muted-foreground">
                     {r.company_name ?? ""}
                   </td>
-                  <td className="num px-3 py-[6px] text-right text-[11px]">{eps(r.eps_estimate)}</td>
-                  <td className="num px-3 py-[6px] text-right text-[11px]">{eps(r.eps_actual)}</td>
-                  <td className={`num px-3 py-[6px] text-right text-[11px] ${
+                  <td className="num px-3 py-[6px] text-right text-[14px]">{eps(r.eps_estimate)}</td>
+                  <td className="num px-3 py-[6px] text-right text-[14px]">{eps(r.eps_actual)}</td>
+                  <td className={`num px-3 py-[6px] text-right text-[14px] ${
                     surprise == null ? "text-muted-foreground"
                       : surprise >= 0 ? "text-gain" : "text-loss"
                   }`}>
                     {surprise == null ? "—" : `${surprise >= 0 ? "+" : ""}${surprise.toFixed(2)}%`}
                   </td>
-                  <td className="num px-3 py-[6px] text-right text-[11px] text-muted-foreground">
+                  <td className="num px-3 py-[6px] text-right text-[14px] text-muted-foreground">
                     {money(r.market_cap)}
                   </td>
                 </tr>
@@ -168,7 +168,7 @@ export function EarningsCalendar() {
         <button
           type="button"
           onClick={() => { setStart(undefined); setSelected(null) }}
-          className="border border-border px-2 py-[3px] text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
+          className="border border-border px-2 py-[3px] text-[14px] text-muted-foreground hover:bg-muted hover:text-foreground"
         >
           Today
         </button>
@@ -177,7 +177,7 @@ export function EarningsCalendar() {
             type="button"
             aria-label="Previous week"
             onClick={() => { setStart(shiftWeek(week.start, -1)); setSelected(null) }}
-            className="px-2 py-[3px] text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
+            className="px-2 py-[3px] text-[14px] text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             ‹
           </button>
@@ -185,20 +185,20 @@ export function EarningsCalendar() {
             type="button"
             aria-label="Next week"
             onClick={() => { setStart(shiftWeek(week.start, 1)); setSelected(null) }}
-            className="px-2 py-[3px] text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
+            className="px-2 py-[3px] text-[14px] text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             ›
           </button>
         </div>
-        <span className="num text-[12px] font-semibold">{rangeLabel(week.start, week.end)}</span>
-        <span className="text-[11px] text-muted-foreground">
+        <span className="num text-[15px] font-semibold">{rangeLabel(week.start, week.end)}</span>
+        <span className="text-[14px] text-muted-foreground">
           {total} {total === 1 ? "call" : "calls"} this week
         </span>
         {selected && (
           <button
             type="button"
             onClick={() => setSelected(null)}
-            className="ml-auto text-[11px] text-accent hover:underline"
+            className="ml-auto text-[14px] text-accent hover:underline"
           >
             show the whole week
           </button>

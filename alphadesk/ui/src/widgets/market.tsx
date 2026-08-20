@@ -24,8 +24,8 @@ const num = (n: number | null | undefined, d = 2) =>
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3 border-b border-grid-line px-3 py-[5px] last:border-b-0">
-      <span className="shrink-0 text-[11px] text-muted-foreground">{label}</span>
-      <span className="num truncate text-[11px]">{value}</span>
+      <span className="shrink-0 text-[14px] text-muted-foreground">{label}</span>
+      <span className="num truncate text-[14px]">{value}</span>
     </div>
   )
 }
@@ -55,12 +55,12 @@ function EquityOverview() {
   return (
     <Widget span={4} symbol={q.symbol} title="Equity Overview" scroll={420}>
       <div className="px-3 pb-2">
-        <div className="text-[10px] text-muted-foreground">
+        <div className="text-[12px] text-muted-foreground">
           {q.exchange} · {q.currency}
         </div>
-        <div className="text-[12px] font-medium">{q.name}</div>
+        <div className="text-[15px] font-medium">{q.name}</div>
         <div className="num mt-1 text-[26px] font-semibold leading-none">{num(q.price)}</div>
-        <div className={`num mt-1 text-[11px] ${up ? "text-gain" : "text-loss"}`}>
+        <div className={`num mt-1 text-[14px] ${up ? "text-gain" : "text-loss"}`}>
           {up ? "+" : ""}{num(q.change)} ({up ? "+" : ""}{num(q.change_pct)}%)
         </div>
       </div>
@@ -108,7 +108,7 @@ function MoversTable({ rows }: { rows: MoverRow[] }) {
   }
   return (
     <div>
-      <div className="flex items-center border-b border-grid-line px-3 py-1 text-[10px] uppercase tracking-[0.06em] text-muted-foreground">
+      <div className="flex items-center border-b border-grid-line px-3 py-1 text-[12px] uppercase tracking-[0.06em] text-muted-foreground">
         <span className="flex-1">Symbol</span>
         <span className="w-[72px]" />
         <span className="w-20 text-right">Price</span>
@@ -120,8 +120,8 @@ function MoversTable({ rows }: { rows: MoverRow[] }) {
         return (
           <Link
             key={r.symbol}
-            to={`/chart?symbol=${encodeURIComponent(r.symbol)}`}
-            className="flex items-center border-b border-grid-line px-3 py-[6px] text-[11px] last:border-b-0 hover:bg-muted/60"
+            to={`/analysis?symbol=${encodeURIComponent(r.symbol)}`}
+            className="flex items-center border-b border-grid-line px-3 py-[6px] text-[14px] last:border-b-0 hover:bg-muted/60"
           >
             <span className="num flex-1 font-semibold text-accent">{r.symbol}</span>
             {/* Tinted by direction, same as the change cell — the line and the
@@ -156,7 +156,7 @@ function StockMovers() {
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`rounded-md px-2.5 py-1 text-[11px] transition-colors ${
+            className={`rounded-md px-2.5 py-1 text-[14px] transition-colors ${
               tab === t.id
                 ? "bg-muted font-medium text-foreground"
                 : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"

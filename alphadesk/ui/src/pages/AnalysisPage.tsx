@@ -47,11 +47,11 @@ export default function AnalysisPage() {
           className={`${fieldCls} w-28 font-mono uppercase`}
         />
         <Btn type="submit" variant="accent">Load</Btn>
-        <span className="num text-[12px] font-semibold">{urlSymbol}</span>
+        <span className="num text-[15px] font-semibold">{urlSymbol}</span>
         <button
           type="button"
           onClick={() => (watched ? remove(urlSymbol) : add(urlSymbol))}
-          className={`px-2 py-[3px] text-[11px] transition-colors ${
+          className={`px-2 py-[3px] text-[14px] transition-colors ${
             watched
               ? "text-accent hover:underline"
               : "border border-border text-muted-foreground hover:bg-muted hover:text-foreground"

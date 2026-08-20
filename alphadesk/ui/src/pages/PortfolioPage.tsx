@@ -24,31 +24,31 @@ function Row({ symbol, onRemove }: { symbol: string; onRemove: () => void }) {
   const up = (chg ?? 0) >= 0
   return (
     <tr className="border-b border-grid-line last:border-b-0 hover:bg-muted/50">
-      <td className="px-3 py-[7px]">
+      <td className="px-3 py-[6px]">
         <Link
           to={`/analysis?symbol=${encodeURIComponent(symbol)}`}
-          className="num text-[11px] font-semibold text-accent hover:underline"
+          className="num text-[14px] font-semibold text-accent hover:underline"
         >
           {symbol}
         </Link>
       </td>
-      <td className="max-w-[240px] truncate px-3 py-[7px] text-[11px] text-muted-foreground">
+      <td className="max-w-[240px] truncate px-3 py-[6px] text-[14px] text-muted-foreground">
         {isPending ? "…" : data?.name ?? ""}
       </td>
-      <td className="num px-3 py-[7px] text-right text-[11px]">
+      <td className="num px-3 py-[6px] text-right text-[14px]">
         {data?.price == null ? "—" : data.price.toFixed(2)}
       </td>
-      <td className={`num px-3 py-[7px] text-right text-[11px] ${
+      <td className={`num px-3 py-[6px] text-right text-[14px] ${
         chg == null ? "text-muted-foreground" : up ? "text-gain" : "text-loss"
       }`}>
         {chg == null ? "—" : `${up ? "+" : ""}${chg.toFixed(2)}%`}
       </td>
-      <td className="px-3 py-[7px] text-right">
+      <td className="px-3 py-[6px] text-right">
         <button
           type="button"
           onClick={onRemove}
           aria-label={`Stop watching ${symbol}`}
-          className="px-1 text-[12px] leading-none text-muted-foreground hover:text-loss"
+          className="px-1 text-[15px] leading-none text-muted-foreground hover:text-loss"
         >
           ×
         </button>
@@ -80,7 +80,7 @@ export default function PortfolioPage() {
             className={`${fieldCls} w-32 font-mono uppercase`}
           />
           <Btn type="submit" variant="accent" disabled={!normalize(draft)}>Add</Btn>
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-[14px] text-muted-foreground">
             {symbols.length} {symbols.length === 1 ? "symbol" : "symbols"}
           </span>
         </form>
@@ -93,7 +93,7 @@ export default function PortfolioPage() {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[520px] border-collapse">
               <thead>
-                <tr className="text-[10px] uppercase tracking-[0.06em] text-muted-foreground">
+                <tr className="text-[12px] uppercase tracking-[0.06em] text-muted-foreground">
                   <th className="px-3 py-1 text-left font-normal">Symbol</th>
                   <th className="px-3 py-1 text-left font-normal" />
                   <th className="px-3 py-1 text-right font-normal">Price</th>

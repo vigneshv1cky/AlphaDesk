@@ -47,9 +47,11 @@
     --color-card: var(--card);
     --color-foreground: var(--foreground);
     --color-background: var(--background);
-    --radius-sm: calc(var(--radius) * 0.6);
-    --radius-md: calc(var(--radius) * 0.8);
-    --radius-lg: var(--radius);
+    /* Their radii are a deliberate 4 / 8 / 12 scale rather than one value
+       scaled by ratios, so they are pinned rather than derived. */
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
     --radius-xl: calc(var(--radius) * 1.4);
     --radius-2xl: calc(var(--radius) * 1.8);
     --radius-3xl: calc(var(--radius) * 2.2);
@@ -57,34 +59,34 @@
 }
 
 :root {
-    /* Light stays available, but the density/geometry match dark: flat panels,
-       hairline rules, no elevation. OpenBB is a dark-first look; a "soft" light
-       theme with lifted white cards would undo it. */
-    --background: oklch(0.985 0 0);
-    --foreground: oklch(0.22 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.22 0 0);
-    --panel: oklch(1 0 0);
-    --panel-header: oklch(0.965 0 0);
-    --grid-line: oklch(0.93 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.22 0 0);
+    /* Light values are AlphaSpace's own surface/text tokens. The ground is the
+       GREY step and panels are the white one, not the other way round — panels
+       have to sit above the page or the whole elevation idea collapses. */
+    --background: #f0f3f5;
+    --foreground: #232a31;
+    --card: #ffffff;
+    --card-foreground: #232a31;
+    --panel: #ffffff;
+    --panel-header: #f0f3f5;
+    --grid-line: #e0e4e9;
+    --popover: #ffffff;
+    --popover-foreground: #232a31;
     --primary: oklch(0.205 0 0);
     --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
+    --secondary: #e8ecef;
+    --secondary-foreground: #232a31;
+    --muted: #e8ecef;
+    --muted-foreground: #5b636a;
+    --accent: #0f69ff;
+    --accent-foreground: #ffffff;
     --destructive: oklch(0.6 0.19 25);
-    --gain: oklch(0.55 0.16 145);
+    --gain: #037b4b;
     --gain-foreground: oklch(0.98 0 0);
-    --loss: oklch(0.58 0.19 25);
+    --loss: #d60a22;
     --loss-foreground: oklch(0.98 0 0);
-    --border: oklch(0.90 0 0);
-    --input: oklch(0.90 0 0);
-    --ring: oklch(0.62 0.16 250);
+    --border: #e0e4e9;
+    --input: #d5dbe0;
+    --ring: #0f69ff;
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
@@ -102,39 +104,40 @@
 }
 
 .dark {
-    /* AlphaSpace palette. The canvas is a dark NAVY-black, not neutral grey —
-       that blue cast is most of why their surface reads as a product rather
-       than a terminal emulator. Panels sit a step above it with rounded
-       corners and a hairline border; nothing is elevated with shadow. */
-    --background: #0a0d14;
-    --foreground: #e6e8eb;
-    --card: #141922;
-    --card-foreground: #e6e8eb;
-    --panel: #141922;
-    --panel-header: #141922;      /* headers are part of the card, not a band */
-    --grid-line: #1e242f;
-    --popover: #1a202b;
-    --popover-foreground: #e6e8eb;
-    --primary: #e6e8eb;
-    --primary-foreground: #0a0d14;
-    --secondary: #1a202b;
-    --secondary-foreground: #e6e8eb;
-    --muted: #1a202b;
-    --muted-foreground: #8b94a3;
-    --accent: #2f7fee;            /* the blue on Start trial / active pills */
+    /* Sampled off their running board. Two things changed from the previous
+       guess: the canvas is near-NEUTRAL (#0d0d10), not navy — the blue cast
+       was mine, not theirs — and there are FOUR surface steps, where this had
+       two. Panel and its header being the same value was why cards read flat;
+       that separation is most of the difference. */
+    --background: #0d0d10;        /* the page */
+    --foreground: #e0e5ea;
+    --card: #16161a;
+    --card-foreground: #e0e5ea;
+    --panel: #16161a;             /* a card on the page */
+    --panel-header: #1c1c20;      /* a band inside the card */
+    --grid-line: #23232a;
+    --popover: #1c1c20;
+    --popover-foreground: #e0e5ea;
+    --primary: #e0e5ea;
+    --primary-foreground: #0d0d10;
+    --secondary: #1c1c20;
+    --secondary-foreground: #e0e5ea;
+    --muted: #26262a;             /* hover / active, the fourth step */
+    --muted-foreground: #969a9e;
+    --accent: #3c83f5;
     --accent-foreground: #ffffff;
-    --destructive: #e5484d;
-    --gain: #16c784;              /* teal-leaning green, not grass */
+    --destructive: #fe6864;
+    --gain: #34d98c;
     --gain-foreground: #06251a;
-    --loss: #e5484d;              /* coral red, softer than pure #f00 */
+    --loss: #fe6864;
     --loss-foreground: #2a0c0e;
-    --border: #232a36;
-    --input: #2a3240;
-    --ring: #2f7fee;
-    --chart-1: #4a9eff;
-    --chart-2: #16c784;
-    --chart-3: #e5484d;
-    --chart-4: #8b94a3;
+    --border: #26262a;
+    --input: #2f2f35;
+    --ring: #3c83f5;
+    --chart-1: #3c83f5;
+    --chart-2: #34d98c;
+    --chart-3: #fe6864;
+    --chart-4: #969a9e;
     --chart-5: #a371f7;
     --sidebar: oklch(0.205 0 0);
     --sidebar-foreground: oklch(0.985 0 0);

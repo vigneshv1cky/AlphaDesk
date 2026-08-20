@@ -16,7 +16,7 @@ export function ViewHeader({ title }: { title: string }) {
     <div className="flex h-[42px] shrink-0 items-center gap-2 px-3">
       <h1 className="text-[15px] font-semibold">{title}</h1>
       {symbol && (
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-2 py-[3px] text-[11px]">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-2 py-[3px] text-[14px]">
           <span className="h-1.5 w-1.5 rounded-full bg-accent" />
           {symbol}
           <button onClick={clear} aria-label={`Clear ${symbol}`}

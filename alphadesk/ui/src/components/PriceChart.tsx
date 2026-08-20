@@ -200,11 +200,11 @@ export function PriceChart({ data, dark }: { data: ChartSeries; dark: boolean })
     <div className="space-y-1">
       <OhlcvStrip bar={readout} live={hovered == null} />
       <div ref={priceRef} className="w-full" />
-      <div className="px-1 text-[11px] font-medium text-muted-foreground">
+      <div className="px-1 text-[14px] font-medium text-muted-foreground">
         RSI-9 {data.indicators_reliable ? "" : "— suppressed, data too sparse"}
       </div>
       <div ref={rsiRef} className="w-full" />
-      <div className="px-1 text-[11px] font-medium text-muted-foreground">
+      <div className="px-1 text-[14px] font-medium text-muted-foreground">
         MACD(12,26,9) {data.indicators_reliable ? "" : "— suppressed, data too sparse"}
       </div>
       <div ref={macdRef} className="w-full" />
@@ -232,13 +232,13 @@ function OhlcvStrip({ bar, live }: { bar: ChartBar | null; live: boolean }) {
     </span>
   )
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-1 text-[11px]">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-1 text-[14px]">
       <Cell k="O" v={bar.o.toFixed(2)} />
       <Cell k="H" v={bar.h.toFixed(2)} />
       <Cell k="L" v={bar.l.toFixed(2)} />
       <Cell k="C" v={bar.c.toFixed(2)} />
       <Cell k="V" v={bar.v == null ? "—" : compact.format(bar.v)} />
-      <span className="num text-[10px] text-muted-foreground">
+      <span className="num text-[12px] text-muted-foreground">
         {stamp}{live ? " · latest" : ""}
       </span>
     </div>

@@ -45,8 +45,8 @@ function MarketClock() {
   })
   return (
     <div className="flex shrink-0 items-center gap-2 px-2">
-      <span className="num text-[11px]">{time} ET</span>
-      <span className="text-[10px] text-muted-foreground">· {day}</span>
+      <span className="num text-[14px]">{time} ET</span>
+      <span className="text-[12px] text-muted-foreground">· {day}</span>
     </div>
   )
 }
@@ -77,7 +77,7 @@ function Shell() {
       <header className="z-30 flex h-[30px] shrink-0 items-stretch border-b border-border bg-panel-header">
         <div className="flex w-[150px] shrink-0 items-center gap-1.5 border-r border-border px-2">
           <span className="h-2 w-2 bg-accent" />
-          <span className="text-[11px] font-bold tracking-[0.06em]">ALPHADESK</span>
+          <span className="text-[14px] font-bold tracking-[0.06em]">ALPHADESK</span>
         </div>
         <MarketClock />
         <div className="min-w-0 flex-1" />
@@ -100,7 +100,7 @@ function Shell() {
       <Sidebar />
       <main className="min-h-0 flex-1 overflow-y-auto">
         <div>
-          <Suspense fallback={<div className="p-2 text-[11px] text-muted-foreground">loading…</div>}>
+          <Suspense fallback={<div className="p-2 text-[14px] text-muted-foreground">loading…</div>}>
             <Routes>
               <Route path="/" element={<Navigate to="/markets" replace />} />
               <Route path="/markets" element={<DashboardPage />} />

@@ -28,7 +28,7 @@ const VIEWS = [
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="py-1.5">
-      <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground/70">
+      <div className="px-3 pb-1 text-[12px] font-semibold uppercase tracking-[0.1em] text-muted-foreground/70">
         {title}
       </div>
       {children}
@@ -45,7 +45,7 @@ export function Sidebar() {
             key={to}
             to={to}
             className={({ isActive }) =>
-              `mx-2 flex items-center gap-2.5 rounded-md px-2 py-[7px] text-[12px] transition-colors ${
+              `mx-2 flex items-center gap-2.5 rounded-md px-2 py-[7px] text-[15px] transition-colors ${
                 isActive
                   ? "bg-muted font-medium text-foreground"
                   : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
@@ -68,7 +68,7 @@ export function Sidebar() {
         <NavLink
           to="/system"
           className={({ isActive }) =>
-            `mb-2 flex items-center gap-2 text-[11px] transition-colors ${
+            `mb-2 flex items-center gap-2 text-[14px] transition-colors ${
               isActive ? "text-foreground" : "text-muted-foreground hover:text-foreground"
             }`
           }
@@ -76,16 +76,16 @@ export function Sidebar() {
           <Wrench className="h-[13px] w-[13px] shrink-0" />
           Health
         </NavLink>
-        <div className="text-[10px] leading-relaxed text-muted-foreground/60">
+        <div className="text-[12px] leading-relaxed text-muted-foreground/60">
           Consumption terminal · no positions, no orders.
         </div>
         <div className="mt-2 flex items-center gap-2 rounded-md border border-border px-2 py-1.5">
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-[10px] font-bold text-accent-foreground">
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-[12px] font-bold text-accent-foreground">
             AD
           </span>
           <div className="min-w-0">
-            <div className="truncate text-[11px] font-medium">Self-hosted</div>
-            <div className="truncate text-[10px] text-muted-foreground">open source</div>
+            <div className="truncate text-[14px] font-medium">Self-hosted</div>
+            <div className="truncate text-[12px] text-muted-foreground">open source</div>
           </div>
         </div>
       </div>

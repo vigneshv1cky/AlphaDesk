@@ -53,14 +53,14 @@ export function SymbolChart({ symbol: requested }: { symbol: string }) {
         subtitle="candles + volume + RSI-9 + MACD · indicators hide themselves when the feed is too sparse to trust"
       >
       <div className="flex flex-wrap items-center gap-1.5 border-b border-border p-1">
-        {loading && <span className="px-1 text-[11px] text-muted-foreground">loading…</span>}
+        {loading && <span className="px-1 text-[14px] text-muted-foreground">loading…</span>}
         <div className="flex items-center gap-px">
           {RANGES.map(r => (
             <button
               key={r.days}
               type="button"
               onClick={() => { setDays(r.days); load(symbol || requested, r.days) }}
-              className={`px-2 py-[3px] text-[11px] tabular-nums transition-colors ${
+              className={`px-2 py-[3px] text-[14px] tabular-nums transition-colors ${
                 days === r.days
                   ? "bg-accent/15 font-semibold text-accent"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -70,7 +70,7 @@ export function SymbolChart({ symbol: requested }: { symbol: string }) {
             </button>
           ))}
         </div>
-        {err && <span className="text-[11px] text-loss">{err}</span>}
+        {err && <span className="text-[14px] text-loss">{err}</span>}
       </div>
 
       {data && (
@@ -94,7 +94,7 @@ function DataQuality({ data }: { data: ChartSeries }) {
   const ok = data.indicators_reliable
   return (
     <div
-      className={`border-b px-2 py-1 text-[11px] ${
+      className={`border-b px-2 py-1 text-[14px] ${
         ok
           ? "border-border bg-gain/5"
           : "border-amber-600/40 bg-amber-600/10"
