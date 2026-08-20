@@ -98,7 +98,16 @@ jobs:
           script: |
             set -e
             cd /opt/alphadesk
-            sudo git pull origin main
+            # Reset rather than pull: the VM had drifted to a mix of a July
+            # checkout, hand-edits to tracked files and hand-copied newer ones,
+            # which made `git pull` abort rather than clobber them. Deploys are
+            # now idempotent — main is the only source of truth for this tree.
+            # NOTE: `clean -fd` deliberately omits -x, so gitignored files stay.
+            # .env lives here and must survive; the ledger is in
+            # /opt/alphadesk-data, outside this directory entirely.
+            sudo git fetch origin main
+            sudo git reset --hard origin/main
+            sudo git clean -fd
             sudo pip install -r requirements.txt
             sudo systemctl restart alphadesk
             echo "Deployed — service restarted"
