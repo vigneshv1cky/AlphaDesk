@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 export type Theme = "light" | "dark" | "system"
 
@@ -56,4 +56,32 @@ export function useTheme(): [Theme, () => void] {
     setTheme(next)
   }
   return [theme, cycle]
+}
+
+
+/** The colours the chart renderer paints with, resolved from the design
+ * tokens and re-read whenever the theme flips.
+ *
+ * Resolved rather than passed as `var(--x)` because SVG attributes accept a
+ * var() but the renderer also needs these values for measurement and for the
+ * axis tag fills, and half-resolved colours are the kind of thing that works
+ * in one theme and not the other.
+ */
+export function useChartTheme() {
+  const dark = useIsDark()
+  return useMemo(() => {
+    const read = (name: string, fallback: string) => {
+      if (typeof document === "undefined") return fallback
+      const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+      return v || fallback
+    }
+    return {
+      gain: read("--gain", "#34d98c"),
+      loss: read("--loss", "#fe6864"),
+      accent: read("--accent", "#3c83f5"),
+      grid: read("--chart-grid", "rgba(255,255,255,0.06)"),
+      text: read("--muted-foreground", "#969a9e"),
+    }
+    // dark is the dependency: the tokens change with it.
+  }, [dark])
 }

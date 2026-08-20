@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import type { IChartApi, ISeriesApi, SeriesType, Time } from "lightweight-charts"
+import type { Projection } from "@/components/chart/ChartCanvas"
 
 /** Hand-drawn annotations over the price pane.
  *
@@ -23,7 +23,7 @@ export type Tool =
 /** Tools that need a second click to complete. The rest place on one. */
 const TWO_CLICK: Tool[] = ["trend", "ray", "rect", "ellipse", "fib", "measure"]
 
-type Anchor = { time: Time; price: number }
+type Anchor = { time: string; price: number }
 export type Drawing = {
   id: string
   kind: Exclude<Tool, "none">
@@ -41,10 +41,10 @@ let seq = 0
 const nextId = () => `d${++seq}`
 
 export function ChartDrawings({
-  chart, series, tool, onToolDone, drawings, onChange, visible, height,
+  projection, tool, onToolDone, drawings, onChange, visible, height,
 }: {
-  chart: IChartApi | null
-  series: ISeriesApi<SeriesType> | null
+  /** Supplied by the renderer. Null before the first layout. */
+  projection: Projection | null
   tool: Tool
   /** Fired after a shape completes, so the toolbar drops back to the crosshair
    * — matching how every charting tool behaves. */
@@ -63,33 +63,25 @@ export function ChartDrawings({
   // Bumped whenever the chart moves, to force a re-projection.
   const [, setTick] = useState(0)
 
-  useEffect(() => {
-    if (!chart) return
-    const redraw = () => setTick(t => t + 1)
-    chart.timeScale().subscribeVisibleLogicalRangeChange(redraw)
-    const ro = new ResizeObserver(redraw)
-    if (wrap.current) ro.observe(wrap.current)
-    return () => {
-      chart.timeScale().unsubscribeVisibleLogicalRangeChange(redraw)
-      ro.disconnect()
-    }
-  }, [chart])
+  // The renderer hands out a fresh projection on every pan, zoom and resize,
+  // so re-projecting is just re-rendering when that identity changes.
+  useEffect(() => { setTick(t => t + 1) }, [projection])
 
   /** data -> pixels. Null when the anchor is scrolled out of view. */
   const project = useCallback((a: Anchor) => {
-    if (!chart || !series) return null
-    const x = chart.timeScale().timeToCoordinate(a.time)
-    const y = series.priceToCoordinate(a.price)
+    if (!projection) return null
+    const x = projection.timeToCoordinate(a.time)
+    const y = projection.priceToCoordinate(a.price)
     return x == null || y == null ? null : { x, y }
-  }, [chart, series])
+  }, [projection])
 
   /** pixels -> data. Null outside the plotted area. */
   const unproject = useCallback((x: number, y: number): Anchor | null => {
-    if (!chart || !series) return null
-    const time = chart.timeScale().coordinateToTime(x)
-    const price = series.coordinateToPrice(y)
+    if (!projection) return null
+    const time = projection.coordinateToTime(x)
+    const price = projection.coordinateToPrice(y)
     return time == null || price == null ? null : { time, price }
-  }, [chart, series])
+  }, [projection])
 
   const commit = (d: Drawing) => { onChange([...drawings, d]); onToolDone() }
 
@@ -127,11 +119,11 @@ export function ChartDrawings({
   const stroke = "var(--accent)"
   const muted = "var(--muted-foreground)"
 
-  /** Bars between two anchors, for the measure readout. Times are unix seconds
-   * on this chart, so the difference is real elapsed time rather than an index
-   * count — reported as duration, which is what it honestly is. */
+  /** Elapsed time between two anchors, for the measure readout. Anchors carry
+   * an ISO timestamp, so this is real elapsed time rather than a bar count —
+   * which is the honest number when the series has gaps in it. */
   const spanLabel = (a: Anchor, b: Anchor) => {
-    const secs = Math.abs(Number(b.time) - Number(a.time))
+    const secs = Math.abs(Date.parse(b.time) - Date.parse(a.time)) / 1000
     if (secs >= 86400) return `${(secs / 86400).toFixed(1)}d`
     if (secs >= 3600) return `${(secs / 3600).toFixed(1)}h`
     return `${Math.round(secs / 60)}m`

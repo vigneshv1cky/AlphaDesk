@@ -4,10 +4,14 @@ import {
   api, type ChartRange, type ChartSeries, type Fundamentals,
   type MetricPeriod, type MetricStyle,
 } from "@/lib/api"
-import { PriceChart, type ScaleMode, type SeriesKind } from "@/components/PriceChart"
+import { ChartCanvas, type Projection, type ScaleMode, type SeriesKind } from "@/components/chart/ChartCanvas"
+import { OhlcvStrip } from "@/components/chart/OhlcvStrip"
+import { ChartDrawings } from "@/components/ChartDrawings"
+import { useChartTheme } from "@/lib/theme"
+import { buildOverlays } from "@/lib/indicators"
 import { ChartRanges, ChartToolbar } from "@/components/ChartToolbar"
 import { DrawingToolbar, type Drawing, type Tool } from "@/components/ChartDrawings"
-import { useIsDark } from "@/lib/theme"
+import type { ChartBar } from "@/lib/api"
 import { Empty, Widget } from "@/components/terminal"
 import { registerWidget } from "@/widgets/registry"
 import { TILE_BODY_HEIGHT } from "@/widgets/tile"
@@ -27,7 +31,6 @@ import type { OverlayId } from "@/lib/indicators"
 const COLLAPSED = 318
 
 function MarketChart() {
-  const dark = useIsDark()
   const [params] = useSearchParams()
   const symbol = (params.get("symbol") || "").toUpperCase()
 
@@ -50,6 +53,10 @@ function MarketChart() {
   const [metrics, setMetrics] = useState<string[]>([])
   const [metricPeriod, setMetricPeriod] = useState<MetricPeriod>("quarterly")
   const [metricStyle, setMetricStyle] = useState<MetricStyle>("bars")
+  const [projection, setProjection] = useState<Projection | null>(null)
+  const [hovered, setHovered] = useState<ChartBar | null>(null)
+  const [hoverAt, setHoverAt] = useState<{ x: number; y: number } | null>(null)
+  const theme = useChartTheme()
 
   // Statements are fetched per symbol and period, not per range — they do not
   // change when you zoom.
@@ -81,8 +88,7 @@ function MarketChart() {
     )
   }
 
-  const showPanes = expanded && panes
-  const priceHeight = expanded ? (showPanes ? 360 : 620) : COLLAPSED
+  const priceHeight = expanded ? 620 : COLLAPSED
 
   return (
     <Widget
@@ -113,24 +119,31 @@ function MarketChart() {
       {!err && !data && <Empty>loading…</Empty>}
       {!err && data && (
         <div className="relative px-[12px] pt-1">
-          <PriceChart
-            data={data}
-            dark={dark}
-            compact={!showPanes}
-            height={priceHeight}
-            series={type}
-            overlays={overlays}
-            scale={scale}
-            showIndicatorPanes={showPanes}
-            fundamentals={fundamentals}
-            metrics={metrics}
-            metricStyle={metricStyle}
-            drawings={drawings}
-            onDrawingsChange={setDrawings}
-            tool={drawOpen ? tool : "none"}
-            onToolDone={() => setTool("none")}
-            drawingsVisible={drawVisible}
-          />
+          <OhlcvStrip bar={hovered ?? data.bars[data.bars.length - 1] ?? null}
+                      live={hovered == null} symbol={data.symbol}
+                      first={data.bars[0] ?? null} at={hoverAt} />
+          <div className="relative">
+            <ChartCanvas
+              bars={data.bars}
+              kind={type}
+              scale={scale}
+              height={priceHeight}
+              volumeHeight={Math.round(priceHeight * 0.22)}
+              overlays={buildOverlays(data.bars, overlays)}
+              onProjection={setProjection}
+              onHover={(b, at) => { setHovered(b); setHoverAt(at) }}
+              {...theme}
+            />
+            <ChartDrawings
+              projection={projection}
+              tool={drawOpen ? tool : "none"}
+              onToolDone={() => setTool("none")}
+              drawings={drawings}
+              onChange={setDrawings}
+              visible={drawVisible}
+              height={priceHeight}
+            />
+          </div>
           {drawOpen && (
             <DrawingToolbar
               tool={tool} onTool={setTool}

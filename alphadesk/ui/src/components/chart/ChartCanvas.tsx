@@ -1,0 +1,355 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import type { ChartBar } from "@/lib/api"
+import {
+  indexToX, padRange, priceDecimals, priceTicks, priceToY,
+  visibleExtent, xToIndex, yToPrice, zoomAt, type Scale,
+} from "@/lib/chartScales"
+
+/** The chart renderer.
+ *
+ * Ours rather than a library's, and SVG rather than canvas, which is the same
+ * choice AlphaSpace made. The reason to own it is control: every axis label,
+ * every tick, the exact crosshair behaviour and the pane layout answer to this
+ * file instead of to another project's options object.
+ *
+ * PERFORMANCE — the thing that makes hand-rolled SVG charts fall over is one
+ * element per bar. At 6,937 daily bars that is 14,000 nodes and every pan
+ * re-lays-out the document. So candles are drawn as FOUR paths (up bodies, up
+ * wicks, down bodies, down wicks) built as strings, and volume as two. Node
+ * count is then constant no matter how much history is loaded.
+ *
+ * PROJECTION — `timeToCoordinate` and `priceToCoordinate` are exposed with the
+ * same shape the drawing layer already consumed from the previous library, so
+ * the ten drawing tools work against this renderer untouched.
+ */
+
+export type SeriesKind = "candles" | "line" | "area" | "bars"
+export type ScaleMode = "linear" | "log" | "percent"
+
+export type Projection = {
+  timeToCoordinate: (t: string) => number | null
+  priceToCoordinate: (p: number) => number | null
+  coordinateToTime: (x: number) => string | null
+  coordinateToPrice: (y: number) => number | null
+}
+
+const AXIS_W = 62      // right price gutter
+const AXIS_H = 22      // bottom time gutter
+
+export function ChartCanvas({
+  bars, kind, scale: scaleMode, height, volumeHeight = 0,
+  gain, loss, accent, grid, text,
+  onProjection, onHover, overlays = [],
+}: {
+  bars: ChartBar[]
+  kind: SeriesKind
+  scale: ScaleMode
+  height: number
+  /** Height of the volume band beneath the price pane. 0 hides it. */
+  volumeHeight?: number
+  gain: string
+  loss: string
+  accent: string
+  grid: string
+  text: string
+  /** Handed out on every layout change so annotations can project against it. */
+  onProjection?: (p: Projection | null) => void
+  onHover?: (bar: ChartBar | null, at: { x: number; y: number } | null) => void
+  /** Extra lines drawn over the price pane, already in price space. */
+  overlays?: { color: string; points: { t: string; v: number }[]; width?: number }[]
+}) {
+  const host = useRef<HTMLDivElement>(null)
+  const [box, setBox] = useState({ w: 0, h: height })
+  const [view, setView] = useState<{ from: number; to: number } | null>(null)
+  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null)
+  const drag = useRef<{ x: number; from: number; to: number } | null>(null)
+
+  useEffect(() => {
+    if (!host.current) return
+    const ro = new ResizeObserver(() => {
+      const r = host.current!.getBoundingClientRect()
+      setBox({ w: r.width, h: r.height })
+    })
+    ro.observe(host.current)
+    return () => ro.disconnect()
+  }, [])
+
+  // A new series resets the window to "everything", the way loading a symbol
+  // should — keeping a stale zoom across a range change strands the reader.
+  useEffect(() => { setView(bars.length ? { from: 0, to: bars.length } : null) }, [bars])
+
+  const priceH = Math.max(40, box.h - AXIS_H - volumeHeight)
+  const plotW = Math.max(10, box.w - AXIS_W)
+  const from = view?.from ?? 0
+  const to = view?.to ?? Math.max(1, bars.length)
+
+  const { min, max } = useMemo(() => {
+    const ext = visibleExtent(bars, from, to)
+    if (scaleMode !== "percent") return padRange(ext.min, ext.max)
+    // Percent rebases to the first visible bar, so two names of very different
+    // price can be compared on one axis.
+    const base = bars[Math.max(0, Math.floor(from))]?.c
+    if (!base) return padRange(ext.min, ext.max)
+    return padRange((ext.min / base - 1) * 100, (ext.max / base - 1) * 100)
+  }, [bars, from, to, scaleMode])
+
+  const s: Scale = { from, to, width: plotW, height: priceH, min, max }
+  const log = scaleMode === "log"
+  const base = bars[Math.max(0, Math.floor(from))]?.c ?? 1
+  const toDisplay = useCallback(
+    (p: number) => (scaleMode === "percent" ? (p / base - 1) * 100 : p), [scaleMode, base])
+  const fromDisplay = useCallback(
+    (v: number) => (scaleMode === "percent" ? base * (1 + v / 100) : v), [scaleMode, base])
+
+  const yOf = useCallback((price: number) => priceToY(s, toDisplay(price), log), [s, toDisplay, log])
+
+  // Index lookups for projection. Built once per series rather than scanned.
+  const indexByTime = useMemo(() => {
+    const m = new Map<string, number>()
+    bars.forEach((b, i) => m.set(b.t, i))
+    return m
+  }, [bars])
+
+  useEffect(() => {
+    if (!onProjection) return
+    if (!bars.length || !plotW) { onProjection(null); return }
+    onProjection({
+      timeToCoordinate: t => {
+        const i = indexByTime.get(t)
+        return i == null ? null : indexToX(s, i + 0.5)
+      },
+      priceToCoordinate: p => yOf(p),
+      coordinateToTime: x => {
+        const i = Math.round(xToIndex(s, x) - 0.5)
+        return bars[Math.max(0, Math.min(bars.length - 1, i))]?.t ?? null
+      },
+      coordinateToPrice: y => fromDisplay(yToPrice(s, y, log)),
+    })
+  }, [onProjection, bars, indexByTime, s, yOf, fromDisplay, log, plotW])
+
+  // ── interaction ─────────────────────────────────────────────────────────
+  const onWheel = (e: React.WheelEvent) => {
+    if (!view || !bars.length) return
+    e.preventDefault()
+    const r = host.current!.getBoundingClientRect()
+    const anchor = xToIndex(s, e.clientX - r.left)
+    setView(zoomAt(s, anchor, e.deltaY > 0 ? 1.15 : 1 / 1.15, bars.length))
+  }
+  const onDown = (e: React.MouseEvent) => {
+    if (!view) return
+    drag.current = { x: e.clientX, from: view.from, to: view.to }
+  }
+  const onMove = (e: React.MouseEvent) => {
+    const r = host.current!.getBoundingClientRect()
+    const x = e.clientX - r.left
+    const y = e.clientY - r.top
+    if (drag.current && view) {
+      const span = drag.current.to - drag.current.from
+      const shift = ((drag.current.x - e.clientX) / plotW) * span
+      setView({ from: drag.current.from + shift, to: drag.current.to + shift })
+      return
+    }
+    if (x > plotW || y > priceH) { setCursor(null); onHover?.(null, null); return }
+    setCursor({ x, y })
+    const i = Math.round(xToIndex(s, x) - 0.5)
+    onHover?.(bars[Math.max(0, Math.min(bars.length - 1, i))] ?? null, { x, y })
+  }
+  const stop = () => { drag.current = null }
+  const leave = () => { stop(); setCursor(null); onHover?.(null, null) }
+
+  // ── geometry, built as path strings ─────────────────────────────────────
+  const barW = Math.max(1, (plotW / Math.max(1, to - from)) * 0.7)
+  const half = barW / 2
+
+  const paths = useMemo(() => {
+    const upBody: string[] = [], downBody: string[] = []
+    const upWick: string[] = [], downWick: string[] = []
+    const line: string[] = []
+    const volUp: string[] = [], volDown: string[] = []
+    let volMax = 0
+    const lo = Math.max(0, Math.floor(from) - 1)
+    const hi = Math.min(bars.length - 1, Math.ceil(to) + 1)
+    for (let i = lo; i <= hi; i++) if (bars[i]?.v) volMax = Math.max(volMax, bars[i].v!)
+
+    for (let i = lo; i <= hi; i++) {
+      const b = bars[i]
+      if (!b) continue
+      const x = indexToX(s, i + 0.5)
+      if (x < -barW || x > plotW + barW) continue
+      const up = b.c >= b.o
+      const yO = yOf(b.o), yC = yOf(b.c), yH = yOf(b.h), yL = yOf(b.l)
+      if (kind === "candles" || kind === "bars") {
+        const wick = `M${x.toFixed(1)},${yH.toFixed(1)}L${x.toFixed(1)},${yL.toFixed(1)}`
+        ;(up ? upWick : downWick).push(wick)
+        if (kind === "candles") {
+          const top = Math.min(yO, yC)
+          const h = Math.max(1, Math.abs(yC - yO))
+          ;(up ? upBody : downBody).push(
+            `M${(x - half).toFixed(1)},${top.toFixed(1)}h${barW.toFixed(1)}v${h.toFixed(1)}h${(-barW).toFixed(1)}Z`)
+        } else {
+          // OHLC bars: ticks left for open, right for close.
+          ;(up ? upBody : downBody).push(
+            `M${(x - half).toFixed(1)},${yO.toFixed(1)}h${half.toFixed(1)}` +
+            `M${x.toFixed(1)},${yC.toFixed(1)}h${half.toFixed(1)}`)
+        }
+      } else {
+        line.push(`${line.length ? "L" : "M"}${x.toFixed(1)},${yC.toFixed(1)}`)
+      }
+      if (volumeHeight && volMax > 0 && b.v) {
+        const vh = (b.v / volMax) * (volumeHeight - 4)
+        const top = priceH + (volumeHeight - vh)
+        ;(up ? volUp : volDown).push(
+          `M${(x - half).toFixed(1)},${top.toFixed(1)}h${barW.toFixed(1)}v${vh.toFixed(1)}h${(-barW).toFixed(1)}Z`)
+      }
+    }
+    return {
+      upBody: upBody.join(""), downBody: downBody.join(""),
+      upWick: upWick.join(""), downWick: downWick.join(""),
+      line: line.join(""),
+      area: line.length ? `${line.join("")}L${plotW},${priceH}L${indexToX(s, lo + 0.5).toFixed(1)},${priceH}Z` : "",
+      volUp: volUp.join(""), volDown: volDown.join(""),
+    }
+  }, [bars, s, kind, yOf, barW, half, plotW, priceH, volumeHeight, from, to])
+
+  const ticks = priceTicks(min, max)
+  const decimals = priceDecimals(ticks.length > 1 ? Math.abs(ticks[1] - ticks[0]) : 1)
+  const last = bars[bars.length - 1]
+  const hovered = cursor ? bars[Math.max(0, Math.min(bars.length - 1, Math.round(xToIndex(s, cursor.x) - 0.5)))] : null
+
+  /** Time labels, thinned to whatever fits without collision. */
+  const timeTicks = useMemo(() => {
+    const out: { x: number; label: string }[] = []
+    const span = to - from
+    const stride = Math.max(1, Math.round(span / Math.max(2, Math.floor(plotW / 90))))
+    const daily = span > 400 || (bars.length > 1 &&
+      Date.parse(bars[bars.length - 1].t) - Date.parse(bars[bars.length - 2].t) >= 86_400_000)
+    for (let i = Math.max(0, Math.ceil(from)); i < Math.min(bars.length, to); i += stride) {
+      const d = new Date(bars[i].t)
+      out.push({
+        x: indexToX(s, i + 0.5),
+        label: daily
+          ? d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" })
+          : d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }),
+      })
+    }
+    return out
+  }, [bars, s, from, to, plotW])
+
+  return (
+    <div
+      ref={host}
+      className="relative w-full select-none"
+      style={{ height, cursor: drag.current ? "grabbing" : "crosshair" }}
+      onWheel={onWheel}
+      onMouseDown={onDown}
+      onMouseMove={onMove}
+      onMouseUp={stop}
+      onMouseLeave={leave}
+    >
+      <svg width="100%" height={height} className="block">
+        {/* horizontal grid + price axis */}
+        {ticks.map(v => {
+          const y = priceToY(s, v, log)
+          return (
+            <g key={v}>
+              <line x1={0} y1={y} x2={plotW} y2={y} stroke={grid} strokeWidth={1} />
+              <text x={plotW + 6} y={y + 3.5} fill={text} fontSize={11} className="tnum">
+                {scaleMode === "percent" ? `${v.toFixed(1)}%` : v.toFixed(decimals)}
+              </text>
+            </g>
+          )
+        })}
+
+        {/* vertical grid + time axis */}
+        {timeTicks.map((t, i) => (
+          <g key={i}>
+            <line x1={t.x} y1={0} x2={t.x} y2={priceH + volumeHeight} stroke={grid} strokeWidth={1} />
+            <text x={t.x} y={priceH + volumeHeight + 15} fill={text} fontSize={11} textAnchor="middle" className="tnum">
+              {t.label}
+            </text>
+          </g>
+        ))}
+
+        {/* volume band */}
+        {volumeHeight > 0 && (
+          <>
+            <path d={paths.volUp} fill={gain} fillOpacity={0.5} />
+            <path d={paths.volDown} fill={loss} fillOpacity={0.5} />
+          </>
+        )}
+
+        {/* the series */}
+        {kind === "area" && <path d={paths.area} fill={accent} fillOpacity={0.14} />}
+        {(kind === "line" || kind === "area") && (
+          <path d={paths.line} fill="none" stroke={accent} strokeWidth={1.5}
+            strokeLinejoin="round" strokeLinecap="round" />
+        )}
+        {(kind === "candles" || kind === "bars") && (
+          <>
+            <path d={paths.upWick} stroke={gain} strokeWidth={1} fill="none" />
+            <path d={paths.downWick} stroke={loss} strokeWidth={1} fill="none" />
+            {kind === "candles" ? (
+              <>
+                <path d={paths.upBody} fill={gain} />
+                <path d={paths.downBody} fill={loss} />
+              </>
+            ) : (
+              <>
+                <path d={paths.upBody} stroke={gain} strokeWidth={1.2} fill="none" />
+                <path d={paths.downBody} stroke={loss} strokeWidth={1.2} fill="none" />
+              </>
+            )}
+          </>
+        )}
+
+        {/* indicator overlays, in price space */}
+        {overlays.map((o, i) => {
+          const d = o.points.map((p, n) => {
+            const idx = indexByTime.get(p.t)
+            if (idx == null) return ""
+            return `${n === 0 ? "M" : "L"}${indexToX(s, idx + 0.5).toFixed(1)},${yOf(p.v).toFixed(1)}`
+          }).filter(Boolean).join("")
+          return <path key={i} d={d} fill="none" stroke={o.color} strokeWidth={o.width ?? 1} />
+        })}
+
+        {/* last price, tagged on the axis */}
+        {last && (
+          <g>
+            <line x1={0} y1={yOf(last.c)} x2={plotW} y2={yOf(last.c)}
+              stroke={accent} strokeWidth={1} strokeDasharray="2 3" />
+            <rect x={plotW + 2} y={yOf(last.c) - 8} width={AXIS_W - 4} height={16} fill={accent} rx={2} />
+            <text x={plotW + 6} y={yOf(last.c) + 3.5} fill="#fff" fontSize={11} className="tnum">
+              {(scaleMode === "percent" ? toDisplay(last.c) : last.c).toFixed(decimals)}
+            </text>
+          </g>
+        )}
+
+        {/* crosshair */}
+        {cursor && (
+          <g pointerEvents="none">
+            <line x1={cursor.x} y1={0} x2={cursor.x} y2={priceH + volumeHeight}
+              stroke={text} strokeWidth={1} strokeDasharray="3 3" />
+            <line x1={0} y1={cursor.y} x2={plotW} y2={cursor.y}
+              stroke={text} strokeWidth={1} strokeDasharray="3 3" />
+            <rect x={plotW + 2} y={cursor.y - 8} width={AXIS_W - 4} height={16} fill={text} rx={2} />
+            <text x={plotW + 6} y={cursor.y + 3.5} fill="#000" fontSize={11} className="tnum">
+              {yToPrice(s, cursor.y, log).toFixed(decimals)}
+            </text>
+            {hovered && (
+              <>
+                <rect x={cursor.x - 42} y={priceH + volumeHeight + 3} width={84} height={16} fill={text} rx={2} />
+                <text x={cursor.x} y={priceH + volumeHeight + 14.5} fill="#000" fontSize={11}
+                  textAnchor="middle" className="tnum">
+                  {new Date(hovered.t).toLocaleString("en-US", {
+                    timeZone: "America/New_York", month: "short", day: "numeric",
+                    hour: "numeric", minute: "2-digit",
+                  })}
+                </text>
+              </>
+            )}
+          </g>
+        )}
+      </svg>
+    </div>
+  )
+}

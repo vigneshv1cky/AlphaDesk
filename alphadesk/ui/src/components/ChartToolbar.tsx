@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { OVERLAYS, type OverlayId } from "@/lib/indicators"
-import type { ScaleMode, SeriesKind } from "@/components/PriceChart"
+import type { ScaleMode, SeriesKind } from "@/components/chart/ChartCanvas"
 import type { ChartRange, Fundamentals, MetricPeriod, MetricStyle } from "@/lib/api"
 
 /** The chart's controls: series type, range, scale, indicators, expand.

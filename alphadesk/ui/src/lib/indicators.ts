@@ -231,3 +231,54 @@ export const OVERLAYS: { id: OverlayId; label: string; color: string; group: str
   { id: "envelopes", label: "Price Envelopes (20, 2.5%)",            color: "#d6a35e", group: "Bands & channels" },
   { id: "vwap",      label: "VWAP",                                  color: "#f31260", group: "Volume" },
 ]
+
+
+/** Turn the chosen overlay ids into series the renderer can draw.
+ *
+ * The band indicators expand to several lines, so this returns a flat list
+ * rather than one entry per id — the renderer should not have to know which
+ * indicators happen to be multi-line.
+ */
+export function buildOverlays(
+  bars: ChartBar[], ids: OverlayId[],
+): { color: string; points: Point[]; width?: number }[] {
+  const out: { color: string; points: Point[]; width?: number }[] = []
+  const colourOf = (id: OverlayId) => OVERLAYS.find(o => o.id === id)!.color
+  const fade = (hex: string, a: number) => {
+    const n = hex.replace("#", "")
+    const v = parseInt(n.length === 3 ? n.split("").map(c => c + c).join("") : n, 16)
+    return `rgba(${(v >> 16) & 255}, ${(v >> 8) & 255}, ${v & 255}, ${a})`
+  }
+  for (const id of ids) {
+    const c = colourOf(id)
+    if (id === "sma20") out.push({ color: c, points: sma(bars, 20) })
+    else if (id === "sma50") out.push({ color: c, points: sma(bars, 50) })
+    else if (id === "ema20") out.push({ color: c, points: ema(bars, 20) })
+    else if (id === "ema50") out.push({ color: c, points: ema(bars, 50) })
+    else if (id === "wma20") out.push({ color: c, points: wma(bars, 20) })
+    else if (id === "dema20") out.push({ color: c, points: dema(bars, 20) })
+    else if (id === "tema20") out.push({ color: c, points: tema(bars, 20) })
+    else if (id === "vwap") out.push({ color: c, points: vwap(bars) })
+    else if (id === "bb") {
+      const b = bollinger(bars, 20, 2)
+      out.push({ color: fade(c, 0.75), points: b.upper },
+               { color: fade(c, 0.45), points: b.middle },
+               { color: fade(c, 0.75), points: b.lower })
+    } else if (id === "keltner") {
+      const k = keltner(bars, 20, 2)
+      out.push({ color: fade(c, 0.75), points: k.upper },
+               { color: fade(c, 0.45), points: k.middle },
+               { color: fade(c, 0.75), points: k.lower })
+    } else if (id === "envelopes") {
+      const e = envelopes(bars, 20, 2.5)
+      out.push({ color: fade(c, 0.75), points: e.upper },
+               { color: fade(c, 0.45), points: e.middle },
+               { color: fade(c, 0.75), points: e.lower })
+    } else if (id === "channel") {
+      const ch = priceChannel(bars, 20)
+      out.push({ color: fade(c, 0.75), points: ch.upper },
+               { color: fade(c, 0.75), points: ch.lower })
+    }
+  }
+  return out
+}
