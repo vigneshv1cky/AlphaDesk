@@ -1,28 +1,29 @@
 import { useSystem } from "@/lib/queries"
 
-/** Header readout — is data still arriving, and what has the AI cost today.
+/** Header readout.
  *
- * The old counters here (open positions, graded, win rate, total picks) were
- * measurement and went with the execution layer. The market-session cell went
- * later: this terminal reads crypto and futures too, so "CLOSED" was only ever
- * true of US equities and read as though the whole board had stopped. */
-function Cell({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex shrink-0 items-baseline gap-1 border-l border-border px-2 first:border-l-0">
-      <span className="text-[11px] uppercase tracking-[0.06em] text-muted-foreground">{label}</span>
-      <span className="num text-[14px] font-semibold">{value}</span>
-    </div>
-  )
-}
-
+ * Deliberately almost empty. This carried news/ai-calls/uptime counters, which
+ * are operator telemetry rather than market information — theirs carries view
+ * controls, and Health already reports all three. A market terminal's top bar
+ * should be about the market.
+ *
+ * What survives is a single staleness signal: if the news pipeline has gone
+ * quiet the board is showing you an old window, and that IS something a reader
+ * needs to know without going to look for it.
+ */
 export function Header() {
   const { data } = useSystem()
-  const news = data?.news
+  const last = data?.news.last_article_at
+  const stale = data ? !last || (Date.now() - new Date(last).getTime()) > 2 * 3600_000 : false
+  if (!stale) return null
   return (
-    <div className="flex items-center">
-      <Cell label="news" value={news ? String(news.articles_today) : "—"} />
-      <Cell label="ai calls" value={news ? String(news.calls_today) : "—"} />
-      <Cell label="up" value={data ? `${Math.floor(data.uptime_s / 3600)}h` : "—"} />
+    <div className="flex items-center px-2">
+      <span
+        className="border border-loss/40 px-1.5 py-[1px] text-[11px] font-medium text-loss"
+        title={last ? `last article ${new Date(last).toLocaleString()}` : "no articles ingested"}
+      >
+        news stale
+      </span>
     </div>
   )
 }

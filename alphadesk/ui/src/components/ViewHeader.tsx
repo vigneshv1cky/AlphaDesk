@@ -1,4 +1,5 @@
 import { useSearchParams } from "react-router-dom"
+import { SymbolSearch } from "@/components/SymbolSearch"
 
 /** The bar above the canvas: which view you are on, which symbol it is scoped
  * to, and the view-level action. AlphaSpace puts the symbol here as a
@@ -24,6 +25,7 @@ export function ViewHeader({ title }: { title: string }) {
         </span>
       )}
       <div className="flex-1" />
+      <SymbolSearch />
     </div>
   )
 }

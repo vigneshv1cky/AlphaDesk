@@ -367,6 +367,9 @@ export const api = {
   askScreener: (question: string) =>
     post<ScreenerAnswer>("/api/screener/ask", { question }),
   system: () => get<SystemInfo>("/api/system"),
+  search: (q: string) =>
+    get<{ results: { symbol: string; name: string | null }[] }>(
+      `/api/search?q=${encodeURIComponent(q)}`),
   earningsWeek: (start?: string) =>
     get<EarningsWeek>(`/api/earnings/week${start ? `?start=${start}` : ""}`),
   tape: () => get<{ tape: TapeEntry[] }>("/api/tape"),

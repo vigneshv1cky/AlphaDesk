@@ -184,6 +184,48 @@ def in_universe(symbol: str) -> bool:
     return symbol.upper() in (load_universe() or set())
 
 
+def search_symbols(query: str, limit: int = 12) -> list[dict]:
+    """Ticker/name search over the cached Alpaca asset list.
+
+    In-memory over ~13k entries, so no index and no endpoint round trip to a
+    vendor is warranted — a linear scan of that is microseconds and the list
+    only changes on the weekly universe refresh.
+
+    Ranked so an exact ticker wins, then ticker prefixes, then name matches.
+    Typing "AA" should offer AA before it offers every company with "aa"
+    somewhere in its name.
+    """
+    q = (query or "").strip().upper()
+    if not q:
+        return []
+    _load_names()
+    exact, prefix, name_hit = [], [], []
+    for sym, name in (_names or {}).items():
+        if sym == q:
+            exact.append((sym, name))
+        elif sym.startswith(q):
+            prefix.append((sym, name))
+        elif q in (name or "").upper():
+            name_hit.append((sym, name))
+    # Within name matches, a name that STARTS with the query is what was meant:
+    # "tesla" should offer TSLA before a 2x inverse ETF that merely has Tesla in
+    # its title, and "nvid" should offer NVDA. Shorter ticker breaks the tie,
+    # which favours the primary listing over its derivatives.
+    prefix.sort(key=lambda r: len(r[0]))
+    name_hit.sort(key=lambda r: (not (r[1] or "").upper().startswith(q), len(r[0])))
+    out = exact + prefix + name_hit
+    return [{"symbol": s_, "name": n or None} for s_, n in out[:limit]]
+
+
+def _load_names() -> None:
+    global _names
+    if _names is None:
+        try:
+            _names = json.loads(_NAMES_CACHE.read_text())
+        except Exception:
+            _names = {}
+
+
 def company_name(symbol: str) -> str | None:
     """Display name for a tradable symbol, from the cached asset list.
 
@@ -191,15 +233,10 @@ def company_name(symbol: str) -> str | None:
     whether a blank cell or a repeated ticker reads better, and repeating it
     would just be noise beside the symbol column.
     """
-    global _names
-    if _names is None:
-        try:
-            _names = json.loads(_NAMES_CACHE.read_text())
-        except Exception:
-            # Populated on the next universe refresh; until then every row
-            # simply has no name, which renders as an empty cell.
-            _names = {}
-    return _names.get(symbol.upper()) or None
+    # Populated on the next universe refresh; until then every row simply has
+    # no name, which renders as an empty cell.
+    _load_names()
+    return (_names or {}).get(symbol.upper()) or None
 
 
 # The index/commodity/crypto strip pinned across the top of the terminal.

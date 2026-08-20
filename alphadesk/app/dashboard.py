@@ -186,6 +186,18 @@ def api_quote(symbol: str):
     return q
 
 
+@app.get("/api/search")
+def api_search(q: str = "", limit: int = 12):
+    """Ticker/name search, so a symbol can be picked rather than typed exactly.
+
+    Served from the cached Alpaca asset list — no vendor round trip, and it
+    covers every symbol the terminal will actually accept, which a free-text
+    box cannot promise.
+    """
+    from alphadesk.config import search_symbols
+    return {"results": search_symbols(q, limit=max(1, min(limit, 50)))}
+
+
 @app.get("/api/movers")
 def api_movers(top: int = 20):
     """Most active / gainers / losers, filtered for tradeability."""
