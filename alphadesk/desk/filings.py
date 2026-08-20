@@ -14,7 +14,7 @@ appear in the SEC document survive.
 import hashlib
 import logging
 
-from alphadesk.ai.llm import LLMError, chat_json, wrap_data
+from alphadesk.ai.llm import LLMError, chat_json, model_name, wrap_data
 from alphadesk.config import FILING_MAX_CHARS
 from alphadesk.ingest import edgar
 from alphadesk.ledger import store
@@ -104,7 +104,7 @@ def ask(accession: str, question: str) -> dict | None:
     if not answer:
         return None
 
-    store.save_filing_qa(accession, qh, question, answer, citations, model="deepseek-chat")
+    store.save_filing_qa(accession, qh, question, answer, citations, model=model_name())
     return {"answer": answer, "citations": citations}
 
 

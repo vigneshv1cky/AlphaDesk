@@ -1,6 +1,6 @@
 """Research over one symbol — pre-fetches fundamentals, institutional
 ownership, insider trades, earnings history, macro conditions, and sector
-performance, then a SINGLE DeepSeek call synthesizes an answer (and a brief
+performance, then a SINGLE LLM call synthesizes an answer (and a brief
 suggestion) from exactly that data.
 
 Same shape as desk/filings.py: the server decides what data is relevant
@@ -16,7 +16,7 @@ import hashlib
 import json
 import logging
 
-from alphadesk.ai.llm import LLMError, chat_json, wrap_data
+from alphadesk.ai.llm import LLMError, chat_json, model_name, wrap_data
 from alphadesk.config import RESEARCH_CACHE_TTL_HOURS, RESEARCH_MAX_CHARS
 from alphadesk.ingest import insider
 from alphadesk.providers import get_prices
@@ -140,7 +140,7 @@ def ask(symbol: str, question: str) -> dict | None:
 
     try:
         out = chat_json(
-            _SYSTEM, user, role="research-agent", source=None, decision_id=f"{sym}:{qh}",
+            _SYSTEM, user, role="research-ask", source=None, decision_id=f"{sym}:{qh}",
             max_input_chars=RESEARCH_MAX_CHARS, max_tokens=1024,
         )
     except LLMError as exc:
@@ -153,5 +153,5 @@ def ask(symbol: str, question: str) -> dict | None:
     raw_citations = [c for c in (out.get("citations") or []) if isinstance(c, dict)]
     citations = _resolve_citations(raw_citations, sections)
 
-    store.save_research(sym, qh, question, answer, citations, sections, "deepseek-chat")
+    store.save_research(sym, qh, question, answer, citations, sections, model_name())
     return {"answer": answer, "citations": citations, "sections": sections}

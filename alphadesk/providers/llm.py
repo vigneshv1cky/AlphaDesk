@@ -39,6 +39,16 @@ def _post(url: str, payload: dict, headers: dict, timeout_s: float) -> dict:
         raise ProviderError(f"request failed: {exc}") from exc
 
 
+def _strip_fence(text: str) -> str:
+    """Unwrap a ```json fence if the model added one. Prompted JSON is not a
+    hard guarantee the way an API-level JSON mode is, and a fence is by far the
+    most common way it is broken."""
+    if not text.startswith("```"):
+        return text
+    body = text.split("\n", 1)[1] if "\n" in text else ""
+    return body.rsplit("```", 1)[0].strip() if "```" in body else body.strip()
+
+
 class OpenAICompatibleLLM:
     """Any endpoint speaking OpenAI's /chat/completions.
 
@@ -96,17 +106,34 @@ class AnthropicLLM:
 
     Config: LLM_API_KEY (or ANTHROPIC_API_KEY), LLM_MODEL, LLM_BASE_URL.
 
-    Anthropic has no `response_format`, so JSON is requested by prefilling the
-    assistant turn with `{`. That constrains the very first token, which is a
-    stronger guarantee than asking politely in the prompt — the reply is
-    then completed FROM that brace, so it is reattached below.
+    Three things here are not obvious, and two of them are load-bearing:
+
+    1. **No assistant prefill.** This used to force JSON by prefilling the
+       assistant turn with `{`. That is rejected with a 400 on every current
+       model, so the JSON contract is now carried by the prompt — which every
+       caller already states ("Return ONLY JSON: {...}"), reinforced below and
+       defended by `_strip_fence`. Anthropic's real structured-output feature
+       (`output_config.format`) needs a per-call JSON Schema, and `chat_json`
+       is deliberately schema-free: four call sites, four different shapes, one
+       transport. Adding schemas would mean changing the provider Protocol for
+       every provider to serve one of them.
+    2. **Thinking is on by default** on the current models and its tokens come
+       out of `max_tokens`. A caller asking for 1024 could spend all of it
+       thinking and return nothing, so effort is pinned low (this is
+       summarize-and-cite, not reasoning) and a floor is applied to the budget.
+    3. Sampling parameters (`temperature` and friends) are rejected outright on
+       current models, which is why none are sent.
     """
 
     name = "anthropic"
 
+    # Enough headroom that thinking tokens cannot starve the answer. The news
+    # path asks for 2048 and the ask paths for 1024-1536; all fit well inside.
+    _MIN_MAX_TOKENS = 4096
+
     def __init__(self) -> None:
         self.base_url = (os.environ.get("LLM_BASE_URL") or "https://api.anthropic.com").rstrip("/")
-        self.model = os.environ.get("LLM_MODEL") or "claude-sonnet-4-5"
+        self.model = os.environ.get("LLM_MODEL") or "claude-opus-5"
         self.api_key = (os.environ.get("LLM_API_KEY")
                         or os.environ.get("ANTHROPIC_API_KEY") or "").strip()
 
@@ -118,23 +145,30 @@ class AnthropicLLM:
             f"{self.base_url}/v1/messages",
             {
                 "model": self.model,
-                "system": system,
-                "max_tokens": max_tokens,
-                "messages": [
-                    {"role": "user", "content": user},
-                    {"role": "assistant", "content": "{"},
-                ],
+                "system": system + (
+                    "\n\nRespond with a single raw JSON object and nothing else — "
+                    "no prose before or after it, and no markdown code fence."
+                ),
+                "max_tokens": max(max_tokens, self._MIN_MAX_TOKENS),
+                "output_config": {"effort": "low"},
+                "messages": [{"role": "user", "content": user}],
             },
             {"x-api-key": self.api_key, "anthropic-version": "2023-06-01"},
             timeout_s,
         )
+        # A safety decline is an HTTP 200 with stop_reason "refusal" and no
+        # usable content — surface it as the failure it is rather than letting
+        # it fall through as "empty completion".
+        if data.get("stop_reason") == "refusal":
+            raise ProviderError("the model declined this request")
         parts = data.get("content") or []
-        text = "".join(p.get("text", "") for p in parts if isinstance(p, dict)).strip()
+        text = "".join(p.get("text", "") for p in parts
+                       if isinstance(p, dict) and p.get("type") == "text").strip()
         if not text:
             raise ProviderError("empty completion")
         usage = data.get("usage") or {}
         return ChatResult(
-            text="{" + text,        # reattach the prefill
+            text=_strip_fence(text),
             input_tokens=int(usage.get("input_tokens") or 0),
             output_tokens=int(usage.get("output_tokens") or 0),
             model=self.model,

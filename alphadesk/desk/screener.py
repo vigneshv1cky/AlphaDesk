@@ -26,7 +26,7 @@ import hashlib
 import logging
 from datetime import timedelta, timezone
 
-from alphadesk.ai.llm import LLMError, chat_json, wrap_data
+from alphadesk.ai.llm import LLMError, chat_json, model_name, wrap_data
 from alphadesk.config import (
     NEWS_LOOKBACK_HOURS,
     SCREENER_ASK_MAX_ARTICLES,
@@ -214,5 +214,5 @@ def ask(question: str) -> dict | None:
     raw = [c for c in (out.get("citations") or []) if isinstance(c, dict)]
     citations = _resolve_citations(raw, items)
 
-    store.save_digest(_ASK_CACHE_SYMBOL, h, answer, citations, model="deepseek-chat")
+    store.save_digest(_ASK_CACHE_SYMBOL, h, answer, citations, model=model_name())
     return {"answer": answer, "citations": citations, "considered": considered}

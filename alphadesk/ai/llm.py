@@ -47,6 +47,18 @@ class LLMError(Exception):
     """
 
 
+def model_name() -> str:
+    """The model actually serving calls right now, for stamping cache rows.
+
+    Providers expose `.model` where they have one; the provider name is the
+    fallback. Not a hardcoded vendor string: the three desk caches used to
+    write "deepseek-chat" literally, which was true of exactly one deployment
+    and a lie on every Anthropic or Ollama one.
+    """
+    provider = get_llm()
+    return getattr(provider, "model", "") or getattr(provider, "name", "?")
+
+
 def wrap_data(tag: str, text: str) -> str:
     """Delimit untrusted external text as data. Neutralises any nested
     delimiter case-insensitively, so a crafted `<DATA:...>` inside a headline
