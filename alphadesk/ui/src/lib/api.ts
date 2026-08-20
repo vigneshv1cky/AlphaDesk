@@ -178,6 +178,15 @@ export interface EarningsWeek {
   days: EarningsDay[]
 }
 
+/** One row of the symbol picker. Exchange and asset class come from the cached
+ * Alpaca asset list, so they describe what this terminal can actually render. */
+export interface SymbolHit {
+  symbol: string
+  name: string | null
+  exchange: string | null
+  asset_class: string | null
+}
+
 export interface TapeEntry {
   symbol: string
   label: string
@@ -368,8 +377,7 @@ export const api = {
     post<ScreenerAnswer>("/api/screener/ask", { question }),
   system: () => get<SystemInfo>("/api/system"),
   search: (q: string) =>
-    get<{ results: { symbol: string; name: string | null }[] }>(
-      `/api/search?q=${encodeURIComponent(q)}`),
+    get<{ results: SymbolHit[]; trending: boolean }>(`/api/search?q=${encodeURIComponent(q)}`),
   earningsWeek: (start?: string) =>
     get<EarningsWeek>(`/api/earnings/week${start ? `?start=${start}` : ""}`),
   tape: () => get<{ tape: TapeEntry[] }>("/api/tape"),

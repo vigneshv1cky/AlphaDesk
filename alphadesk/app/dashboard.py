@@ -194,8 +194,25 @@ def api_search(q: str = "", limit: int = 12):
     covers every symbol the terminal will actually accept, which a free-text
     box cannot promise.
     """
-    from alphadesk.config import search_symbols
-    return {"results": search_symbols(q, limit=max(1, min(limit, 50)))}
+    from alphadesk.config import search_symbols, symbol_meta
+    n = max(1, min(limit, 50))
+    if q.strip():
+        return {"results": search_symbols(q, limit=n), "trending": False}
+
+    # Empty query: offer what is actually moving rather than a hardcoded list.
+    # Most-active is the honest reading of "trending" from data this terminal
+    # already has — it is the same ranking the movers tile shows.
+    from alphadesk.providers import get_prices
+    try:
+        active = (get_prices().movers(top=n) or {}).get("most_active") or []
+    except Exception:
+        active = []
+    out = []
+    for row in active[:n]:
+        meta = symbol_meta(row["symbol"]) or {"symbol": row["symbol"], "name": row.get("name"),
+                                              "exchange": None, "asset_class": None}
+        out.append(meta)
+    return {"results": out, "trending": True}
 
 
 @app.get("/api/movers")

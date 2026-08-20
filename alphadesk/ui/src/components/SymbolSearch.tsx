@@ -1,44 +1,54 @@
 import { useEffect, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
-import { api } from "@/lib/api"
-import { fieldCls } from "@/components/terminal"
+import { api, type SymbolHit } from "@/lib/api"
 
 /** Pick the symbol the whole board is scoped to.
  *
- * Until this existed the only way to scope the board was to edit ?symbol= by
- * hand or click through from a movers row — the chart tile said "pick a
- * symbol" and offered no way to do it.
+ * Opened from a `+` beside the symbol chip, the way theirs is, rather than
+ * sitting in the header as a permanent input — the board is usually already
+ * scoped, and a search box you are not using is chrome.
  *
- * Searches the cached Alpaca asset list server-side, so it can only ever offer
- * symbols the terminal will actually accept. A free-text box would happily
- * take a ticker that resolves to nothing and leave every tile empty with no
+ * Results come from the cached Alpaca asset list server-side, so it can only
+ * ever offer symbols the terminal will actually render. A free-text box would
+ * take a ticker that resolves to nothing and leave every tile blank with no
  * explanation.
+ *
+ * Empty query shows what is currently most active. Theirs calls that "Trending
+ * Tickers"; this is the same idea sourced from data we actually have rather
+ * than a curated list we would have to invent.
  */
 export function SymbolSearch() {
   const [params, setParams] = useSearchParams()
-  const [q, setQ] = useState("")
-  const [results, setResults] = useState<{ symbol: string; name: string | null }[]>([])
   const [open, setOpen] = useState(false)
+  const [q, setQ] = useState("")
+  const [hits, setHits] = useState<SymbolHit[]>([])
+  const [trending, setTrending] = useState(true)
   const [active, setActive] = useState(0)
   const box = useRef<HTMLDivElement>(null)
+  const input = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { if (open) input.current?.focus() }, [open])
 
   useEffect(() => {
-    if (!q.trim()) { setResults([]); return }
-    // Debounced: a keystroke per character would be ~10 requests for "microsoft"
-    // and the last one is the only one whose answer is still wanted.
+    if (!open) return
+    // Debounced: a request per keystroke would be ten for "microsoft", and only
+    // the last one's answer is still wanted.
     const id = setTimeout(() => {
-      api.search(q).then(d => { setResults(d.results); setActive(0) }).catch(() => setResults([]))
-    }, 140)
+      api.search(q)
+        .then(d => { setHits(d.results); setTrending(d.trending); setActive(0) })
+        .catch(() => setHits([]))
+    }, q ? 140 : 0)
     return () => clearTimeout(id)
-  }, [q])
+  }, [q, open])
 
   useEffect(() => {
+    if (!open) return
     const away = (e: MouseEvent) => {
       if (box.current && !box.current.contains(e.target as Node)) setOpen(false)
     }
     document.addEventListener("mousedown", away)
     return () => document.removeEventListener("mousedown", away)
-  }, [])
+  }, [open])
 
   const pick = (symbol: string) => {
     const next = new URLSearchParams(params)
@@ -51,39 +61,74 @@ export function SymbolSearch() {
   }
 
   const onKey = (e: React.KeyboardEvent) => {
-    if (e.key === "ArrowDown") { e.preventDefault(); setActive(a => Math.min(a + 1, results.length - 1)) }
+    if (e.key === "ArrowDown") { e.preventDefault(); setActive(a => Math.min(a + 1, hits.length - 1)) }
     else if (e.key === "ArrowUp") { e.preventDefault(); setActive(a => Math.max(a - 1, 0)) }
-    else if (e.key === "Enter" && results[active]) { e.preventDefault(); pick(results[active].symbol) }
-    else if (e.key === "Escape") setOpen(false)
+    else if (e.key === "Enter" && hits[active]) { e.preventDefault(); pick(hits[active].symbol) }
+    else if (e.key === "Escape") { e.preventDefault(); setOpen(false) }
   }
 
   return (
     <div ref={box} className="relative">
-      <input
-        value={q}
-        onChange={e => { setQ(e.target.value); setOpen(true) }}
-        onFocus={() => setOpen(true)}
-        onKeyDown={onKey}
-        placeholder="Search symbol"
-        aria-label="Search for a symbol to scope this board"
-        className={`${fieldCls} w-[190px]`}
-      />
-      {open && results.length > 0 && (
-        <div className="absolute left-0 top-full z-50 mt-1 max-h-[320px] w-[320px] overflow-y-auto rounded-md border border-border bg-popover py-1 shadow-lg">
-          {results.map((r, i) => (
-            <button
-              key={r.symbol}
-              type="button"
-              onMouseEnter={() => setActive(i)}
-              onClick={() => pick(r.symbol)}
-              className={`flex w-full items-baseline gap-2 px-3 py-[5px] text-left ${
-                i === active ? "bg-muted" : ""
-              }`}
-            >
-              <span className="w-[64px] shrink-0 text-[14px] font-medium">{r.symbol}</span>
-              <span className="truncate text-[12px] text-muted-foreground">{r.name ?? ""}</span>
-            </button>
-          ))}
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-label="Add a symbol"
+        aria-expanded={open}
+        className={`flex h-[22px] w-[22px] items-center justify-center rounded-full border border-dashed text-[13px] transition-colors ${
+          open ? "border-accent text-accent" : "border-border text-muted-foreground hover:border-accent hover:text-accent"
+        }`}
+      >
+        +
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-2 w-[420px] overflow-hidden rounded-lg border border-border bg-popover shadow-xl">
+          <input
+            ref={input}
+            value={q}
+            onChange={e => setQ(e.target.value)}
+            onKeyDown={onKey}
+            placeholder="Search ticker or company…"
+            aria-label="Search ticker or company"
+            className="w-full border-b border-grid-line bg-transparent px-4 py-3 text-[14px] text-foreground outline-none placeholder:text-muted-foreground"
+          />
+          {trending && hits.length > 0 && (
+            <div className="px-4 pb-1 pt-3 text-[13px] font-semibold">Most active</div>
+          )}
+          <div className="max-h-[320px] overflow-y-auto">
+            {hits.length === 0 ? (
+              <p className="px-4 py-4 text-[13px] text-muted-foreground">
+                {q ? `Nothing tradable matches “${q}”.` : "No movers right now."}
+              </p>
+            ) : hits.map((h, i) => (
+              <button
+                key={h.symbol}
+                type="button"
+                onMouseEnter={() => setActive(i)}
+                onClick={() => pick(h.symbol)}
+                className={`flex w-full flex-col gap-0.5 border-b border-grid-line px-4 py-2 text-left last:border-b-0 ${
+                  i === active ? "bg-accent text-accent-foreground" : "hover:bg-muted"
+                }`}
+              >
+                <span className="flex items-baseline justify-between gap-3">
+                  <span className={`text-[14px] font-semibold ${i === active ? "" : "text-accent"}`}>
+                    {h.symbol}
+                  </span>
+                  <span className={`text-[12px] ${i === active ? "opacity-90" : "text-muted-foreground"}`}>
+                    {h.asset_class ?? ""}
+                  </span>
+                </span>
+                <span className="flex items-baseline justify-between gap-3">
+                  <span className={`truncate text-[13px] ${i === active ? "opacity-90" : "text-muted-foreground"}`}>
+                    {h.name ?? ""}
+                  </span>
+                  <span className={`shrink-0 text-[12px] ${i === active ? "opacity-90" : "text-muted-foreground"}`}>
+                    {h.exchange ?? ""}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>

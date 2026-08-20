@@ -131,11 +131,16 @@ def session(dt: datetime | None = None) -> str:
 # ── Universe ─────────────────────────────────────────────────────────────────
 
 _UNIVERSE_CACHE = DATA_DIR / "universe.json"
-# Company names ride along with the universe refresh: the asset list already
-# carries a name for every symbol and this used to throw it away, which is why
-# a movers row could only ever show a bare ticker. Separate file so the
-# universe cache keeps its existing shape (a plain list, read by in_universe).
-_NAMES_CACHE = DATA_DIR / "symbol_names.json"
+# Symbol metadata rides along with the universe refresh: the asset list already
+# carries a name, an exchange and an asset class for every symbol, and this
+# used to throw all three away — which is why a movers row could only show a
+# bare ticker. Separate file so the universe cache keeps its existing shape (a
+# plain list, read by in_universe).
+#
+# v2 filename because the shape changed from {symbol: name} to a dict per
+# symbol. A stale v1 file is simply ignored rather than mis-parsed; the next
+# refresh writes the new one.
+_NAMES_CACHE = DATA_DIR / "symbol_meta_v2.json"
 _UNIVERSE_MAX_AGE_S = 7 * 24 * 3600
 _universe: set[str] | None = None
 _names: dict[str, str] | None = None
@@ -150,11 +155,21 @@ def _fetch_universe_from_alpaca() -> list[str]:
         os.environ["ALPACA_API_KEY"], os.environ["ALPACA_SECRET_KEY"], paper=True))
     assets = client.get_all_assets(GetAssetsRequest(status=AssetStatus.ACTIVE, asset_class=AssetClass.US_EQUITY))
     tradable = [a for a in assets if not isinstance(a, str) and getattr(a, "tradable", False)]
+
+    def _val(x) -> str:
+        # The SDK hands back enums for exchange/class; their .value is the
+        # short code a reader recognises ("NASDAQ", "us_equity").
+        return str(getattr(x, "value", x) or "").strip()
+
     try:
-        _NAMES_CACHE.write_text(json.dumps(
-            {a.symbol: (getattr(a, "name", "") or "").strip() for a in tradable}))
-    except Exception as exc:                     # a missing name file is cosmetic
-        log.warning("could not cache symbol names: %s", exc)
+        _NAMES_CACHE.write_text(json.dumps({
+            a.symbol: {
+                "name": (getattr(a, "name", "") or "").strip(),
+                "exchange": _val(getattr(a, "exchange", "")),
+                "class": _val(getattr(a, "asset_class", "")),
+            } for a in tradable}))
+    except Exception as exc:                     # a missing meta file is cosmetic
+        log.warning("could not cache symbol metadata: %s", exc)
     return sorted({a.symbol for a in tradable})
 
 
@@ -184,23 +199,33 @@ def in_universe(symbol: str) -> bool:
     return symbol.upper() in (load_universe() or set())
 
 
+_CLASS_LABEL = {"us_equity": "Equity", "crypto": "Cryptocurrency",
+                "us_option": "Option", "crypto_perp": "Crypto perpetual"}
+
+
+def _row(sym: str, meta: dict) -> dict:
+    return {"symbol": sym, "name": meta.get("name") or None,
+            "exchange": meta.get("exchange") or None,
+            "asset_class": _CLASS_LABEL.get(meta.get("class", ""), meta.get("class") or None)}
+
+
 def search_symbols(query: str, limit: int = 12) -> list[dict]:
     """Ticker/name search over the cached Alpaca asset list.
 
-    In-memory over ~13k entries, so no index and no endpoint round trip to a
-    vendor is warranted — a linear scan of that is microseconds and the list
-    only changes on the weekly universe refresh.
+    In-memory over ~13k entries, so no index and no round trip to a vendor is
+    warranted — a linear scan of that is microseconds and the list only changes
+    on the weekly universe refresh.
 
     Ranked so an exact ticker wins, then ticker prefixes, then name matches.
-    Typing "AA" should offer AA before it offers every company with "aa"
-    somewhere in its name.
+    Typing "AA" should offer AA before every company with "aa" in its name.
     """
     q = (query or "").strip().upper()
     if not q:
         return []
     _load_names()
     exact, prefix, name_hit = [], [], []
-    for sym, name in (_names or {}).items():
+    for sym, meta in (_names or {}).items():
+        name = (meta or {}).get("name", "")
         if sym == q:
             exact.append((sym, name))
         elif sym.startswith(q):
@@ -214,16 +239,26 @@ def search_symbols(query: str, limit: int = 12) -> list[dict]:
     prefix.sort(key=lambda r: len(r[0]))
     name_hit.sort(key=lambda r: (not (r[1] or "").upper().startswith(q), len(r[0])))
     out = exact + prefix + name_hit
-    return [{"symbol": s_, "name": n or None} for s_, n in out[:limit]]
+    return [_row(s_, (_names or {}).get(s_) or {}) for s_, _n in out[:limit]]
 
 
 def _load_names() -> None:
     global _names
     if _names is None:
         try:
-            _names = json.loads(_NAMES_CACHE.read_text())
+            raw = json.loads(_NAMES_CACHE.read_text())
+            # Guard the shape: a v1 file (symbol -> string) would otherwise be
+            # read as metadata and every lookup would return nonsense.
+            _names = raw if all(isinstance(v, dict) for v in raw.values()) else {}
         except Exception:
             _names = {}
+
+
+def symbol_meta(symbol: str) -> dict | None:
+    """Everything cached about one symbol — name, exchange, asset class."""
+    _load_names()
+    meta = (_names or {}).get(symbol.upper())
+    return _row(symbol.upper(), meta) if meta else None
 
 
 def company_name(symbol: str) -> str | None:
@@ -236,7 +271,7 @@ def company_name(symbol: str) -> str | None:
     # Populated on the next universe refresh; until then every row simply has
     # no name, which renders as an empty cell.
     _load_names()
-    return (_names or {}).get(symbol.upper()) or None
+    return ((_names or {}).get(symbol.upper()) or {}).get("name") or None
 
 
 # The index/commodity/crypto strip pinned across the top of the terminal.

@@ -24,8 +24,8 @@ export function ViewHeader({ title }: { title: string }) {
             className="text-muted-foreground hover:text-foreground">✕</button>
         </span>
       )}
-      <div className="flex-1" />
       <SymbolSearch />
+      <div className="flex-1" />
     </div>
   )
 }
