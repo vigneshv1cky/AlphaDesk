@@ -51,6 +51,49 @@ function cssVar(name: string): string {
   return `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`
 }
 
+/** The card that follows the crosshair.
+ *
+ * Theirs shows the date and the symbol's change at that point. "Change" needs a
+ * baseline, and the honest one here is the FIRST BAR IN THE SERIES — the change
+ * across what you are actually looking at. Using the previous close would be a
+ * different claim, and one this component cannot check, since a range longer
+ * than a day has no single previous close.
+ *
+ * Flips to the left of the cursor near the right edge so it never leaves the
+ * pane, and never intercepts the mouse.
+ */
+function CrosshairCard({ bar, first, symbol, at, width }: {
+  bar: ChartBar
+  first: ChartBar | null
+  symbol: string
+  at: { x: number; y: number }
+  width: number
+}) {
+  const base = first?.c
+  const pct = base ? ((bar.c - base) / Math.abs(base)) * 100 : null
+  const up = (pct ?? 0) >= 0
+  const flip = at.x > width - 190
+  const when = new Date(bar.t).toLocaleString("en-US", {
+    timeZone: "America/New_York", month: "short", day: "numeric",
+    year: "numeric", hour: "numeric", minute: "2-digit",
+  })
+  return (
+    <div
+      className="pointer-events-none absolute z-20 rounded-md border border-border bg-popover/95 px-2.5 py-1.5 shadow-lg backdrop-blur"
+      style={{ left: flip ? at.x - 178 : at.x + 14, top: Math.max(4, at.y - 34) }}
+    >
+      <div className="text-[11px] text-muted-foreground">{when}</div>
+      <div className="flex items-center gap-1.5 text-[12px]">
+        <span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--accent)" }} />
+        <span className="font-medium">{symbol}</span>
+        <span className={`tnum ${pct == null ? "text-muted-foreground" : up ? "text-gain" : "text-loss"}`}>
+          {pct == null ? "—" : `${up ? "+" : ""}${pct.toFixed(2)}%`}
+        </span>
+      </div>
+    </div>
+  )
+}
+
 /** Drop a resolved rgb/rgba string to a given alpha. cssVar() always hands
  * back a concrete rgba() (it rasterizes to get there), so this only has to
  * handle that one shape. */
@@ -108,6 +151,8 @@ export function PriceChart({
   // Which bar the OHLCV strip describes. null = not hovering, and the strip
   // falls back to the most recent bar so it is never blank.
   const [hovered, setHovered] = useState<ChartBar | null>(null)
+  // Where the crosshair is, in pane pixels — the tooltip card follows it.
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null)
   // Held in state so the drawing overlay can project against the live chart.
   const [api, setApi] = useState<{ chart: IChartApi; series: ISeriesApi<SeriesType> } | null>(null)
   const lastBar = data.bars.length ? data.bars[data.bars.length - 1] : null
@@ -290,8 +335,9 @@ export function PriceChart({
     // matching the timestamps handed to setData above.
     const byTime = new Map<number, ChartBar>()
     idx.forEach(i => byTime.set(Date.parse(data.bars[i].t) / 1000, data.bars[i]))
-    const readoutHandler = (param: { time?: Time }) => {
+    const readoutHandler = (param: { time?: Time; point?: { x: number; y: number } }) => {
       setHovered(param.time ? byTime.get(param.time as number) ?? null : null)
+      setAt(param.time && param.point ? param.point : null)
     }
     priceChart.subscribeCrosshairMove(readoutHandler)
 
@@ -315,6 +361,15 @@ export function PriceChart({
             the container — and a bare div has none to measure. */}
         <div className="relative w-full">
           <div ref={priceRef} className="w-full" style={{ height }} />
+          {hovered && at && (
+            <CrosshairCard
+              bar={hovered}
+              first={data.bars[0] ?? null}
+              symbol={data.symbol}
+              at={at}
+              width={priceRef.current?.clientWidth ?? 0}
+            />
+          )}
           {onDrawingsChange && (
             <ChartDrawings
               chart={api?.chart ?? null}
@@ -337,6 +392,15 @@ export function PriceChart({
       <OhlcvStrip bar={readout} live={hovered == null} />
       <div className="relative w-full">
         <div ref={priceRef} className="w-full" style={{ height }} />
+        {hovered && at && (
+          <CrosshairCard
+            bar={hovered}
+            first={data.bars[0] ?? null}
+            symbol={data.symbol}
+            at={at}
+            width={priceRef.current?.clientWidth ?? 0}
+          />
+        )}
         {onDrawingsChange && (
           <ChartDrawings
             chart={api?.chart ?? null}
