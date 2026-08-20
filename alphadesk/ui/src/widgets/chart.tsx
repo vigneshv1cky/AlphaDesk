@@ -1,50 +1,50 @@
 import { useCallback, useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { api, type ChartSeries } from "@/lib/api"
-import { PriceChart } from "@/components/PriceChart"
+import { PriceChart, type SeriesKind } from "@/components/PriceChart"
+import { ChartToolbar } from "@/components/ChartToolbar"
 import { useIsDark } from "@/lib/theme"
 import { Empty, Widget } from "@/components/terminal"
 import { registerWidget } from "@/widgets/registry"
 import { TILE_BODY_HEIGHT } from "@/widgets/tile"
+import type { OverlayId } from "@/lib/indicators"
 
 /** The chart tile on the Markets board.
  *
- * Price and volume only. Their board runs this at 440px across two of three
- * columns, and at that height the RSI and MACD panes would be two 40px slivers
- * — worse than absent, because an indicator you cannot read still invites you
- * to read it. The full three-pane chart lives on Analysis.
+ * Scoped by ?symbol= like every other tile, so one chip re-points the chart,
+ * the quote panel and the AI rail together.
  *
- * Scoped by ?symbol= like every other tile, so one chip in the URL re-points
- * the chart, the quote panel and the AI rail together.
+ * Expanding takes the tile to the full width of the board and gives the price
+ * pane the height the indicator panes need — which is why RSI and MACD are
+ * only offered once expanded. At 440px they would be two 40px slivers, and an
+ * indicator you cannot read still invites you to read it.
  */
 
-const RANGES = [
-  { days: 1, label: "1D" },
-  { days: 2, label: "2D" },
-  { days: 5, label: "5D" },
-  { days: 10, label: "10D" },
-  { days: 30, label: "1M" },
-] as const
+const COLLAPSED = 318
 
 function MarketChart() {
   const dark = useIsDark()
   const [params] = useSearchParams()
   const symbol = (params.get("symbol") || "").toUpperCase()
+
   const [data, setData] = useState<ChartSeries | null>(null)
-  const [days, setDays] = useState(2)
   const [err, setErr] = useState<string | null>(null)
+  const [days, setDays] = useState(2)
+  const [type, setType] = useState<SeriesKind>("line")
+  const [logScale, setLogScale] = useState(false)
+  const [overlays, setOverlays] = useState<OverlayId[]>([])
+  const [panes, setPanes] = useState(false)
+  const [expanded, setExpanded] = useState(false)
 
   const load = useCallback((sym: string, d: number) => {
     if (!sym) return
     setErr(null)
-    api.chart(sym, d)
-      .then(setData)
-      .catch(e => { setData(null); setErr(String(e.message ?? e)) })
+    api.chart(sym, d).then(setData).catch(e => { setData(null); setErr(String(e.message ?? e)) })
   }, [])
 
   // eslint-disable-next-line react-hooks/exhaustive-deps -- follow the scoped
-  // symbol, not this component's own identity
-  useEffect(() => { setData(null); load(symbol, days) }, [symbol])
+  // symbol and the chosen range, not this component's own identity
+  useEffect(() => { setData(null); load(symbol, days) }, [symbol, days])
 
   if (!symbol) {
     return (
@@ -54,40 +54,40 @@ function MarketChart() {
     )
   }
 
+  const showPanes = expanded && panes
+  const priceHeight = expanded ? (showPanes ? 360 : 620) : COLLAPSED
+
   return (
     <Widget
-      span={8}
+      span={expanded ? 12 : 8}
       symbol={symbol}
       title="Chart"
       subtitle={data ? `${data.bar_count} bars · ${data.sessions} sessions` : undefined}
-      scroll={TILE_BODY_HEIGHT}
+      scroll={expanded ? undefined : TILE_BODY_HEIGHT}
     >
-      <div className="flex flex-wrap items-center gap-px border-b border-grid-line px-[12px] py-1">
-        {RANGES.map(r => (
-          <button
-            key={r.days}
-            type="button"
-            onClick={() => { setDays(r.days); load(symbol, r.days) }}
-            className={`px-2 py-[3px] text-[12px] tabular-nums transition-colors ${
-              days === r.days
-                ? "bg-accent/15 font-semibold text-accent"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
-            }`}
-          >
-            {r.label}
-          </button>
-        ))}
-        {data && !data.indicators_reliable && (
-          <span className="ml-2 text-[12px] text-muted-foreground">
-            sparse feed — price only
-          </span>
-        )}
-      </div>
+      <ChartToolbar
+        type={type} onType={setType}
+        days={days} onDays={setDays}
+        logScale={logScale} onLogScale={setLogScale}
+        overlays={overlays} onOverlays={setOverlays}
+        panes={panes} onPanes={setPanes}
+        expanded={expanded} onExpand={() => setExpanded(e => !e)}
+        indicatorsReliable={data?.indicators_reliable ?? false}
+      />
       {err && <Empty>{err}</Empty>}
       {!err && !data && <Empty>loading…</Empty>}
       {!err && data && (
         <div className="px-[12px] pt-1">
-          <PriceChart data={data} dark={dark} compact height={318} series="line" />
+          <PriceChart
+            data={data}
+            dark={dark}
+            compact={!showPanes}
+            height={priceHeight}
+            series={type}
+            overlays={overlays}
+            logScale={logScale}
+            showIndicatorPanes={showPanes}
+          />
         </div>
       )}
     </Widget>

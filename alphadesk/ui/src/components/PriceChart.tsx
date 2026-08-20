@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
+  AreaSeries,
+  BarSeries,
   CandlestickSeries,
   createChart,
   HistogramSeries,
@@ -8,6 +10,7 @@ import {
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts"
+import { bollinger, ema, OVERLAYS, sma, vwap, type OverlayId } from "@/lib/indicators"
 import type { ChartBar, ChartSeries } from "@/lib/api"
 
 // Distinct accent colors for RSI/MACD/signal — these read fine on both
@@ -60,7 +63,12 @@ function fade(color: string, alpha: number): string {
  * `indicators_reliable` in api.ts. A MACD computed on 61 prints spread across
  * five sessions renders exactly like one computed on 1,950 real minute bars,
  * and the whole point of this app is to not fool its own operator. */
-export function PriceChart({ data, dark, compact = false, height = 320, series = "candles" }: {
+export type SeriesKind = "candles" | "line" | "area" | "bars"
+
+export function PriceChart({
+  data, dark, compact = false, height = 320, series = "candles",
+  overlays = [], logScale = false, showIndicatorPanes = true,
+}: {
   data: ChartSeries
   dark: boolean
   /** Price and volume only — no RSI or MACD panes. Their markets tile is
@@ -71,7 +79,16 @@ export function PriceChart({ data, dark, compact = false, height = 320, series =
   /** "line" matches their board exactly — measured: a 1.5px stroke in the
    * accent blue with no fill. Candles carry more per bar and stay the default
    * on Analysis, where the chart is the point rather than one tile of six. */
-  series?: "candles" | "line"
+  series?: SeriesKind
+  /** Overlays drawn on the price pane. Chosen, not fixed: the RSI/MACD panes
+   * were hardcoded because the retired strategy read them, and a general
+   * chart lets the reader pick what to see. */
+  overlays?: OverlayId[]
+  /** Log price scale. Meaningful over months, noise intraday — offered rather
+   * than assumed. */
+  logScale?: boolean
+  /** Show the RSI and MACD panes. Ignored in compact mode, which has no room. */
+  showIndicatorPanes?: boolean
 }) {
   const priceRef = useRef<HTMLDivElement>(null)
   const rsiRef = useRef<HTMLDivElement>(null)
@@ -99,7 +116,7 @@ export function PriceChart({ data, dark, compact = false, height = 320, series =
     const base = {
       layout: { background: { color: "transparent" }, textColor: text, attributionLogo: false },
       grid: { vertLines: { color: grid }, horzLines: { color: grid } },
-      rightPriceScale: { borderColor: grid },
+      rightPriceScale: { borderColor: grid, mode: logScale ? 1 : 0 },
       timeScale: { borderColor: grid, timeVisible: true, secondsVisible: false },
       autoSize: true,
     }
@@ -119,14 +136,20 @@ export function PriceChart({ data, dark, compact = false, height = 320, series =
     })
 
     const priceChart = createChart(priceRef.current, { ...base, height })
-    if (series === "line") {
-      const line = priceChart.addSeries(LineSeries, {
-        color: cssVar("--accent"),
-        lineWidth: 2,          // the API takes whole pixels; theirs is 1.5
-        priceLineVisible: true,
-        lastValueVisible: true,
-      })
+    const accent = cssVar("--accent")
+    if (series === "line" || series === "area") {
+      const kind = series === "area" ? AreaSeries : LineSeries
+      const opts = series === "area"
+        ? { lineColor: accent, topColor: fade(accent, 0.28), bottomColor: fade(accent, 0.02), lineWidth: 2 as const }
+        : { color: accent, lineWidth: 2 as const }
+      const line = priceChart.addSeries(kind, opts)
       line.setData(idx.map(i => ({ time: t(data.bars[i].t), value: data.bars[i].c })))
+    } else if (series === "bars") {
+      const bars = priceChart.addSeries(BarSeries, { upColor: gain, downColor: loss })
+      bars.setData(idx.map(i => {
+        const b = data.bars[i]
+        return { time: t(b.t), open: b.o, high: b.h, low: b.l, close: b.c }
+      }))
     } else {
       const candles = priceChart.addSeries(CandlestickSeries, {
         upColor: gain, downColor: loss,
@@ -136,6 +159,32 @@ export function PriceChart({ data, dark, compact = false, height = 320, series =
         const b = data.bars[i]
         return { time: t(b.t), open: b.o, high: b.h, low: b.l, close: b.c }
       }))
+    }
+
+    // Chosen overlays, drawn over the price series. Each is computed from the
+    // bars already on screen (lib/indicators) — no round trip on a toggle.
+    if (overlays.length) {
+      const visible = idx.map(i => data.bars[i])
+      const add = (points: { t: string; v: number }[], color: string, width: 1 | 2 = 1) => {
+        const line = priceChart.addSeries(LineSeries, {
+          color, lineWidth: width, priceLineVisible: false, lastValueVisible: false,
+          crosshairMarkerVisible: false,
+        })
+        line.setData(points.map(p => ({ time: t(p.t), value: p.v })))
+      }
+      const colorOf = (id: OverlayId) => OVERLAYS.find(o => o.id === id)!.color
+      for (const id of overlays) {
+        if (id === "sma20") add(sma(visible, 20), colorOf(id))
+        else if (id === "sma50") add(sma(visible, 50), colorOf(id))
+        else if (id === "ema20") add(ema(visible, 20), colorOf(id))
+        else if (id === "vwap") add(vwap(visible), colorOf(id))
+        else if (id === "bb") {
+          const b = bollinger(visible, 20, 2)
+          add(b.upper, fade(colorOf(id), 0.75))
+          add(b.middle, fade(colorOf(id), 0.45))
+          add(b.lower, fade(colorOf(id), 0.75))
+        }
+      }
     }
 
     // Volume as an overlay in the price pane's bottom fifth, the way every
@@ -165,7 +214,7 @@ export function PriceChart({ data, dark, compact = false, height = 320, series =
     const macdChart = compact ? null : createChart(macdRef.current!, { ...base, height: 120 })
     const charts: IChartApi[] = [priceChart, rsiChart, macdChart].filter(Boolean) as IChartApi[]
 
-    if (!compact && rsiChart && macdChart && data.indicators_reliable) {
+    if (!compact && showIndicatorPanes && rsiChart && macdChart && data.indicators_reliable) {
       const rsi = rsiChart.addSeries(LineSeries, { color: RSI_COLOR, lineWidth: 2 })
       rsi.setData(idx.filter(i => data.rsi_9[i] != null)
         .map(i => ({ time: t(data.bars[i].t), value: data.rsi_9[i] as number })))
@@ -234,7 +283,7 @@ export function PriceChart({ data, dark, compact = false, height = 320, series =
       crosshairs.forEach(c => c.src.unsubscribeCrosshairMove(c.handler))
       charts.forEach(c => c.remove())
     }
-  }, [data, dark, compact, height, series])
+  }, [data, dark, compact, height, series, overlays, logScale, showIndicatorPanes])
 
   if (compact) {
     return (
