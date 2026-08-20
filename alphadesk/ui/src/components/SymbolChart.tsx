@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useState } from "react"
-import { useSearchParams } from "react-router-dom"
 import { api, type ChartSeries } from "@/lib/api"
 import { PriceChart } from "@/components/PriceChart"
 import { useIsDark } from "@/lib/theme"
-import { Badge, Btn, Widget, fieldCls } from "@/components/terminal"
+import { Badge, Widget } from "@/components/terminal"
 
-/** The chart surface: candles, volume, RSI and MACD over one symbol.
+/** Candles, volume, RSI and MACD for one symbol.
  *
- * Accepts ?symbol=XYZ so the Screener page can hand off a candidate directly
- * — "here's where to look" (Screener) → "now look at it" (this page) is meant
- * to be one click, not a re-typed ticker.
+ * The symbol is a prop rather than page state: Analysis owns one input that
+ * scopes every panel on it, so two panels can never disagree about which
+ * company you are looking at.
  *
  * Ranges stop at one month because the series underneath is INTRADAY bars
  * from the minute feed, which only reaches ~30 days. Offering 3M/1Y/MAX here
@@ -25,12 +24,9 @@ const RANGES = [
   { days: 30, label: "1M" },
 ] as const
 
-export default function ChartPage() {
+export function SymbolChart({ symbol: requested }: { symbol: string }) {
   const dark = useIsDark()
-  const [params] = useSearchParams()
-  const initial = (params.get("symbol") || "AAPL").toUpperCase()
   const [symbol, setSymbol] = useState("")
-  const [query, setQuery] = useState(initial)
   const [data, setData] = useState<ChartSeries | null>(null)
   const [days, setDays] = useState(2)
   const [err, setErr] = useState<string | null>(null)
@@ -46,36 +42,24 @@ export default function ChartPage() {
       .finally(() => setLoading(false))
   }, [])
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-run when the URL's
-  // ?symbol= changes (a fresh handoff from Screener), not on every `load` identity change
-  useEffect(() => { load(initial, 2) }, [initial])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run when the
+  // requested symbol changes, not on every `load` identity change
+  useEffect(() => { if (requested) load(requested, days) }, [requested])
 
   return (
-    <div className="collage">
       <Widget
         span={12}
         title="Chart"
         subtitle="candles + volume + RSI-9 + MACD · indicators hide themselves when the feed is too sparse to trust"
       >
-      <form
-        className="flex flex-wrap items-center gap-1.5 border-b border-border p-1"
-        onSubmit={e => { e.preventDefault(); load(query.trim().toUpperCase(), days) }}
-      >
-        <input
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          placeholder="Symbol"
-          className={`${fieldCls} w-24 font-mono uppercase`}
-        />
-        <Btn type="submit" variant="accent" disabled={loading}>
-          {loading ? "Loading…" : "Load"}
-        </Btn>
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-border p-1">
+        {loading && <span className="px-1 text-[11px] text-muted-foreground">loading…</span>}
         <div className="flex items-center gap-px">
           {RANGES.map(r => (
             <button
               key={r.days}
               type="button"
-              onClick={() => { setDays(r.days); load(symbol || query, r.days) }}
+              onClick={() => { setDays(r.days); load(symbol || requested, r.days) }}
               className={`px-2 py-[3px] text-[11px] tabular-nums transition-colors ${
                 days === r.days
                   ? "bg-accent/15 font-semibold text-accent"
@@ -87,7 +71,7 @@ export default function ChartPage() {
           ))}
         </div>
         {err && <span className="text-[11px] text-loss">{err}</span>}
-      </form>
+      </div>
 
       {data && (
         <>
@@ -100,7 +84,6 @@ export default function ChartPage() {
         </>
       )}
       </Widget>
-    </div>
   )
 }
 

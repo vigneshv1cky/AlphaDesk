@@ -10,17 +10,17 @@ import { Moon, Monitor, Sun } from "lucide-react"
 
 // Lazy routes — each page is its own chunk, so it loads like a real page.
 const DashboardPage = lazy(() => import("@/pages/DashboardPage"))
-const ScreenerPage = lazy(() => import("@/pages/ScreenerPage"))
-const FilingsPage = lazy(() => import("@/pages/FilingsPage"))
-const ChartPage = lazy(() => import("@/pages/ChartPage"))
+const NewsPage = lazy(() => import("@/pages/NewsPage"))
+const AnalysisPage = lazy(() => import("@/pages/AnalysisPage"))
+const PortfolioPage = lazy(() => import("@/pages/PortfolioPage"))
 const EarningsPage = lazy(() => import("@/pages/EarningsPage"))
 const SystemPage = lazy(() => import("@/pages/SystemPage"))
 
 const TITLES: Record<string, string> = {
-  "/dashboard": "Dashboard · AlphaDesk",
-  "/screener": "Screener · AlphaDesk",
-  "/filings": "Filings · AlphaDesk",
-  "/chart": "Chart · AlphaDesk",
+  "/markets": "Markets · AlphaDesk",
+  "/analysis": "Analysis · AlphaDesk",
+  "/news": "News · AlphaDesk",
+  "/portfolio": "My Portfolio · AlphaDesk",
   "/earnings": "Earnings · AlphaDesk",
   "/system": "System Health · AlphaDesk",
 }
@@ -57,6 +57,14 @@ function MarketClock() {
       )}
     </div>
   )
+}
+
+/** A redirect that keeps ?symbol= / ?accession=. A bare <Navigate> would drop
+ * the query, so an old /chart?symbol=NVDA link would land on Analysis showing
+ * the default company instead of the one that was linked. */
+function RedirectKeepingQuery({ to }: { to: string }) {
+  const { search } = useLocation()
+  return <Navigate to={`${to}${search}`} replace />
 }
 
 function Shell() {
@@ -102,19 +110,24 @@ function Shell() {
         <div>
           <Suspense fallback={<div className="p-2 text-[11px] text-muted-foreground">loading…</div>}>
             <Routes>
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<DashboardPage />} />
-              <Route path="/screener" element={<ScreenerPage />} />
-              <Route path="/filings" element={<FilingsPage />} />
-              {/* /research was nothing but an ask form; the AI rail's Symbol
-                  mode is that same call, available from every route. Kept as a
-                  redirect so old links and bookmarks still land somewhere. */}
-              <Route path="/research" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/chart" element={<ChartPage />} />
-              <Route path="/trade" element={<Navigate to="/chart" replace />} />
+              <Route path="/" element={<Navigate to="/markets" replace />} />
+              <Route path="/markets" element={<DashboardPage />} />
+              <Route path="/analysis" element={<AnalysisPage />} />
+              <Route path="/news" element={<NewsPage />} />
+              <Route path="/portfolio" element={<PortfolioPage />} />
               <Route path="/earnings" element={<EarningsPage />} />
               <Route path="/system" element={<SystemPage />} />
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+              {/* Old paths, kept as redirects so links and bookmarks still
+                  land somewhere. /chart and /filings merged into Analysis and
+                  carry their ?symbol= across; /research was only ever an ask
+                  form, and the rail does that from every route now. */}
+              <Route path="/dashboard" element={<Navigate to="/markets" replace />} />
+              <Route path="/screener" element={<Navigate to="/news" replace />} />
+              <Route path="/chart" element={<RedirectKeepingQuery to="/analysis" />} />
+              <Route path="/filings" element={<RedirectKeepingQuery to="/analysis" />} />
+              <Route path="/trade" element={<RedirectKeepingQuery to="/analysis" />} />
+              <Route path="/research" element={<RedirectKeepingQuery to="/analysis" />} />
+              <Route path="*" element={<Navigate to="/markets" replace />} />
             </Routes>
           </Suspense>
         </div>

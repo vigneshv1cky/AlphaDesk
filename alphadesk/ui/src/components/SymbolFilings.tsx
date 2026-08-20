@@ -1,15 +1,15 @@
 import { useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { api, type FilingRow } from "@/lib/api"
-import { Badge, Btn, Empty, Widget, fieldCls } from "@/components/terminal"
+import { Badge, Empty, Widget } from "@/components/terminal"
 
-/** SEC filings, straight from EDGAR — free, no vendor, no API key. Pick a
- * filing, ask it a question. Every answer is backed only by verbatim quotes
- * checked against the actual document text server-side; the model can't
- * fabricate a citation that doesn't literally appear in the SEC filing. */
-export default function FilingsPage() {
+/** SEC filings for one symbol, straight from EDGAR — free, no vendor, no API
+ * key. Pick a filing, then ask it something in the AI rail: every answer is
+ * backed only by verbatim quotes checked against the actual document text
+ * server-side, so the model cannot fabricate a citation that does not
+ * literally appear in the filing. */
+export function SymbolFilings({ symbol: requested }: { symbol: string }) {
   const [params, setParams] = useSearchParams()
-  const [query, setQuery] = useState((params.get("symbol") || "AAPL").toUpperCase())
   const [symbol, setSymbol] = useState("")
   const [filings, setFilings] = useState<FilingRow[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -27,30 +27,22 @@ export default function FilingsPage() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { load(query) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- follow the symbol
+  // Analysis is scoped to, not this component's own identity
+  useEffect(() => { if (requested) load(requested) }, [requested])
 
   return (
-    <div className="collage">
       <Widget
         span={12}
         title="Filings"
         subtitle="SEC EDGAR direct — every answer is a verbatim quote from the document, never a paraphrase passed off as fact"
       >
-      <form
-        className="flex flex-wrap items-center gap-1.5 border-b border-border p-1"
-        onSubmit={e => { e.preventDefault(); load(query.trim().toUpperCase()) }}
-      >
-        <input
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          placeholder="Symbol"
-          className={`${fieldCls} w-24 font-mono uppercase`}
-        />
-        <Btn type="submit" variant="accent" disabled={loading}>
-          {loading ? "Loading…" : "Load"}
-        </Btn>
-        {err && <span className="text-[11px] text-loss">{err}</span>}
-      </form>
+      {(loading || err) && (
+        <div className="border-b border-border p-1 text-[11px]">
+          {loading && <span className="text-muted-foreground">loading…</span>}
+          {err && <span className="text-loss">{err}</span>}
+        </div>
+      )}
 
       {filings && (
         <div className="grid lg:grid-cols-[220px_1fr]">
@@ -91,7 +83,6 @@ export default function FilingsPage() {
         </div>
       )}
       </Widget>
-    </div>
   )
 }
 

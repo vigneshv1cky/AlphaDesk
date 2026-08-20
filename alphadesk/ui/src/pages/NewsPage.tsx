@@ -12,7 +12,7 @@ import { WindowTable } from "@/components/WindowTable"
  * The AI is NOT on this page. Asking moved to the rail (components/AiRail),
  * which reaches the same window-wide call from any route — so the question box
  * no longer has to live on the page whose data it happens to read. */
-export default function ScreenerPage() {
+export default function NewsPage() {
   const { data, error } = useScreener()
   const rows = data?.symbols ?? null
   const err = error ? String(error.message ?? error) : null
@@ -24,7 +24,7 @@ export default function ScreenerPage() {
     <div className="collage">
       <Widget
         span={12}
-        title="Window"
+        title="News window"
         subtitle={
           rows === null
             ? "loading…"

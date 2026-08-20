@@ -1,6 +1,6 @@
 import { NavLink } from "react-router-dom"
 import {
-  Activity, BarChart3, CalendarDays, FileText, LineChart, Newspaper, Wrench,
+  Activity, CalendarDays, LineChart, Newspaper, Star, Wrench,
 } from "lucide-react"
 
 /** Left rail — sectioned, icon-led, with an identity card pinned to the
@@ -11,16 +11,18 @@ import {
  * for by the ticker strip, and a list grows without wrapping.
  */
 const VIEWS = [
-  { to: "/dashboard", label: "Markets", Icon: Activity },
-  { to: "/screener", label: "Screener", Icon: BarChart3 },
-  { to: "/chart", label: "Charts", Icon: LineChart },
+  { to: "/markets", label: "Markets", Icon: Activity },
+  // Analysis is the one-company surface — chart AND filings, sharing a single
+  // symbol. They used to be separate routes with separate inputs, which let
+  // the terminal show one company's chart beside another's 10-K.
+  { to: "/analysis", label: "Analysis", Icon: LineChart },
+  { to: "/news", label: "News", Icon: Newspaper },
+  { to: "/portfolio", label: "My Portfolio", Icon: Star },
   { to: "/earnings", label: "Earnings Hub", Icon: CalendarDays },
-  { to: "/filings", label: "Filings", Icon: FileText },
-  { to: "/system", label: "Health", Icon: Wrench },
 ]
 
-/** Themes are pre-set symbol groups. They deep-link into the screener filter
- * rather than being a separate surface — the same list, narrowed. */
+/** Themes are pre-set symbol groups. They deep-link into the news window's
+ * filter rather than being a separate surface — the same list, narrowed. */
 const THEMES = [
   { q: "NVDA", label: "AI & Semis", Icon: Newspaper },
   { q: "AAPL", label: "Mega Cap", Icon: Newspaper },
@@ -68,7 +70,7 @@ export function Sidebar() {
         {THEMES.map(({ q, label, Icon }) => (
           <NavLink
             key={label}
-            to={`/screener?q=${encodeURIComponent(q)}`}
+            to={`/news?q=${encodeURIComponent(q)}`}
             className="mx-2 flex items-center gap-2.5 rounded-md px-2 py-[7px] text-[12px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
           >
             <Icon className="h-[15px] w-[15px] shrink-0" />
@@ -80,6 +82,17 @@ export function Sidebar() {
       <div className="flex-1" />
 
       <div className="border-t border-border p-3">
+        <NavLink
+          to="/system"
+          className={({ isActive }) =>
+            `mb-2 flex items-center gap-2 text-[11px] transition-colors ${
+              isActive ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+            }`
+          }
+        >
+          <Wrench className="h-[13px] w-[13px] shrink-0" />
+          Health
+        </NavLink>
         <div className="text-[10px] leading-relaxed text-muted-foreground/60">
           Consumption terminal · no positions, no orders.
         </div>
