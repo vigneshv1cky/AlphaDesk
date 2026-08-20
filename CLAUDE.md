@@ -97,6 +97,9 @@ mcp_server.py  the same data as 11 read-only MCP tools. The *_ask tools return
                their citations, so an agent inherits the verification rather
                than reproducing it. Read-only by construction — there is no
                write surface to expose.
+net.py         socket deadlines for alpaca-py, which ships without any. Every
+               endpoint here is a sync def on a 40-worker threadpool, so an
+               unbounded upstream parks workers rather than failing.
 main.py        two ingest loops (news, earnings) + the web server
 ui/            React 19 + Vite. Dense terminal styling, NO component library —
                hand-rolled primitives in components/terminal.tsx. Dashboard

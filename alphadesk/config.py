@@ -139,7 +139,9 @@ def _fetch_universe_from_alpaca() -> list[str]:
     from alpaca.trading.client import TradingClient
     from alpaca.trading.enums import AssetClass, AssetStatus
     from alpaca.trading.requests import GetAssetsRequest
-    client = TradingClient(os.environ["ALPACA_API_KEY"], os.environ["ALPACA_SECRET_KEY"], paper=True)
+    from alphadesk.net import bound_timeout
+    client = bound_timeout(TradingClient(
+        os.environ["ALPACA_API_KEY"], os.environ["ALPACA_SECRET_KEY"], paper=True))
     assets = client.get_all_assets(GetAssetsRequest(status=AssetStatus.ACTIVE, asset_class=AssetClass.US_EQUITY))
     return sorted({a.symbol for a in assets if not isinstance(a, str) and getattr(a, "tradable", False)})
 

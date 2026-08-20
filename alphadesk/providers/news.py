@@ -18,6 +18,7 @@ import logging
 import os
 from datetime import datetime, timezone
 
+from alphadesk.net import bound_timeout
 from alphadesk.providers.base import Article, ProviderError
 from alphadesk.providers.registry import register
 
@@ -104,7 +105,7 @@ class AlpacaNews:
         except ImportError as exc:                    # pragma: no cover
             raise ProviderError("alpaca-py is not installed") from exc
 
-        client = NewsClient(self.key, self.secret)
+        client = bound_timeout(NewsClient(self.key, self.secret))
         out: list[Article] = []
         try:
             # Alpaca caps a page at 50; page until the caller's limit or the

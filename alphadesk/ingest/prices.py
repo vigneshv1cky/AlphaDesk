@@ -18,6 +18,7 @@ import threading
 import time
 from typing import Any, Optional
 
+from alphadesk.net import bound_timeout as _bound
 from alphadesk.config import (
     LOW_LIQUIDITY_DOLLAR_VOL,
     OWNERSHIP_TTL_S,
@@ -57,8 +58,8 @@ def _alpaca_data_client():
                 try:
                     import os
                     from alpaca.data.historical import StockHistoricalDataClient
-                    _alpaca_client = StockHistoricalDataClient(
-                        os.environ["ALPACA_API_KEY"], os.environ["ALPACA_SECRET_KEY"])
+                    _alpaca_client = _bound(StockHistoricalDataClient(
+                        os.environ["ALPACA_API_KEY"], os.environ["ALPACA_SECRET_KEY"]))
                 except Exception as exc:      # missing keys / import failure
                     log.debug("alpaca data client unavailable: %s", exc)
                     return None
@@ -992,7 +993,8 @@ def movers(top: int = 20) -> dict:
     try:
         from alpaca.data.historical.screener import ScreenerClient
         from alpaca.data.requests import MarketMoversRequest, MostActivesRequest
-        client = ScreenerClient(os.environ["ALPACA_API_KEY"], os.environ["ALPACA_SECRET_KEY"])
+        client = _bound(ScreenerClient(os.environ["ALPACA_API_KEY"],
+                                       os.environ["ALPACA_SECRET_KEY"]))
     except Exception as exc:
         log.debug("screener unavailable: %s", exc)
         return cached
