@@ -150,8 +150,7 @@ not edits to `ingest/`.
 
 **[docs/data-sources.md](docs/data-sources.md)** lists every upstream, how it is
 collected, and what its terms are. Read it before running a public instance —
-two sources are unofficial endpoints rather than licensed APIs rather than
-licensed feeds.
+two sources are unofficial endpoints rather than licensed feeds.
 
 ## Licence
 

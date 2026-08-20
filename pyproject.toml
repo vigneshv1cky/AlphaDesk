@@ -23,12 +23,13 @@ classifiers = [
     "Topic :: Office/Business :: Financial :: Investment",
 ]
 # Keep in sync with requirements.txt — that file carries the per-dependency
-# rationale. There is no Claude Agent SDK dependency: the v1 multi-agent
-# system was removed (11263ae, 2026-08-07) and the one LLM transport left
-# (ai/deepseek.py) is plain urllib against an OpenAI-compatible endpoint.
+# rationale. There is no LLM SDK dependency of any kind: the v1 multi-agent
+# system was removed (11263ae, 2026-08-07) and the transports that replaced it
+# (providers/llm.py) are plain urllib against OpenAI-compatible and Anthropic
+# endpoints.
 dependencies = [
     "alpaca-py>=0.14.0",            # market data + tradable universe
-    "yfinance>=0.2.31",             # grading, fundamentals, macro, institutional ownership
+    "yfinance>=0.2.31",             # fundamentals, macro, institutional ownership
     "pandas>=2.0.0",                # price frames
     "polygon-api-client>=1.13.0",   # ingest/news.py's article source
     "beautifulsoup4>=4.12.0",       # ingest/edgar.py's filing text extraction

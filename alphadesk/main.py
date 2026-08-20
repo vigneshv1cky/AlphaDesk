@@ -72,7 +72,7 @@ async def _serve() -> None:
         This is the ONLY unattended LLM call in the process, and it only
         labels text. Everything else the AI does happens on a request, when a
         human asks. /api/screener is a plain database read, so the window and
-        its headlines survive a DeepSeek outage untouched."""
+        its headlines survive an LLM-provider outage untouched."""
         from datetime import timedelta
 
         from alphadesk.config import NEWS_LOOKBACK_HOURS, NEWS_REFRESH_MINUTES, now_et

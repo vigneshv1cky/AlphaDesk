@@ -1,8 +1,9 @@
-# AlphaDesk — human-operated research terminal. No autonomous trading, two
-# LLM call shapes (ai/deepseek.py, plain HTTP — no SDK dependency): chat_json
-# (summarize-and-cite) and run_tool_loop (the agentic research layer).
+# AlphaDesk — a market research terminal. No autonomous trading, and exactly
+# one LLM call shape (ai/llm.py -> providers/llm.py, plain urllib — no vendor
+# SDK): chat_json, text in and a JSON object out. No tool loop, no streaming.
+# Keep in sync with pyproject.toml's [project.dependencies].
 alpaca-py>=0.14.0           # market data + tradable universe
-yfinance>=0.2.31            # grading, fundamentals, VIX/macro context, institutional ownership
+yfinance>=0.2.31            # fundamentals, VIX/macro context, institutional ownership
 pandas>=2.0.0               # price frames
 polygon-api-client>=1.13.0  # ingest/news.py's article source
 beautifulsoup4>=4.12.0      # ingest/edgar.py's filing text extraction
@@ -10,3 +11,4 @@ fastapi                     # dashboard JSON API
 uvicorn                     # ASGI server
 python-dotenv               # .env config
 python-multipart            # form parsing
+mcp>=1.0                    # `alphadesk.main mcp` — exposes the terminal to agents

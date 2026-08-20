@@ -1,12 +1,14 @@
-"""Price CONTEXT service — lazy, per-symbol, TTL-cached. NO triggers, NO sweeps.
+"""Price data — lazy, per-symbol, TTL-cached. Nothing here sweeps or polls.
 
-Price never decides what gets analyzed (that's information's job); it only
-answers factual questions for symbols already under attention:
-  • what's the recent price action? (briefs, scout fields)
-  • has a neighbor already moved? (ripple priced-check)
-  • how liquid is it? (LOW_LIQUIDITY evidence tag, friction scaling)
+Every function answers a factual question about a symbol the reader is already
+looking at: what is it trading at, what do the intraday bars look like, how
+liquid is it, what are its fundamentals. Fetching is driven by the request
+path, so an idle terminal makes no market-data calls.
 
-Plus one movers() call per scout window — a fact ranking, not a filter.
+The one non-obvious responsibility is `_coverage_stats`: on a sparse feed a
+"1-minute" series can be a handful of prints stretched across days, and it
+renders identically to a real one. Anything that DISPLAYS an indicator has to
+surface `indicators_reliable` rather than draw regardless.
 """
 
 import logging
@@ -18,7 +20,6 @@ from typing import Any, Optional
 
 from alphadesk.config import (
     LOW_LIQUIDITY_DOLLAR_VOL,
-    MA_INTRADAY_HISTORY_DAYS,
     OWNERSHIP_TTL_S,
     RSI_CROSS_OVERBOUGHT,
     RSI_CROSS_OVERSOLD,
@@ -548,11 +549,9 @@ def liquidity_batch(symbols: list[str], ttl: int = 3600) -> dict[str, bool]:
 
 def intraday_bars(symbol: str, start) -> list[dict]:
     """Minute bars for `symbol` from `start` (a tz-aware datetime) to now, via Alpaca
-    (free IEX feed). Lets the position watcher walk the true intraday price PATH — so an
-    exit is booked at the FIRST level actually touched, and in the right order when one
-    bar spans both target and stop, instead of whatever the ~180s spot poll happened to
-    catch. Chronological (oldest first). Empty list on any failure → caller falls back to
-    the spot-quote check."""
+    (free IEX feed). The bar series behind get_chart_series() and the coverage
+    statistics that gate its indicators. Chronological (oldest first); empty list on
+    any failure, which the caller renders as "no intraday bars" rather than an error."""
     client = _alpaca_data_client()
     if client is None:
         return []
@@ -572,9 +571,6 @@ def intraday_bars(symbol: str, start) -> list[dict]:
         log.debug("intraday_bars failed for %s: %s", symbol, exc)
         return []
 
-
-_intraday_ma_cache: dict[str, tuple[float, Optional[dict]]] = {}
-_INTRADAY_MA_TTL_S = 30
 
 # A full US regular session is 390 one-minute bars. The IEX feed prints far
 # fewer for illiquid names, so this ratio is the honest measure of whether a
@@ -612,127 +608,12 @@ def _coverage_stats(bars: list[dict]) -> dict:
             "indicators_reliable": reliable}
 
 
-def get_intraday_ma_context(symbol: str) -> Optional[dict]:
-    """Day-trading-scale technical signal — RSI-9 computed on
-    MA_INTRADAY_HISTORY_DAYS of 1-minute bars (via intraday_bars(), Alpaca
-    IEX), not daily closes. Positions here are session-scoped (held for
-    hours, not weeks), so the signal has to move on that clock.
-
-    rsi_cross: RSI-9 crossing UP through RSI_CROSS_OVERSOLD or DOWN through
-    RSI_CROSS_OVERBOUGHT between the last two bars — a threshold-CROSSING
-    event, not "wait for the extreme" (only knowable in hindsight, after
-    it's already reversed). This ONE signal decides both DIRECTION and
-    TIMING: which threshold got crossed, and which way, is the whole setup.
-
-    RSI stays the ONLY automated signal. An earlier build paired MACD as a
-    second automated filter, but two independently-moving signals can
-    briefly disagree (MACD about to flip while RSI has already crossed for
-    the OLD regime), which entered trades right before a reversal. Nothing
-    in code arbitrates between signals.
-
-    macd_*: computed and returned for the HUMAN chart only (Phase 0). It is
-    display data — no automated caller reads it, and re-wiring it into
-    _entry_signal would resurrect the disagreement bug. A human reading a
-    chart resolves "RSI oversold but MACD hasn't turned" with judgment,
-    which is exactly what the machine could not do.
-
-    coverage/*: the IEX feed carries only a few percent of consolidated
-    volume, so illiquid names have no print in most minutes and these
-    "1-minute" indicators are computed on a sparse, irregular series
-    (measured: 92 bars over 5 sessions with a 42-minute p90 gap, vs 1570
-    and 1.0 for AAPL). Callers that DISPLAY an indicator must surface
-    indicators_reliable — a chart that looks normal but isn't will recruit
-    a trader's judgment into a bad decision.
-
-    TTL-cached separately from get_context() — short enough an exit check
-    stays fresh, long enough not to refetch faster than a new bar can even
-    form."""
-    sym = symbol.upper()
-    with _cache_lock:
-        hit = _intraday_ma_cache.get(sym)
-        if hit and time.time() - hit[0] < _INTRADAY_MA_TTL_S:
-            return hit[1]
-    result: Optional[dict] = None
-    try:
-        from datetime import timedelta
-        start = now_et() - timedelta(days=MA_INTRADAY_HISTORY_DAYS + 3)  # weekend/holiday buffer
-        bars = intraday_bars(sym, start)
-        # 30 bars, not the 60 the MACD build needed (EMA-26 convergence):
-        # RSI-9's Wilder smoothing is settled well inside 3x its period.
-        if len(bars) >= 30:
-            import pandas as pd
-            closes = pd.Series([b["close"] for b in bars])
-
-            delta = closes.diff()
-            gain = delta.clip(lower=0)
-            loss = -delta.clip(upper=0)
-            avg_gain = gain.ewm(alpha=1 / 9, min_periods=9, adjust=False).mean()
-            avg_loss = loss.ewm(alpha=1 / 9, min_periods=9, adjust=False).mean()
-            # avg_loss == 0 -> RSI 100 (no losses in the smoothing window);
-            # avoids a divide-by-zero on the raw gain/loss ratio.
-            rs = avg_gain / avg_loss.where(avg_loss != 0, other=float("nan"))
-            rsi_series = (100 - 100 / (1 + rs)).where(avg_loss != 0, other=100.0)
-
-            rsi_now = float(rsi_series.iloc[-1])
-            rsi_prev = float(rsi_series.iloc[-2]) if len(rsi_series) > 1 else None
-            # Four crossing flags, not one: RSI alone drives BOTH entry and
-            # exit, and each direction needs a different pair. Entry: RSI
-            # crossing UP through oversold IS the LONG, crossing DOWN
-            # through overbought IS the SHORT (the reversion just started —
-            # the cross decides direction, nothing else votes). Exit: the
-            # OPPOSITE crossing — RSI crossing UP through overbought means a
-            # LONG's reversion has played out (take the signal-based exit),
-            # crossing DOWN through oversold means the same for a SHORT.
-            rsi_cross_up_oversold = rsi_cross_down_overbought = False
-            rsi_cross_up_overbought = rsi_cross_down_oversold = False
-            if rsi_prev is not None and math.isfinite(rsi_prev) and math.isfinite(rsi_now):
-                rsi_cross_up_oversold = rsi_prev <= RSI_CROSS_OVERSOLD < rsi_now
-                rsi_cross_down_overbought = rsi_prev >= RSI_CROSS_OVERBOUGHT > rsi_now
-                rsi_cross_up_overbought = rsi_prev < RSI_CROSS_OVERBOUGHT <= rsi_now
-                rsi_cross_down_oversold = rsi_prev > RSI_CROSS_OVERSOLD >= rsi_now
-
-            result = {
-                "rsi_9": round(rsi_now, 2) if math.isfinite(rsi_now) else None,
-                "rsi_cross_up_oversold": rsi_cross_up_oversold,
-                "rsi_cross_down_overbought": rsi_cross_down_overbought,
-                "rsi_cross_up_overbought": rsi_cross_up_overbought,
-                "rsi_cross_down_oversold": rsi_cross_down_oversold,
-            }
-            # MACD(12,26,9) — DISPLAY ONLY (see docstring). Needs 26+9 bars
-            # before the signal line means anything; below that, omit rather
-            # than emit a number that looks valid.
-            if len(bars) >= 35:
-                ema_fast = closes.ewm(span=12, adjust=False).mean()
-                ema_slow = closes.ewm(span=26, adjust=False).mean()
-                macd_line = ema_fast - ema_slow
-                signal_line = macd_line.ewm(span=9, adjust=False).mean()
-                diff = float((macd_line - signal_line).iloc[-1])
-                result.update({
-                    "macd_line": round(float(macd_line.iloc[-1]), 4),
-                    "macd_signal": round(float(signal_line.iloc[-1]), 4),
-                    "macd_diff": round(diff, 4),
-                    "macd_regime": "LONG" if diff > 0 else "SHORT" if diff < 0 else None,
-                })
-            result.update(_coverage_stats(bars))
-    except Exception as exc:
-        log.debug("intraday MA context failed %s: %s", sym, exc)
-    with _cache_lock:
-        if len(_intraday_ma_cache) >= _CACHE_MAX_ENTRIES:
-            _evict_expired(_intraday_ma_cache, _INTRADAY_MA_TTL_S)
-        _intraday_ma_cache[sym] = (time.time(), result)
-    return result
-
-
 _chart_cache: dict[str, tuple[float, Optional[dict]]] = {}
 _CHART_TTL_S = 30
 
 
 def get_chart_series(symbol: str, days: int = 2) -> Optional[dict]:
     """OHLC + full RSI-9 and MACD(12,26,9) SERIES for the human chart.
-
-    get_intraday_ma_context() returns only the latest value (all an automated
-    exit check needs); a chart needs every point. Same indicator math, so the
-    number under the cursor matches what the engine acted on.
 
     Indicators are computed over the whole fetched window but only marked
     reliable via _coverage_stats — see CHART_MIN_COVERAGE. The caller is

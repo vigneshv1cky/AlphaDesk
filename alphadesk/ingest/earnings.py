@@ -1,22 +1,19 @@
 """Earnings calendar — MARKET-WIDE: who reported (with the EPS surprise) and
 who's about to, across the whole US tape, not a curated list.
 
-Design law #1 (code owns facts, agents own judgment): this module supplies the
-FACT "who reported / who's about to", filtered only by tradability (a factual
-screen), and hands every reporter to the scout. The scout — not a hardcoded
-watchlist — decides which are worth the team's attention. That removes the old
-large-cap selection bias, so post-earnings drift can reach small/mid caps where
-the edge actually lives; liquidity stays as EVIDENCE downstream (the grader's
-double-friction haircut), never a gate here.
+The only filter applied is tradability (is the symbol in the Alpaca universe),
+which is a factual screen rather than a judgment. Nothing here decides which
+reporters matter — the calendar states who reports when, and the reader picks.
+Liquidity is attached as EVIDENCE (`low_liquidity`, pre-armed by
+arm_liquidity), never used to drop a row.
 
 Source: the Nasdaq earnings calendar (api.nasdaq.com) — one call per date, no
 API key, giving EPS estimate / actual / surprise% and the BMO/AMC session. It's
-an undocumented endpoint, so every fetch is wrapped defensively: a bad day just
-yields nothing and the next refresh heals it.
+an undocumented endpoint (see docs/data-sources.md), so every fetch is wrapped
+defensively: a bad day just yields nothing and the next refresh heals it.
 
-Two consumers:
-  • upcoming_earnings()  → "be ready": what reports in the next N days
-  • drift_candidates()   → post-earnings-drift candidates (reported, surprise known)
+Consumed by store.upcoming_earnings() / earnings_window() — the "reporting
+soon" tile, the Earnings page, and the screener's window.
 """
 
 import json
@@ -26,13 +23,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
 
-from alphadesk.config import (
-    ET,
-    EARNINGS_POST_MAX_DAYS,
-    EARNINGS_PRE_WINDOW_DAYS,
-    in_universe,
-    now_et,
-)
+from alphadesk.config import ET, in_universe, now_et
 from alphadesk.ledger import store
 
 log = logging.getLogger("alphadesk.earnings")
@@ -212,68 +203,3 @@ def arm_liquidity(days_back: int = 4, days_fwd: int = 14) -> int:
     if n:
         log.info("Armed liquidity for %d/%d earnings-window symbols", len(liq), len(syms))
     return n
-
-
-def drift_candidates() -> dict[str, list[dict]]:
-    """Earnings-adjacent names → synthetic candidate articles, keyed by symbol.
-    A CANDIDATE SOURCE: it lets the earnings calendar flow through the same
-    candidate-pool shape the entry watcher consumes. The calendar fetch
-    already ran (refresh_calendar, on the 6h loop); this just reads the rows
-    the run needs and shapes them as candidates.
-
-    One continuous window, unfiltered by reaction/momentum (facts only —
-    a human reading the terminal is where the judgment lives):
-    from EARNINGS_PRE_WINDOW_DAYS before the report through
-    EARNINGS_POST_MAX_DAYS after it (-3 to +5 days around the report date,
-    by default) — sourced as two pools (upcoming vs. already-reported are
-    different queries) but no gap between them.
-    """
-    now = now_et()
-    out: dict[str, list[dict]] = {}
-
-    # ── Pre-earnings: reports within the next EARNINGS_PRE_WINDOW_DAYS ──────
-    pre_candidates = store.upcoming_earnings(days=EARNINGS_PRE_WINDOW_DAYS)
-    for p in pre_candidates:
-        esym = p["symbol"]
-        out[esym] = [{
-            "id": f"pre-earnings-{esym}-{p['report_date']}",
-            "title": f"[PRE-EARNINGS] {esym} reports {p['report_date']} {p.get('session', '')}",
-            "summary": f"{esym} reports {p['report_date']} — watching for a technical setup ahead of the print.",
-            "source": "PreEarnings", "url": "",
-            "published_at": p["report_date"],
-            "category": "PRE_EARNINGS", "tickers": [esym],
-            "low_liquidity": bool(p.get("low_liquidity")),   # pre-armed by arm_liquidity()
-            "mentions": [{"symbol": esym, "sentiment": 0.0, "label": "neutral",
-                          "category": "PRE_EARNINGS"}],
-            "relations": [],
-        }]
-
-    # ── Post-earnings: up to EARNINGS_POST_MAX_DAYS ago, already PUBLIC (past
-    # their BMO/DAY 9:30 or AMC 16:00 boundary) — no lower bound, so this
-    # picks up right where the pre-earnings window leaves off (age 0) ──
-    reporters = [e for e in store.recently_reported(EARNINGS_POST_MAX_DAYS)
-                 if (rp := reported_public(e["report_date"])) and rp <= now]
-    for e in reporters:
-        esym = e["symbol"]
-        report_day = datetime.strptime(e["report_date"][:10], "%Y-%m-%d").date()
-        age_days = (now.date() - report_day).days
-        if age_days > EARNINGS_POST_MAX_DAYS:
-            continue
-        surp = e.get("surprise_pct")
-        if surp is not None:
-            verdict = "beat" if surp > 0 else ("miss" if surp < 0 else "in-line")
-            eps_txt = f"EPS {e.get('eps_actual')} vs est {e.get('eps_estimate')} — {verdict} {surp}%"
-        else:
-            eps_txt = f"EPS est {e.get('eps_estimate')}"
-        out[esym] = [{
-            "id": f"earnings-{esym}-{e['report_date'][:10]}",
-            "title": f"[EARNINGS] {esym} reported {e['report_date'][:10]} {e.get('session') or ''} ({age_days}d ago): {eps_txt}",
-            "summary": f"{esym} reported {age_days} days ago — watching for a settled technical setup.",
-            "source": "EarningsCalendar", "url": "", "published_at": e["report_date"],
-            "category": "EARNINGS", "tickers": [esym],
-            "low_liquidity": bool(e.get("low_liquidity")),   # pre-armed by arm_liquidity()
-            "mentions": [{"symbol": esym, "sentiment": 0.0, "label": "neutral",
-                          "category": "EARNINGS"}],
-            "relations": [],
-        }]
-    return out

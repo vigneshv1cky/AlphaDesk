@@ -3,17 +3,13 @@ desk/filings.py.
 
 Every endpoint here is a plain SEC-hosted JSON/HTML file, verified live
 against real filings before this was written (see commit history — Apple's
-CIK, its actual 10-Q shape, the full-text search param names). Three facts
+CIK, its actual 10-Q shape, the full-text search param names). Two facts
 that are easy to get wrong and will silently 403/empty-result you if you do:
 
   1. SEC requires a descriptive User-Agent with contact info on every request
      (`SEC_USER_AGENT`, see `_user_agent()`) — generic or missing gets
      throttled or blocked. There is no safe default; each deployment sets it.
-  2. Full-text search filters by CIK via `ciks=` (zero-padded 10 digits), NOT
-     `tickers=` — the latter is silently ignored and returns unfiltered
-     results across every filer, which reads as "it worked" until you notice
-     the company names in the results are wrong.
-  3. Modern filings are inline XBRL: financial data tags are woven into the
+  2. Modern filings are inline XBRL: financial data tags are woven into the
      human-readable HTML, not a separate file. A naive tag-strip regex
      produces garbage near the document's XBRL-heavy front matter; this uses
      BeautifulSoup's get_text() instead, which handles it cleanly.
@@ -51,7 +47,6 @@ def _user_agent() -> str:
 _user_agent._warned = False                          # type: ignore[attr-defined]
 _TICKER_MAP_URL = "https://www.sec.gov/files/company_tickers.json"
 _SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik10}.json"
-_FTS_URL = "https://efts.sec.gov/LATEST/search-index"
 _ARCHIVE_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{accession_nodash}/{doc}"
 
 # SEC asks for <=10 req/s; a human clicking through the UI never gets close,
@@ -136,35 +131,6 @@ def recent_filings(symbol: str, forms: tuple[str, ...] = ("10-K", "10-Q", "8-K")
         })
         if len(out) >= limit:
             break
-    return out
-
-
-def full_text_search(query: str, symbol: str | None = None,
-                     forms: tuple[str, ...] = ("10-K", "10-Q"), limit: int = 10) -> list[dict]:
-    """Free-text search across EDGAR's indexed filings (2001-present).
-    ciks= filters correctly; tickers= does not (see module docstring)."""
-    import json
-    from urllib.parse import urlencode
-    params = {"q": query, "forms": ",".join(forms)}
-    if symbol:
-        cik10 = cik_for(symbol)
-        if not cik10:
-            return []
-        params["ciks"] = cik10
-    try:
-        data = json.loads(_get(f"{_FTS_URL}?{urlencode(params)}"))
-    except Exception as exc:
-        log.warning("EDGAR full-text search failed (%r): %s", query, exc)
-        return []
-    out = []
-    for h in (data.get("hits") or {}).get("hits", [])[:limit]:
-        src = h.get("_source") or {}
-        out.append({
-            "id": h.get("_id"),
-            "names": src.get("display_names"),
-            "form": (src.get("root_forms") or [None])[0],
-            "filed": src.get("file_date"),
-        })
     return out
 
 

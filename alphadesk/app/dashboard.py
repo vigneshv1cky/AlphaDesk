@@ -250,9 +250,6 @@ def api_earnings():
         else:
             e["run_at"] = run_at(e["report_date"], e.get("session"))
             upcoming.append(e)
-    # Sort so the UI can group by run-day (earliest to run first) with the biggest
-    # names surfaced first inside each day — never truncated by earlier small-caps.
-    upcoming.sort(key=lambda e: (e["run_at"] or "9999", -(e.get("market_cap") or 0.0)))
     # newest report first, then group by report-day in the UI (biggest names first)
     # reverse=True → newest report day first AND biggest market cap first within a
     # day (a plain cap here, NOT -cap: reverse already flips it to descending).

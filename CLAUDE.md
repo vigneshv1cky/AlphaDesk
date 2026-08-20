@@ -71,11 +71,11 @@ ai/llm.py      one call shape: text in, JSON out. Injection guard, input-size
                provider — no vendor here.
 ingest/news.py poll the news provider -> persist -> enrich (category/sentiment)
 ingest/edgar.py SEC EDGAR: ticker->CIK, filing list, text extraction. Free, no
-               key. Needs SEC_USER_AGENT — see its docstring for three things
-               that silently break (UA requirement, ciks= not tickers=, iXBRL).
+               key. Needs SEC_USER_AGENT — see its docstring for two things
+               that silently break (the UA requirement, and iXBRL).
 ingest/earnings.py Nasdaq calendar -> the earnings window
-ingest/prices.py Alpaca live + yfinance; intraday RSI-9/MACD, _coverage_stats,
-               chart series, fundamentals, ownership, macro, sector
+ingest/prices.py Alpaca live + yfinance; chart series with RSI-9/MACD,
+               _coverage_stats, fundamentals, ownership, macro, sector, movers
 ingest/insider.py SEC Form 4 insider trades, parsed from EDGAR XML directly.
                NOTE: primaryDocument points at the XSL-RENDERED view; the raw
                XML is the bare filename in the same folder. Derivative rows
@@ -87,9 +87,10 @@ desk/filings.py  Q&A over ONE filing, verbatim quotes verified server-side
 desk/research.py Q&A over ONE symbol from 6 pre-fetched sections
 ledger/store.py  SQLite/WAL: news_articles, enrichment_cache, symbol_digests,
                filings + text + qa caches, research_cache, earnings,
-               token_usage. NOTE: the picks/runs/funnel tables still exist and
-               nothing reads them — kept so existing ledgers don't lose their
-               history. Don't "clean up" by dropping them.
+               token_usage. NOTE: init() DROPS the retired trading tables
+               (picks/runs/funnel/skips/...) on every start — destructive and
+               deliberate (816314b). An old ledger loses that history the first
+               time it boots this version; back it up first if it matters.
 app/dashboard.py FastAPI: screener(+ask), filings(+ask), research/ask, chart,
                quote, movers, tape, earnings, tokens, system, + the SPA
 mcp_server.py  the same data as 11 read-only MCP tools. The *_ask tools return
@@ -109,7 +110,7 @@ pip install -r requirements.txt
 python -m alphadesk.main dashboard      # API + SPA on :8000
 python -m alphadesk.main earnings       # refresh the calendar, print it
 python -m alphadesk.main mcp            # serve the same data to agents
-python -m pytest -q                     # 34 tests
+python -m pytest -q                     # 66 tests
 
 cd alphadesk/ui && pnpm dev             # frontend HMR, proxies /api
 cd alphadesk/ui && pnpm build           # tsc -b + vite build -> app/static/
@@ -149,7 +150,7 @@ instance.
 
 ## Known gaps
 
-- **No frontend tests.** Python is covered (34 tests); the UI has none.
+- **No frontend tests.** Python is covered (66 tests); the UI has none.
 - **`@tanstack/react-virtual`'s `measureElement` did not fire** for expanding
   rows in the earnings table (verified at 289-row scale). Sizes there are
   computed instead, with the expanded panel a fixed height. If you fix the

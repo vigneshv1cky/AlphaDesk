@@ -138,7 +138,7 @@ CREATE TABLE IF NOT EXISTS filing_qa_cache (
 
 -- Cached answers from the research agent (desk/research.py): all of one
 -- symbol's fundamentals/ownership/insider/earnings/macro/sector data is
--- fetched server-side, then one DeepSeek call answers from exactly that —
+-- fetched server-side, then one LLM call answers from exactly that —
 -- same "no claim without a source" shape as filing_qa_cache, keyed the same
 -- way ((symbol, question) composite PK), but WITH a TTL that filing_qa_cache
 -- doesn't need: a filing's text never changes, but a live quote or a recent
@@ -232,38 +232,12 @@ def _et_date(offset_days: int = 0) -> str:
 
 
 def _et_day_start_utc() -> str:
-    """UTC ISO timestamp of ET midnight today — for comparing full-timestamp columns
-    (picks.ts) against 'start of today' on the ET clock."""
+    """UTC ISO timestamp of ET midnight today — for comparing full-timestamp
+    columns (news_articles.ingested_at) against 'start of today' on the ET
+    clock, which is the clock every stored report_date already uses."""
     from alphadesk.config import now_et
     return now_et().replace(hour=0, minute=0, second=0, microsecond=0).astimezone(
         timezone.utc).isoformat()
-
-
-# ---------------------------------------------------------------------------
-# Picks
-# ---------------------------------------------------------------------------
-
-_JSON_FIELDS = ("debate", "briefs", "model_tags")
-
-
-def _check_cols(keys) -> None:
-    """Column names are interpolated into SQL (values are always bound), so every key
-    MUST be a bare identifier. All callers pass literal keys today; this guard stops a
-    future caller that lets a model-derived string become a column key from opening an
-    injection hole (str.isidentifier() admits only [A-Za-z_][A-Za-z0-9_]*)."""
-    for k in keys:
-        if not isinstance(k, str) or not k.isidentifier():
-            raise ValueError(f"invalid column name: {k!r}")
-
-
-def _decode(row: dict) -> dict:
-    for field in _JSON_FIELDS:
-        if row.get(field):
-            try:
-                row[field] = json.loads(row[field])
-            except Exception:
-                pass
-    return row
 
 
 def token_summary(days: int = 1) -> list[dict]:
