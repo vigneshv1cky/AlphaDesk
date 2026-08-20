@@ -11,4 +11,6 @@ fastapi                     # dashboard JSON API
 uvicorn                     # ASGI server
 python-dotenv               # .env config
 python-multipart            # form parsing
-mcp>=1.0                    # `alphadesk.main mcp` — exposes the terminal to agents
+# <2: mcp 2.0 moved FastMCP out of `mcp.server.fastmcp`, which mcp_server.py
+# imports. Lifting the ceiling means porting that module, not just the pin.
+mcp>=1.0,<2                 # `alphadesk.main mcp` — exposes the terminal to agents

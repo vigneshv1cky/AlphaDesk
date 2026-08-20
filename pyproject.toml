@@ -36,7 +36,7 @@ dependencies = [
     "uvicorn",
     "python-dotenv",
     "python-multipart",
-    "mcp>=1.0",                     # `alphadesk.main mcp` — exposes the terminal to agents
+    "mcp>=1.0,<2",                     # `alphadesk.main mcp` — exposes the terminal to agents
 ]
 
 # Providers plug in here. A package declaring this group is discovered
