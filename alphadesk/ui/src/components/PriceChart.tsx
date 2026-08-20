@@ -17,7 +17,7 @@ import {
   sma, tema, vwap, wma, type OverlayId, type Point,
 } from "@/lib/indicators"
 import { ChartDrawings, type Drawing, type Tool } from "@/components/ChartDrawings"
-import type { ChartBar, ChartSeries } from "@/lib/api"
+import type { ChartBar, ChartSeries, Fundamentals, MetricStyle } from "@/lib/api"
 
 // Distinct accent colors for RSI/MACD/signal — these read fine on both
 // themes already, so unlike grid/text/candle colors (which come from the
@@ -118,6 +118,7 @@ export type ScaleMode = "linear" | "log" | "percent"
 export function PriceChart({
   data, dark, compact = false, height = 320, series = "candles",
   overlays = [], scale = "linear", showIndicatorPanes = true,
+  fundamentals = null, metrics = [], metricStyle = "bars",
   drawings, onDrawingsChange, tool = "none", onToolDone, drawingsVisible = true,
 }: {
   data: ChartSeries
@@ -141,6 +142,12 @@ export function PriceChart({
   scale?: ScaleMode
   /** Show the RSI and MACD panes. Ignored in compact mode, which has no room. */
   showIndicatorPanes?: boolean
+  /** Fundamentals plotted in their own pane. They cannot share the price axis:
+   * revenue is in billions and price in dollars, so one scale would flatten
+   * whichever is smaller into the floor. */
+  fundamentals?: Fundamentals | null
+  metrics?: string[]
+  metricStyle?: MetricStyle
   /** Hand-drawn annotations. Passed in rather than owned here so they survive
    * a range change — the chart is torn down and rebuilt on every one of those,
    * and drawings must not go with it. */
@@ -295,6 +302,32 @@ export function PriceChart({
       }
     }))
 
+    // Fundamentals get their own pane under the volume band.
+    const chosen = metrics.filter(m => fundamentals?.series?.[m]?.length)
+    if (chosen.length && fundamentals) {
+      const pane = priceChart.addPane()
+      pane.setHeight(Math.max(70, Math.round(height * 0.3)))
+      const PALETTE = ["#4c8dff", "#34d98c", "#f5a524", "#9353d3", "#f31260"]
+      chosen.forEach((id, i) => {
+        const colour = PALETTE[i % PALETTE.length]
+        const pts = fundamentals.series[id]
+          .map(pt => ({ time: (Date.parse(`${pt.t}T00:00:00Z`) / 1000) as UTCTimestamp, value: pt.v }))
+          .sort((a, b) => Number(a.time) - Number(b.time))
+        if (metricStyle === "bars") {
+          const h = pane.addSeries(HistogramSeries, { color: fade(colour, 0.7), priceFormat: { type: "volume" } })
+          h.setData(pts)
+        } else if (metricStyle === "area") {
+          const a = pane.addSeries(AreaSeries, {
+            lineColor: colour, topColor: fade(colour, 0.3), bottomColor: fade(colour, 0.02), lineWidth: 2,
+          })
+          a.setData(pts)
+        } else {
+          const l = pane.addSeries(LineSeries, { color: colour, lineWidth: 2 })
+          l.setData(pts)
+        }
+      })
+    }
+
     const rsiChart = compact ? null : createChart(rsiRef.current!, { ...base, height: 120 })
     const macdChart = compact ? null : createChart(macdRef.current!, { ...base, height: 120 })
     const charts: IChartApi[] = [priceChart, rsiChart, macdChart].filter(Boolean) as IChartApi[]
@@ -371,7 +404,8 @@ export function PriceChart({
       setApi(null)
       charts.forEach(c => c.remove())
     }
-  }, [data, dark, compact, height, series, overlays, scale, showIndicatorPanes])
+  }, [data, dark, compact, height, series, overlays, scale, showIndicatorPanes,
+      fundamentals, metrics, metricStyle])
 
   if (compact) {
     return (

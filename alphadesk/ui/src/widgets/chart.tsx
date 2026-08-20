@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
-import { api, type ChartRange, type ChartSeries } from "@/lib/api"
+import {
+  api, type ChartRange, type ChartSeries, type Fundamentals,
+  type MetricPeriod, type MetricStyle,
+} from "@/lib/api"
 import { PriceChart, type ScaleMode, type SeriesKind } from "@/components/PriceChart"
 import { ChartRanges, ChartToolbar } from "@/components/ChartToolbar"
 import { DrawingToolbar, type Drawing, type Tool } from "@/components/ChartDrawings"
@@ -43,6 +46,22 @@ function MarketChart() {
   const [tool, setTool] = useState<Tool>("none")
   const [drawOpen, setDrawOpen] = useState(false)
   const [drawVisible, setDrawVisible] = useState(true)
+  const [fundamentals, setFundamentals] = useState<Fundamentals | null>(null)
+  const [metrics, setMetrics] = useState<string[]>([])
+  const [metricPeriod, setMetricPeriod] = useState<MetricPeriod>("quarterly")
+  const [metricStyle, setMetricStyle] = useState<MetricStyle>("bars")
+
+  // Statements are fetched per symbol and period, not per range — they do not
+  // change when you zoom.
+  useEffect(() => {
+    if (!symbol) { setFundamentals(null); return }
+    let alive = true
+    setFundamentals(null)
+    api.fundamentals(symbol, metricPeriod)
+      .then(d => { if (alive) setFundamentals(d) })
+      .catch(() => { if (alive) setFundamentals(null) })
+    return () => { alive = false }
+  }, [symbol, metricPeriod])
 
   const load = useCallback((sym: string, r: ChartRange, iv: string) => {
     if (!sym) return
@@ -83,6 +102,11 @@ function MarketChart() {
         panes={panes} onPanes={setPanes}
         expanded={expanded} onExpand={() => setExpanded(e => !e)}
         drawOpen={drawOpen} onDrawOpen={() => setDrawOpen(o => !o)}
+        fundamentals={fundamentals}
+        metrics={metrics}
+        onToggleMetric={id => setMetrics(m => m.includes(id) ? m.filter(x => x !== id) : [...m, id])}
+        metricPeriod={metricPeriod} onMetricPeriod={setMetricPeriod}
+        metricStyle={metricStyle} onMetricStyle={setMetricStyle}
         indicatorsReliable={data?.indicators_reliable ?? false}
       />
       {err && <Empty>{err}</Empty>}
@@ -98,6 +122,9 @@ function MarketChart() {
             overlays={overlays}
             scale={scale}
             showIndicatorPanes={showPanes}
+            fundamentals={fundamentals}
+            metrics={metrics}
+            metricStyle={metricStyle}
             drawings={drawings}
             onDrawingsChange={setDrawings}
             tool={drawOpen ? tool : "none"}

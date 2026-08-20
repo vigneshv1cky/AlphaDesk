@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { OVERLAYS, type OverlayId } from "@/lib/indicators"
 import type { ScaleMode, SeriesKind } from "@/components/PriceChart"
-import type { ChartRange } from "@/lib/api"
+import type { ChartRange, Fundamentals, MetricPeriod, MetricStyle } from "@/lib/api"
 
 /** The chart's controls: series type, range, scale, indicators, expand.
  *
@@ -119,6 +119,8 @@ export function ChartToolbar({
   type, onType, scale, onScale,
   overlays, onOverlays, panes, onPanes, expanded, onExpand, indicatorsReliable,
   interval, onInterval, servedInterval, servedLabel, drawOpen, onDrawOpen,
+  fundamentals, metrics, onToggleMetric,
+  metricPeriod, onMetricPeriod, metricStyle, onMetricStyle,
 }: {
   type: SeriesKind
   onType: (t: SeriesKind) => void
@@ -138,6 +140,14 @@ export function ChartToolbar({
   drawOpen: boolean
   onDrawOpen: () => void
   indicatorsReliable: boolean
+  /** Null while loading, or when this symbol reports no statements at all. */
+  fundamentals: Fundamentals | null
+  metrics: string[]
+  onToggleMetric: (id: string) => void
+  metricPeriod: MetricPeriod
+  onMetricPeriod: (p: MetricPeriod) => void
+  metricStyle: MetricStyle
+  onMetricStyle: (s: MetricStyle) => void
 }) {
   const toggle = (id: OverlayId) =>
     onOverlays(overlays.includes(id) ? overlays.filter(o => o !== id) : [...overlays, id])
@@ -187,6 +197,17 @@ export function ChartToolbar({
             overlays={overlays} toggle={toggle}
             panes={panes} onPanes={onPanes}
             indicatorsReliable={indicatorsReliable}
+          />
+        )}
+      </Menu>
+
+      <Menu label="Metrics" active={metrics.length > 0} wide>
+        {() => (
+          <MetricsMenu
+            data={fundamentals}
+            selected={metrics} onToggle={onToggleMetric}
+            period={metricPeriod} onPeriod={onMetricPeriod}
+            style={metricStyle} onStyle={onMetricStyle}
           />
         )}
       </Menu>
@@ -302,3 +323,88 @@ function IndicatorMenu({ overlays, toggle, panes, onPanes, indicatorsReliable }:
     </>
   )
 }
+
+/** The Metrics picker: fundamentals plotted against price.
+ *
+ * Period and chart-style sit at the top the way theirs do, because both apply
+ * to every metric you pick rather than to one of them.
+ *
+ * Only metrics the company actually reports are listed — the server drops the
+ * rest — so nothing here can be selected and then draw nothing.
+ */
+function MetricsMenu({
+  data, selected, onToggle, period, onPeriod, style, onStyle,
+}: {
+  data: Fundamentals | null
+  selected: string[]
+  onToggle: (id: string) => void
+  period: MetricPeriod
+  onPeriod: (p: MetricPeriod) => void
+  style: MetricStyle
+  onStyle: (s: MetricStyle) => void
+}) {
+  const [q, setQ] = useState("")
+  const groups = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    const hits = (data?.metrics ?? []).filter(m => !needle || m.label.toLowerCase().includes(needle))
+    const by = new Map<string, FundamentalMetricRow[]>()
+    for (const m of hits) by.set(m.group, [...(by.get(m.group) ?? []), m])
+    return [...by.entries()]
+  }, [q, data])
+
+  const seg = (on: boolean) =>
+    `px-2 py-[2px] text-[11px] rounded ${on ? "bg-accent/20 text-accent" : "text-muted-foreground hover:text-foreground"}`
+
+  return (
+    <>
+      <input
+        autoFocus
+        value={q}
+        onChange={e => setQ(e.target.value)}
+        placeholder="Search fundamentals…"
+        aria-label="Search fundamentals"
+        className="w-full border-b border-grid-line bg-transparent px-3 py-2 text-[13px] outline-none placeholder:text-muted-foreground"
+      />
+      <div className="flex items-center justify-between border-b border-grid-line px-3 py-1.5">
+        <span className="text-[10px] font-medium uppercase tracking-[1px] text-muted-foreground">Period</span>
+        <span className="flex gap-1">
+          <button type="button" className={seg(period === "annual")} onClick={() => onPeriod("annual")}>Annual</button>
+          <button type="button" className={seg(period === "quarterly")} onClick={() => onPeriod("quarterly")}>Quarterly</button>
+        </span>
+      </div>
+      <div className="flex items-center justify-between border-b border-grid-line px-3 py-1.5">
+        <span className="text-[10px] font-medium uppercase tracking-[1px] text-muted-foreground">Type</span>
+        <span className="flex gap-1">
+          {(["bars", "line", "area"] as MetricStyle[]).map(x => (
+            <button key={x} type="button" className={seg(style === x)} onClick={() => onStyle(x)}>
+              {x[0].toUpperCase() + x.slice(1)}
+            </button>
+          ))}
+        </span>
+      </div>
+      <div className="max-h-[240px] overflow-y-auto">
+        {!data && <p className="px-3 py-3 text-[12px] text-muted-foreground">loading…</p>}
+        {data && groups.length === 0 && (
+          <p className="px-3 py-3 text-[12px] text-muted-foreground">
+            {q ? `No fundamental matches “${q}”.`
+               : "This symbol reports no statements — ETFs and funds usually do not."}
+          </p>
+        )}
+        {groups.map(([group, items]) => (
+          <div key={group}>
+            <div className="bg-panel-header px-3 py-1 text-[10px] font-medium uppercase tracking-[1px] text-muted-foreground">
+              {group}
+            </div>
+            {items.map(m => (
+              <Item key={m.id} selected={selected.includes(m.id)} onClick={() => onToggle(m.id)}>
+                <span className="truncate">{m.label}</span>
+              </Item>
+            ))}
+          </div>
+        ))}
+      </div>
+    </>
+  )
+}
+
+type FundamentalMetricRow = Fundamentals["metrics"][number]

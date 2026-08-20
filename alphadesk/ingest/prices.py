@@ -799,6 +799,81 @@ def get_chart_series(symbol: str, days: int = 2, range_key: str | None = None,
     return result
 
 
+# The fundamentals the chart can plot against price, grouped the way a reader
+# thinks about them. `row` is yfinance's own label — kept as data rather than
+# guessed at each call site, because these strings are the one part of this
+# that upstream can rename without warning.
+FUNDAMENTAL_METRICS: dict[str, dict] = {
+    "revenue":      {"label": "Revenue",            "row": "Total Revenue",       "stmt": "income", "group": "Income statement"},
+    "gross_profit": {"label": "Gross Profit",       "row": "Gross Profit",        "stmt": "income", "group": "Income statement"},
+    "operating_income": {"label": "Operating Income", "row": "Operating Income",  "stmt": "income", "group": "Income statement"},
+    "net_income":   {"label": "Net Income",         "row": "Net Income",          "stmt": "income", "group": "Income statement"},
+    "diluted_eps":  {"label": "Diluted EPS",        "row": "Diluted EPS",         "stmt": "income", "group": "Income statement"},
+    "ebitda":       {"label": "EBITDA",             "row": "EBITDA",              "stmt": "income", "group": "Income statement"},
+    "ocf":          {"label": "Operating Cash Flow","row": "Operating Cash Flow", "stmt": "cash",   "group": "Cash flow"},
+    "fcf":          {"label": "Free Cash Flow",     "row": "Free Cash Flow",      "stmt": "cash",   "group": "Cash flow"},
+    "capex":        {"label": "Capital Expenditure","row": "Capital Expenditure", "stmt": "cash",   "group": "Cash flow"},
+}
+
+_fundamentals_cache: dict[str, tuple[float, dict]] = {}
+_FUNDAMENTALS_TTL_S = 12 * 3600      # statements change quarterly; this is generous
+
+
+def fundamentals_series(symbol: str, period: str = "quarterly") -> dict:
+    """Financial-statement time series for plotting against price.
+
+    Returns {metric_id: [{t, v}, ...]} plus the metric catalogue, oldest first.
+
+    A metric upstream does not report is OMITTED rather than returned as an
+    empty series — a menu entry that draws nothing is worse than one that is
+    not offered, and coverage genuinely varies by company (an ETF has no
+    revenue; not every filer reports EBITDA).
+    """
+    sym = symbol.upper()
+    key = f"{sym}:{period}"
+    hit = _fundamentals_cache.get(key)
+    if hit and time.time() - hit[0] < _FUNDAMENTALS_TTL_S:
+        return hit[1]
+
+    out: dict[str, list[dict]] = {}
+    try:
+        import yfinance as yf
+        t = yf.Ticker(sym)
+        quarterly = period != "annual"
+        income = t.quarterly_income_stmt if quarterly else t.income_stmt
+        cash = t.quarterly_cashflow if quarterly else t.cashflow
+        frames = {"income": income, "cash": cash}
+        for mid, spec in FUNDAMENTAL_METRICS.items():
+            df = frames.get(spec["stmt"])
+            if df is None or getattr(df, "empty", True) or spec["row"] not in df.index:
+                continue
+            row = df.loc[spec["row"]]
+            points = []
+            # yfinance returns newest-first columns; a chart wants oldest-first.
+            for col in reversed(list(df.columns)):
+                v = row.get(col)
+                if v is None or v != v:          # drop NaN
+                    continue
+                points.append({"t": str(col)[:10], "v": float(v)})
+            if len(points) >= 2:                 # one point is not a series
+                out[mid] = points
+    except Exception as exc:
+        log.debug("fundamentals series failed for %s: %s", sym, exc)
+
+    result = {
+        "symbol": sym,
+        "period": "quarterly" if period != "annual" else "annual",
+        "metrics": [
+            {"id": mid, "label": spec["label"], "group": spec["group"],
+             "unit": "eps" if mid == "diluted_eps" else "currency"}
+            for mid, spec in FUNDAMENTAL_METRICS.items() if mid in out
+        ],
+        "series": out,
+    }
+    _fundamentals_cache[key] = (time.time(), result)
+    return result
+
+
 def macro_snapshot() -> dict:
     """Code-fetched macro facts — no interpretation, no LLM. Uses yfinance for
     ^TNX (10Y yield), ^VIX, plus a rate-proxy from the Fed funds rate. Cached

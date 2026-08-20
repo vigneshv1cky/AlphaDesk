@@ -220,6 +220,22 @@ def api_search(q: str = "", limit: int = 12):
     return {"results": out, "trending": True}
 
 
+@app.get("/api/fundamentals/{symbol}")
+def api_fundamentals(symbol: str, period: str = "quarterly"):
+    """Financial-statement series for plotting against price.
+
+    Only metrics upstream actually reports for this company are returned, so
+    the chart's Metrics menu offers nothing that would draw an empty line.
+    """
+    from alphadesk.ingest.prices import fundamentals_series
+    sym = "".join(c for c in symbol.upper() if c.isalnum() or c in ".-")[:12]
+    if not sym:
+        raise HTTPException(400, "bad symbol")
+    if period not in ("quarterly", "annual"):
+        raise HTTPException(400, "period must be quarterly or annual")
+    return fundamentals_series(sym, period)
+
+
 @app.get("/api/movers")
 def api_movers(top: int = 20):
     """Most active / gainers / losers, filtered for tradeability."""

@@ -187,6 +187,25 @@ export interface SymbolHit {
   asset_class: string | null
 }
 
+export type MetricPeriod = "quarterly" | "annual"
+export type MetricStyle = "bars" | "line" | "area"
+
+export interface FundamentalMetric {
+  id: string
+  label: string
+  group: string
+  unit: "currency" | "eps"
+}
+
+export interface Fundamentals {
+  symbol: string
+  period: MetricPeriod
+  /** Only metrics upstream actually reports for this company — a menu entry
+   * that would draw an empty line is not offered at all. */
+  metrics: FundamentalMetric[]
+  series: Record<string, { t: string; v: number }[]>
+}
+
 export interface TapeEntry {
   symbol: string
   label: string
@@ -381,6 +400,8 @@ export const api = {
   askScreener: (question: string) =>
     post<ScreenerAnswer>("/api/screener/ask", { question }),
   system: () => get<SystemInfo>("/api/system"),
+  fundamentals: (symbol: string, period: MetricPeriod) =>
+    get<Fundamentals>(`/api/fundamentals/${encodeURIComponent(symbol)}?period=${period}`),
   search: (q: string) =>
     get<{ results: SymbolHit[]; trending: boolean }>(`/api/search?q=${encodeURIComponent(q)}`),
   earningsWeek: (start?: string) =>
