@@ -57,7 +57,7 @@ export function WindowTable({ rows }: { rows: ScreenerRow[] }) {
     }),
     col.accessor("report_date", {
       header: "Reports",
-      cell: c => <span className="num text-muted-foreground">{c.getValue() ?? "—"}</span>,
+      cell: c => <span className="tnum text-muted-foreground">{c.getValue() ?? "—"}</span>,
       // Nulls last regardless of direction: "no report date" is absence of a
       // value, not an early or late one, so it should never win the top slot.
       sortUndefined: "last",
@@ -146,7 +146,7 @@ export function WindowTable({ rows }: { rows: ScreenerRow[] }) {
             reset
           </Btn>
         )}
-        <span className="num ml-auto text-[12px] text-muted-foreground">
+        <span className="tnum ml-auto text-[12px] text-muted-foreground">
           {modelRows.length} / {rows.length}
         </span>
       </div>

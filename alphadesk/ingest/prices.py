@@ -21,6 +21,7 @@ from typing import Any, Optional
 from alphadesk.net import bound_timeout as _bound
 from alphadesk.config import (
     LOW_LIQUIDITY_DOLLAR_VOL,
+    company_name,
     OWNERSHIP_TTL_S,
     RSI_CROSS_OVERBOUGHT,
     RSI_CROSS_OVERSOLD,
@@ -980,7 +981,7 @@ def _spark_series(symbols: list[str]) -> dict[str, list[float]]:
 
 def movers(top: int = 20) -> dict:
     """{most_active, gainers, losers}, each
-    [{symbol, price, change_pct, volume, spark}].
+    [{symbol, name, price, change_pct, volume, spark}].
 
     Alpaca's screener, then filtered and priced. Cached 2 minutes: this is a
     board you glance at, and the list barely moves minute to minute.
@@ -1036,6 +1037,7 @@ def movers(top: int = 20) -> dict:
                 continue
             out.append({
                 "symbol": sym,
+                "name": company_name(sym),
                 "price": snap["price"],
                 # Prefer the screener's own change when it supplies one (it is
                 # the field the ranking was computed on); fall back to the

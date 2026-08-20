@@ -76,7 +76,7 @@ function DayCell({
       }`}>
         {day.weekday}
       </span>
-      <span className={`num text-[16px] ${isToday ? "font-semibold text-accent" : "text-foreground"}`}>
+      <span className={`tnum text-[16px] ${isToday ? "font-semibold text-accent" : "text-foreground"}`}>
         {day.date.slice(8)}
       </span>
       <span className="truncate text-[12px] text-muted-foreground">
@@ -115,7 +115,7 @@ function DayTable({ day }: { day: EarningsDay }) {
                   <td className="px-[12px] py-[6px] text-[14px]">
                     <Link
                       to={`/analysis?symbol=${encodeURIComponent(r.symbol)}`}
-                      className="num font-semibold text-accent hover:underline"
+                      className="hover:underline"
                     >
                       {r.symbol}
                     </Link>
@@ -123,15 +123,15 @@ function DayTable({ day }: { day: EarningsDay }) {
                   <td className="max-w-[280px] truncate px-[12px] py-[6px] text-[14px] text-muted-foreground">
                     {r.company_name ?? ""}
                   </td>
-                  <td className="num px-[12px] py-[6px] text-right text-[14px]">{eps(r.eps_estimate)}</td>
-                  <td className="num px-[12px] py-[6px] text-right text-[14px]">{eps(r.eps_actual)}</td>
-                  <td className={`num px-[12px] py-[6px] text-right text-[14px] ${
+                  <td className="tnum px-[12px] py-[6px] text-right text-[14px]">{eps(r.eps_estimate)}</td>
+                  <td className="tnum px-[12px] py-[6px] text-right text-[14px]">{eps(r.eps_actual)}</td>
+                  <td className={`tnum px-[12px] py-[6px] text-right text-[14px] ${
                     surprise == null ? "text-muted-foreground"
                       : surprise >= 0 ? "text-gain" : "text-loss"
                   }`}>
                     {surprise == null ? "—" : `${surprise >= 0 ? "+" : ""}${surprise.toFixed(2)}%`}
                   </td>
-                  <td className="num px-[12px] py-[6px] text-right text-[14px] text-muted-foreground">
+                  <td className="tnum px-[12px] py-[6px] text-right text-[14px] text-muted-foreground">
                     {money(r.market_cap)}
                   </td>
                 </tr>

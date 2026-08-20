@@ -27,7 +27,7 @@ function Row({ symbol, onRemove }: { symbol: string; onRemove: () => void }) {
       <td className="px-3 py-[6px]">
         <Link
           to={`/analysis?symbol=${encodeURIComponent(symbol)}`}
-          className="num text-[14px] font-semibold text-accent hover:underline"
+          className="hover:underline"
         >
           {symbol}
         </Link>
@@ -35,10 +35,10 @@ function Row({ symbol, onRemove }: { symbol: string; onRemove: () => void }) {
       <td className="max-w-[240px] truncate px-3 py-[6px] text-[14px] text-muted-foreground">
         {isPending ? "…" : data?.name ?? ""}
       </td>
-      <td className="num px-[12px] py-[6px] text-right text-[14px]">
+      <td className="tnum px-[12px] py-[6px] text-right text-[14px]">
         {data?.price == null ? "—" : data.price.toFixed(2)}
       </td>
-      <td className={`num px-[12px] py-[6px] text-right text-[14px] ${
+      <td className={`tnum px-[12px] py-[6px] text-right text-[14px] ${
         chg == null ? "text-muted-foreground" : up ? "text-gain" : "text-loss"
       }`}>
         {chg == null ? "—" : `${up ? "+" : ""}${chg.toFixed(2)}%`}

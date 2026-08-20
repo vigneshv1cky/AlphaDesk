@@ -144,6 +144,9 @@ export interface Quote {
 
 export interface MoverRow {
   symbol: string
+  /** From the cached Alpaca asset list. Null when unknown — a blank cell beats
+   * repeating the ticker that is already in the column beside it. */
+  name?: string | null
   price: number | null
   change_pct: number | null
   volume: number

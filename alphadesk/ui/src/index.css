@@ -165,8 +165,16 @@
        this one line. */
     font-size: 14px;
     }
-  /* Numeric cells are monospace + tabular so digits align down a column and a
-     changing price doesn't reflow its neighbours. */
+  /* Grid numerals. Theirs are the SANS face with tabular figures, not a mono
+     one — measured: font-family GT America, font-variant-numeric tabular-nums.
+     Digits still align down a column and a changing price still doesn't reflow
+     its neighbours; it just doesn't shout "code" the way mono does. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+  /* Mono stays for the places that ARE readouts rather than table cells: the
+     ticker tape and the chart's OHLCV strip. */
   .num {
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;

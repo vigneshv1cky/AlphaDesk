@@ -131,8 +131,14 @@ def session(dt: datetime | None = None) -> str:
 # ── Universe ─────────────────────────────────────────────────────────────────
 
 _UNIVERSE_CACHE = DATA_DIR / "universe.json"
+# Company names ride along with the universe refresh: the asset list already
+# carries a name for every symbol and this used to throw it away, which is why
+# a movers row could only ever show a bare ticker. Separate file so the
+# universe cache keeps its existing shape (a plain list, read by in_universe).
+_NAMES_CACHE = DATA_DIR / "symbol_names.json"
 _UNIVERSE_MAX_AGE_S = 7 * 24 * 3600
 _universe: set[str] | None = None
+_names: dict[str, str] | None = None
 
 
 def _fetch_universe_from_alpaca() -> list[str]:
@@ -143,7 +149,13 @@ def _fetch_universe_from_alpaca() -> list[str]:
     client = bound_timeout(TradingClient(
         os.environ["ALPACA_API_KEY"], os.environ["ALPACA_SECRET_KEY"], paper=True))
     assets = client.get_all_assets(GetAssetsRequest(status=AssetStatus.ACTIVE, asset_class=AssetClass.US_EQUITY))
-    return sorted({a.symbol for a in assets if not isinstance(a, str) and getattr(a, "tradable", False)})
+    tradable = [a for a in assets if not isinstance(a, str) and getattr(a, "tradable", False)]
+    try:
+        _NAMES_CACHE.write_text(json.dumps(
+            {a.symbol: (getattr(a, "name", "") or "").strip() for a in tradable}))
+    except Exception as exc:                     # a missing name file is cosmetic
+        log.warning("could not cache symbol names: %s", exc)
+    return sorted({a.symbol for a in tradable})
 
 
 def load_universe(refresh: bool = False) -> set[str]:
@@ -170,6 +182,24 @@ def load_universe(refresh: bool = False) -> set[str]:
 
 def in_universe(symbol: str) -> bool:
     return symbol.upper() in (load_universe() or set())
+
+
+def company_name(symbol: str) -> str | None:
+    """Display name for a tradable symbol, from the cached asset list.
+
+    Returns None rather than the ticker when unknown — the caller decides
+    whether a blank cell or a repeated ticker reads better, and repeating it
+    would just be noise beside the symbol column.
+    """
+    global _names
+    if _names is None:
+        try:
+            _names = json.loads(_NAMES_CACHE.read_text())
+        except Exception:
+            # Populated on the next universe refresh; until then every row
+            # simply has no name, which renders as an empty cell.
+            _names = {}
+    return _names.get(symbol.upper()) or None
 
 
 # The index/commodity/crypto strip pinned across the top of the terminal.

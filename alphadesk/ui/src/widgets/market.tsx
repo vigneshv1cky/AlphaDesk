@@ -109,11 +109,11 @@ function MoversTable({ rows }: { rows: MoverRow[] }) {
   return (
     <div>
       <div className="sticky top-0 z-10 flex items-center bg-panel px-[12px] py-[14px] text-[10px] font-medium uppercase tracking-[1px] text-muted-foreground">
-        <span className="flex-1">Symbol</span>
-        <span className="w-[72px]" />
-        <span className="w-20 text-right">Price</span>
-        <span className="w-20 text-right">Chg %</span>
-        <span className="w-24 text-right">Volume</span>
+        <span className="w-[72px] shrink-0">Symbol</span>
+        <span className="min-w-0 flex-1" />
+        <span className="w-[71px] text-right">Price</span>
+        <span className="w-[76px] text-right">Chg %</span>
+        <span className="w-[80px] text-right">1D</span>
       </div>
       {rows.map(r => {
         const up = (r.change_pct ?? 0) >= 0
@@ -123,17 +123,20 @@ function MoversTable({ rows }: { rows: MoverRow[] }) {
             to={`/analysis?symbol=${encodeURIComponent(r.symbol)}`}
             className="flex h-[33px] items-center px-[12px] text-[14px] hover:bg-muted/60"
           >
-            <span className="num flex-1 font-semibold text-accent">{r.symbol}</span>
-            {/* Tinted by direction, same as the change cell — the line and the
-                number should never disagree about which way the day went. */}
-            <span className={`w-[72px] ${up ? "text-gain" : "text-loss"}`}>
-              <Sparkline points={r.spark} />
-            </span>
-            <span className="num w-20 text-right">{r.price?.toFixed(2) ?? "—"}</span>
-            <span className={`num w-20 text-right ${up ? "text-gain" : "text-loss"}`}>
+            {/* Symbol is plain foreground at normal weight — theirs is not a
+                link colour and not bold. Colour in a grid is reserved for
+                direction, so spending it on every ticker spends it on nothing. */}
+            <span className="w-[72px] shrink-0 truncate">{r.symbol}</span>
+            <span className="min-w-0 flex-1 truncate pr-3 text-muted-foreground">{r.name ?? ""}</span>
+            <span className="tnum w-[71px] text-right">{r.price?.toFixed(2) ?? "—"}</span>
+            <span className={`tnum w-[76px] text-right ${up ? "text-gain" : "text-loss"}`}>
               {r.change_pct == null ? "—" : `${up ? "+" : ""}${r.change_pct.toFixed(2)}%`}
             </span>
-            <span className="num w-24 text-right text-muted-foreground">{compact(r.volume)}</span>
+            {/* Tinted by direction, same as the change cell — the line and the
+                number must never disagree about which way the day went. */}
+            <span className={`flex w-[80px] justify-end ${up ? "text-gain" : "text-loss"}`}>
+              <Sparkline points={r.spark} />
+            </span>
           </Link>
         )
       })}
