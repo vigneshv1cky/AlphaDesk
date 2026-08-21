@@ -49,6 +49,17 @@ function MarketChart() {
   const [type, setType] = useState<SeriesKind>("line")
   const [scale, setScale] = useState<ScaleMode>("linear")
   const [interval, setInterval] = useState("1m")
+  /** Whether the interval was chosen BY HAND. Unpinned, the server picks the
+   * one that suits the range and the toolbar adopts it.
+   *
+   * Carrying a hand-set interval across a range change was quietly expensive:
+   * the 1D view defaults to 1-minute bars, so switching to 1Y asked for a year
+   * of minute data. The server correctly refuses and serves hourly instead —
+   * but a year of HOURLY bars is a 20-second upstream fetch that nothing
+   * caches, and the answer is not even the daily series the range wants.
+   * Asking for the range alone returns in half a second. */
+  const [intervalPinned, setIntervalPinned] = useState(false)
+  const wantedInterval = intervalPinned ? interval : null
   const [overlays, setOverlays] = useState<OverlayId[]>([])
   const [panes, setPanes] = useState<PaneId[]>([])
   const [expanded, setExpanded] = useState(false)
@@ -75,13 +86,20 @@ function MarketChart() {
    * visible, a slow reply for a range you have already moved off must not be
    * allowed to land on top of a newer one. */
   const reqId = useRef(0)
-  const load = useCallback((sym: string, r: ChartRange, iv: string) => {
+  const load = useCallback((sym: string, r: ChartRange, iv: string | null) => {
     if (!sym) return
     const id = ++reqId.current
     setErr(null)
     setLoading(true)
-    api.chartRange(sym, r, iv)
-      .then(d => { if (id === reqId.current) setData(d) })
+    api.chartRange(sym, r, iv ?? undefined)
+      .then(d => {
+        if (id !== reqId.current) return
+        setData(d)
+        // Adopt whatever the server chose, so the toolbar reports the series
+        // actually on screen. Safe against a refetch loop: `wantedInterval`
+        // stays null while unpinned, so this changes no dependency.
+        if (iv == null && d.interval) setInterval(d.interval)
+      })
       .catch(e => {
         if (id !== reqId.current) return
         setData(null)
@@ -96,7 +114,7 @@ function MarketChart() {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps -- follow the scoped
   // symbol, range and interval, not this component's own identity
-  useEffect(() => { load(symbol, range, interval) }, [symbol, range, interval])
+  useEffect(() => { load(symbol, range, wantedInterval) }, [symbol, range, wantedInterval])
 
   const priceHeight = expanded ? 620 : COLLAPSED
   const OSC_HEIGHT = 90
@@ -171,7 +189,8 @@ function MarketChart() {
       <ChartToolbar
         type={type} onType={setType}
         scale={scale} onScale={setScale}
-        interval={interval} onInterval={setInterval}
+        interval={interval}
+        onInterval={iv => { setInterval(iv); setIntervalPinned(true) }}
         servedInterval={data?.interval}
         servedLabel={data?.interval_label}
         overlays={overlays} onOverlays={setOverlays}
@@ -223,7 +242,10 @@ function MarketChart() {
           )}
         </div>
       )}
-      <ChartRanges range={range} onRange={setRange} />
+      {/* A range change releases the interval back to the server's choice —
+          the two are one decision, and pinning minute bars onto a year is not
+          a thing to preserve. */}
+      <ChartRanges range={range} onRange={r => { setRange(r); setIntervalPinned(false) }} />
     </Widget>
   )
 }
