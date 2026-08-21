@@ -199,6 +199,34 @@
      rather than floating in whitespace. */
   /* Cards floating on the canvas with a real gutter — AlphaSpace separates
      widgets with space, not with shared hairlines. */
+  /* A dashed rule between rows, the way their panels separate them.
+     A solid hairline reads as a table border and boxes each value in; dashed
+     at low contrast separates without drawing a grid, which is why theirs
+     stays legible at a dozen rows in a third of the board. */
+  .row-rule {
+    border-bottom: 1px dashed color-mix(in srgb, var(--muted-foreground) 22%, transparent);
+  }
+  .row-rule:last-child { border-bottom: 0; }
+
+  /* A number that just changed, held for a moment.
+     The house rule is that nothing animates, because motion in a data grid is
+     noise — unless it encodes a change in the DATA, which is exactly what this
+     does. With prices now streaming, a value can move while the eye is
+     elsewhere; the flash is what says which one moved. */
+  @keyframes flash-gain {
+    from { background-color: color-mix(in srgb, var(--gain) 26%, transparent); }
+    to   { background-color: transparent; }
+  }
+  @keyframes flash-loss {
+    from { background-color: color-mix(in srgb, var(--loss) 26%, transparent); }
+    to   { background-color: transparent; }
+  }
+  .flash-gain { animation: flash-gain 700ms ease-out; border-radius: 3px; }
+  .flash-loss { animation: flash-loss 700ms ease-out; border-radius: 3px; }
+  @media (prefers-reduced-motion: reduce) {
+    .flash-gain, .flash-loss { animation: none; }
+  }
+
   .collage {
     display: grid;
     /* Still twelve tracks, but the board is read as THREE columns: a tile is

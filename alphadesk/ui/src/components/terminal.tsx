@@ -86,6 +86,41 @@ export function Sparkline({
   )
 }
 
+/* ── Flash: a value that just moved ─────────────────────────────────────── */
+
+/** Tint a number for a moment when it changes, green up and red down.
+ *
+ * The one animation in the terminal, and it earns it: the house rule is that
+ * motion in a data grid is noise UNLESS it encodes a change in the data, and
+ * this encodes nothing else. It became worth having when prices started
+ * streaming — a figure can move while the eye is on another panel, and without
+ * this the only evidence is that it now reads differently than you remember.
+ *
+ * Keyed on the value, so React remounts the span and restarts the animation
+ * even when two changes land back to back.
+ */
+export function Flash({ value, className, children }: {
+  value: number | null | undefined
+  className?: string
+  children: React.ReactNode
+}) {
+  const prev = React.useRef(value)
+  const [dir, setDir] = React.useState<"up" | "down" | null>(null)
+  React.useEffect(() => {
+    const was = prev.current
+    prev.current = value
+    if (typeof was !== "number" || typeof value !== "number" || was === value) return
+    setDir(value > was ? "up" : "down")
+    const t = setTimeout(() => setDir(null), 700)
+    return () => clearTimeout(t)
+  }, [value])
+  return (
+    <span className={cn(dir === "up" && "flash-gain", dir === "down" && "flash-loss", className)}>
+      {children}
+    </span>
+  )
+}
+
 /* ── Widget: the tiled panel every surface is built from ────────────────── */
 
 /** An expanded tile gets height as well as width. Width alone does nothing for

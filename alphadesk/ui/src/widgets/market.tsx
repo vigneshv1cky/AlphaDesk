@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom"
 import type { MoverRow } from "@/lib/api"
 import { useMovers, useQuote } from "@/lib/queries"
 import { useLiveTrade } from "@/lib/live"
-import { Empty, Sparkline, Widget } from "@/components/terminal"
+import { Empty, Flash, Sparkline, Widget } from "@/components/terminal"
 import { registerWidget } from "@/widgets/registry"
 import { TILE_BODY_HEIGHT } from "@/widgets/tile"
 
@@ -25,7 +25,7 @@ const num = (n: number | null | undefined, d = 2) =>
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 border-b border-grid-line px-3 py-[5px] last:border-b-0">
+    <div className="row-rule flex items-baseline justify-between gap-3 px-3 py-[5px]">
       <span className="shrink-0 text-[14px] text-muted-foreground">{label}</span>
       <span className="num truncate text-[14px]">{value}</span>
     </div>
@@ -74,11 +74,13 @@ function EquityOverview() {
           {[q.exchange_name || q.exchange, q.quote_source].filter(Boolean).join(" - ")} · {q.currency}
         </div>
         <div className="text-[15px] font-medium">{q.name} ({q.symbol})</div>
-        <div className="num mt-1 text-[26px] font-semibold leading-none">{num(price)}</div>
+        <Flash value={price} className="num mt-1 inline-block text-[26px] font-semibold leading-none">
+          {num(price)}
+        </Flash>
         <div className="mt-1 flex flex-wrap items-baseline gap-x-2">
-          <span className={`num text-[14px] ${up ? "text-gain" : "text-loss"}`}>
+          <Flash value={change} className={`num text-[14px] ${up ? "text-gain" : "text-loss"}`}>
             {up ? "+" : ""}{num(change)} ({up ? "+" : ""}{num(changePct)}%)
-          </span>
+          </Flash>
           {/* When this price was struck. A quote panel with no time on it looks
               identical whether it is a second old or an hour — the same reason
               the live ticks carry their age. */}
@@ -154,7 +156,7 @@ function MoversTable({ rows }: { rows: MoverRow[] }) {
           <Link
             key={r.symbol}
             to={`/analysis?symbol=${encodeURIComponent(r.symbol)}`}
-            className="flex h-[44px] items-center px-[12px] text-[14px] hover:bg-muted/60"
+            className="row-rule flex h-[44px] items-center px-[12px] text-[14px] hover:bg-muted/60"
           >
             {/* Symbol is plain foreground at normal weight — theirs is not a
                 link colour and not bold. Colour in a grid is reserved for
@@ -168,7 +170,7 @@ function MoversTable({ rows }: { rows: MoverRow[] }) {
                 width spent on nothing, and dropping it is what buys the price
                 and its change enough room to sit together. */}
             <span className="flex min-w-0 flex-1 flex-col items-end leading-tight">
-              <span className="tnum">{r.price?.toFixed(2) ?? "—"}</span>
+              <Flash value={r.price} className="tnum">{r.price?.toFixed(2) ?? "—"}</Flash>
               <span className={`tnum text-[13px] ${up ? "text-gain" : "text-loss"}`}>
                 {r.change_pct == null ? "—" : `${up ? "+" : ""}${r.change_pct.toFixed(2)}%`}
               </span>
