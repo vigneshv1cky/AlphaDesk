@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { api } from "@/lib/api"
+import { api, type ChartRange } from "@/lib/api"
 
 /** One query key per endpoint, defined once.
  *
@@ -18,6 +18,8 @@ export const keys = {
   movers: ["movers"] as const,
   quote: (symbol: string) => ["quote", symbol] as const,
   earningsWeek: (start?: string) => ["earnings-week", start ?? "current"] as const,
+  chart: (symbol: string, range: ChartRange, interval: string | null) =>
+    ["chart", symbol, range, interval ?? "auto"] as const,
 }
 
 export const useEarnings = (enabled = true) =>
@@ -55,3 +57,29 @@ export const useQuote = (symbol: string) =>
 export const useSystem = () =>
   useQuery({ queryKey: keys.system, queryFn: api.system, refetchInterval: 30_000 })
 
+/** The price series, polled like everything else on the board.
+ *
+ * This was the one panel that fetched once and then sat there: a terminal on a
+ * second monitor showing a chart frozen at the moment it was opened. Every
+ * other endpoint here already refreshes on the cadence its server cache
+ * refreshes at, and this now does too.
+ *
+ * 30s for the intraday ranges, matching _CHART_TTL_S — asking faster returns
+ * the same cached bytes. Daily ranges still move (today's bar is live) but not
+ * on that timescale, so they poll at five minutes rather than spending a
+ * request a minute to redraw an identical year.
+ *
+ * The previous series is kept across a range or interval change so the canvas
+ * is never torn down mid-swap — but NOT across a symbol change, where holding
+ * one company's bars under another company's name is the one version of that
+ * which actually misleads.
+ */
+export const useChartSeries = (symbol: string, range: ChartRange, interval: string | null) =>
+  useQuery({
+    queryKey: keys.chart(symbol, range, interval),
+    queryFn: () => api.chartRange(symbol, range, interval ?? undefined),
+    enabled: !!symbol,
+    refetchInterval: range === "1D" || range === "5D" ? 30_000 : 300_000,
+    placeholderData: (prev, prevQuery) =>
+      prevQuery && prevQuery.queryKey[1] === symbol ? prev : undefined,
+  })

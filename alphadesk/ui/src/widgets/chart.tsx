@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "react-router-dom"
-import { api, type ChartRange, type ChartSeries } from "@/lib/api"
+import { type ChartRange } from "@/lib/api"
 import { ChartCanvas, type Projection, type ScaleMode, type SeriesKind } from "@/components/chart/ChartCanvas"
 import { OhlcvStrip } from "@/components/chart/OhlcvStrip"
 import { ChartDrawings } from "@/components/ChartDrawings"
@@ -12,6 +12,7 @@ import { DrawingToolbar, type Drawing, type Tool } from "@/components/ChartDrawi
 import type { ChartBar } from "@/lib/api"
 import { Empty, Widget } from "@/components/terminal"
 import { PANE_INDICATORS } from "@/lib/indicators"
+import { useChartSeries } from "@/lib/queries"
 import { registerWidget } from "@/widgets/registry"
 import { TILE_BODY_HEIGHT } from "@/widgets/tile"
 import type { OverlayId, PaneId } from "@/lib/indicators"
@@ -42,9 +43,6 @@ function MarketChart() {
   const [params] = useSearchParams()
   const symbol = (params.get("symbol") || "").toUpperCase()
 
-  const [data, setData] = useState<ChartSeries | null>(null)
-  const [err, setErr] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
   const [range, setRange] = useState<ChartRange>("1D")
   const [type, setType] = useState<SeriesKind>("line")
   const [scale, setScale] = useState<ScaleMode>("linear")
@@ -74,47 +72,20 @@ function MarketChart() {
   const [hoverAt, setHoverAt] = useState<{ x: number; y: number } | null>(null)
   const theme = useChartTheme()
 
-  /** Fetch WITHOUT throwing the current series away first.
-   *
-   * Blanking the chart to show a placeholder meant every range change tore the
-   * canvas down and put a loading panel in its place — the chart vanished,
-   * text appeared where it had been, and the chart came back. Keeping the last
-   * series on screen while the next one lands makes a range change a redraw
-   * rather than a teardown, and there is nothing to place a layer over.
-   *
-   * The response is guarded by a request id: now that a stale series stays
-   * visible, a slow reply for a range you have already moved off must not be
-   * allowed to land on top of a newer one. */
-  const reqId = useRef(0)
-  const load = useCallback((sym: string, r: ChartRange, iv: string | null) => {
-    if (!sym) return
-    const id = ++reqId.current
-    setErr(null)
-    setLoading(true)
-    api.chartRange(sym, r, iv ?? undefined)
-      .then(d => {
-        if (id !== reqId.current) return
-        setData(d)
-        // Adopt whatever the server chose, so the toolbar reports the series
-        // actually on screen. Safe against a refetch loop: `wantedInterval`
-        // stays null while unpinned, so this changes no dependency.
-        if (iv == null && d.interval) setInterval(d.interval)
-      })
-      .catch(e => {
-        if (id !== reqId.current) return
-        setData(null)
-        setErr(String(e.message ?? e))
-      })
-      .finally(() => { if (id === reqId.current) setLoading(false) })
-  }, [])
+  /** Polled, shared and de-duplicated like every other endpoint on the board
+   * (lib/queries). This replaced a hand-rolled fetch whose request-id guard,
+   * keep-the-old-series-while-loading and loading flag were all reimplementing
+   * what the query layer already does — and which, being one-shot, left the
+   * chart frozen at whatever moment the page was opened. */
+  const { data, isFetching, error } = useChartSeries(symbol, range, wantedInterval)
+  const err = error ? String((error as Error).message ?? error) : null
 
-  // A different SYMBOL does clear it: holding one company's bars under another
-  // company's name is the one version of this that would actually mislead.
-  useEffect(() => { setData(null) }, [symbol])
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- follow the scoped
-  // symbol, range and interval, not this component's own identity
-  useEffect(() => { load(symbol, range, wantedInterval) }, [symbol, range, wantedInterval])
+  // Adopt whatever the server chose, so the toolbar reports the series
+  // actually on screen. No refetch loop: `wantedInterval` stays null while
+  // unpinned, so this changes no query key.
+  useEffect(() => {
+    if (wantedInterval == null && data?.interval) setInterval(data.interval)
+  }, [wantedInterval, data?.interval])
 
   const priceHeight = expanded ? 620 : COLLAPSED
   const OSC_HEIGHT = 90
@@ -177,7 +148,7 @@ function MarketChart() {
       span={8}
       symbol={symbol}
       title="Chart"
-      subtitle={data ? `${data.bar_count} bars · ${data.sessions} sessions${loading ? " · updating…" : ""}` : undefined}
+      subtitle={data ? `${data.bar_count} bars · ${data.sessions} sessions${isFetching ? " · updating…" : ""}` : undefined}
       scroll={expanded ? undefined : TILE_BODY_HEIGHT}
       // Controlled, so the header's ⤢ and the toolbar's drive ONE state. The
       // chart cannot expand on its own terms — the price pane grows and the
@@ -216,6 +187,9 @@ function MarketChart() {
               overlays={buildOverlays(data.bars, overlays)}
               onProjection={setProjection}
               onHover={(b, at) => { setHovered(b); setHoverAt(at) }}
+              // The SERIES identity, not the bars. A poll brings a new array
+              // for the same series and must not reset the reader's view.
+              seriesId={`${symbol}:${range}:${data?.interval ?? ""}`}
               {...theme}
             />
             <ChartDrawings

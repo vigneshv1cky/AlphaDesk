@@ -47,7 +47,7 @@ const AXIS_GAP = 12
 export function ChartCanvas({
   bars, kind, scale: scaleMode, height, panes = [],
   gain, loss, accent, grid, text, tagBg, tagFg, tagBorder,
-  onProjection, onHover, overlays = [],
+  onProjection, onHover, overlays = [], seriesId,
 }: {
   bars: ChartBar[]
   kind: SeriesKind
@@ -70,6 +70,9 @@ export function ChartCanvas({
   onHover?: (bar: ChartBar | null, at: { x: number; y: number } | null) => void
   /** Extra lines drawn over the price pane, already in price space. */
   overlays?: { color: string; points: { t: string; v: number }[]; width?: number }[]
+  /** Identity of the SERIES — symbol, range and interval. What resets the
+   * view. Distinct from `bars`, which now arrives afresh on every poll. */
+  seriesId?: string
 }) {
   const host = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState({ w: 0, h: height })
@@ -104,14 +107,33 @@ export function ChartCanvas({
     return () => ro.disconnect()
   }, [])
 
-  // A new series resets the window to "everything", the way loading a symbol
-  // should — keeping a stale zoom across a range change strands the reader.
+  /** What a new poll must NOT do is move the chart under the reader.
+   *
+   * Resetting on `bars` was right when the series was fetched once: a new
+   * array meant a new series. Now that it refreshes every 30 seconds, a new
+   * array usually means the same series with one more bar on it, and resetting
+   * there would throw away the reader's zoom twice a minute.
+   *
+   * So the reset keys on the SERIES identity. Within one series, growth is
+   * followed only if the view was already sitting at the live edge — pan the
+   * window along so the newest bar stays visible. A reader who has scrolled
+   * back to look at yesterday is left exactly where they are.
+   */
+  const prevSeries = useRef({ id: seriesId, len: bars.length })
   useEffect(() => {
-    setView(bars.length ? { from: 0, to: bars.length } : null)
-    // A hand-set price scale belongs to the series it was set on; carrying it
-    // onto a different symbol or range would silently misframe the new one.
-    setYZoom(1)
-  }, [bars])
+    const was = prevSeries.current
+    prevSeries.current = { id: seriesId, len: bars.length }
+    if (was.id !== seriesId) {
+      setView(bars.length ? { from: 0, to: bars.length } : null)
+      // A hand-set price scale belongs to the series it was set on; carrying
+      // it onto a different symbol or range would silently misframe the new one.
+      setYZoom(1)
+      return
+    }
+    const grew = bars.length - was.len
+    if (grew <= 0) return
+    setView(v => (v && v.to >= was.len - 0.5 ? { from: v.from + grew, to: v.to + grew } : v))
+  }, [seriesId, bars.length])
 
   const panesH = panes.reduce((n, p) => n + p.height, 0)
   const priceH = Math.max(40, box.h - AXIS_H - panesH)
