@@ -47,7 +47,7 @@ const AXIS_GAP = 12
 export function ChartCanvas({
   bars, kind, scale: scaleMode, height, panes = [],
   gain, loss, accent, grid, text, tagBg, tagFg, tagBorder,
-  onProjection, onHover, overlays = [], seriesId, intraday = false,
+  onProjection, onHover, overlays = [], seriesId, intraday = false, onRemovePane,
 }: {
   bars: ChartBar[]
   kind: SeriesKind
@@ -76,6 +76,8 @@ export function ChartCanvas({
   /** Whether these bars are INTRADAY. Only then do session boundaries mean
    * anything: on daily bars every bar is already one session. */
   intraday?: boolean
+  /** Remove a pane from its own header. Omitted, no control is drawn. */
+  onRemovePane?: (id: string) => void
 }) {
   const host = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState({ w: 0, h: height })
@@ -429,10 +431,15 @@ export function ChartCanvas({
           ? `${d}L${seriesW},${top + pane.height}L0,${top + pane.height}Z` : ""
         return { kind: ser.kind, d, areaD, color: ser.color, width: (ser as { width?: number }).width ?? 1.5 }
       })
+      // One map per series so the legend can read a value at the cursor in
+      // constant time. Built here because this memo already walks every point;
+      // doing it at render would repeat that work on every mouse move.
+      const lookups = pane.series.map(ser => new Map(ser.points.map(p => [p.t, p.v])))
+      const colors = pane.series.map(ser => ser.color)
       const levels = (pane.levels ?? []).map(v => ({ v, y: yIn(v) }))
       const axis = [ext.min, (ext.min + ext.max) / 2, ext.max]
         .map(v => ({ v, y: yIn(v) }))
-      return { pane, top, drawn, levels, axis }
+      return { pane, top, drawn, levels, axis, lookups, colors }
     })
   }, [panes, priceH, bars, s, barW, half, seriesW, from, to])
 
@@ -646,7 +653,7 @@ export function ChartCanvas({
         })}
 
         {/* the stacked panes */}
-        {paneLayout.map(({ pane, top, drawn, levels, axis }) => (
+        {paneLayout.map(({ pane, top, drawn, levels, axis, lookups, colors }) => (
           <g key={pane.id}>
             <line x1={0} y1={top} x2={plotW} y2={top} stroke={grid} strokeWidth={1} />
             {levels.map(l => (
@@ -674,8 +681,45 @@ export function ChartCanvas({
                   <path d={d.d} fill="none" stroke={d.color} strokeWidth={d.width} />
                 </g>
               ))}
-            {pane.label && (
-              <text x={4} y={top + 12} fill={text} fontSize={10}>{pane.label}</text>
+            {/* The legend, with the VALUES at the cursor.
+                A pane labelled only "RSI 9" makes the reader estimate a number
+                off a 90px axis; the price strip above already answers that for
+                price, and an indicator deserves the same. Falls back to the
+                latest bar when nothing is hovered, so it reads as a current
+                value rather than going blank. */}
+            {pane.label && (() => {
+              const at = bars[hoveredIdx >= 0 ? hoveredIdx : bars.length - 1]?.t
+              return (
+                <text x={4} y={top + 12} fontSize={10} className="tnum">
+                  <tspan fill={text}>{pane.label}</tspan>
+                  {lookups.map((m, i) => {
+                    const v = at == null ? undefined : m.get(at)
+                    if (v == null || !Number.isFinite(v)) return null
+                    return (
+                      <tspan key={i} dx={6} fill={colors[i]}>
+                        {paneAxisLabel(v, pane.compact)}
+                      </tspan>
+                    )
+                  })}
+                </text>
+              )
+            })()}
+            {/* Drop the pane from where it is, rather than reopening the menu
+                to find the row you just ticked. */}
+            {onRemovePane && pane.id !== "volume" && (
+              <g
+                style={{ cursor: "pointer" }}
+                // Kept off the host, whose mousedown starts a horizontal pan.
+                // Harmless on a click that does not move, but it would arm a
+                // drag on the way to dismissing a pane.
+                onMouseDown={e => e.stopPropagation()}
+                onClick={e => { e.stopPropagation(); onRemovePane(pane.id) }}
+                pointerEvents="all"
+              >
+                <rect x={seriesW - 16} y={top + 3} width={13} height={13} fill="transparent" rx={2} />
+                <text x={seriesW - 10} y={top + 13} fill={text} fontSize={10} textAnchor="middle">×</text>
+                <title>Remove {pane.label ?? pane.id}</title>
+              </g>
             )}
           </g>
         ))}

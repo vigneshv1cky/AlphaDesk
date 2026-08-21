@@ -61,6 +61,18 @@ function MarketChart() {
   const wantedInterval = intervalPinned ? interval : null
   const [overlays, setOverlays] = useState<OverlayId[]>([])
   const [panes, setPanes] = useState<PaneId[]>([])
+
+  /** Choosing a pane indicator opens the tile if it is closed.
+   *
+   * Panes only render once expanded — at tile height they would be 40px
+   * slivers — but the menu offered them either way, so ticking RSI on a
+   * collapsed tile did nothing at all and said nothing about why. Either the
+   * option should have been unavailable or the choice should take effect;
+   * taking effect is the one that gives the reader what they asked for. */
+  const choosePanes = (next: PaneId[]) => {
+    if (next.length > panes.length) setExpanded(true)
+    setPanes(next)
+  }
   const [expanded, setExpanded] = useState(false)
   // Drawings live here, not inside PriceChart: that component is torn down and
   // rebuilt on every range or series change, and annotations must outlive both.
@@ -188,7 +200,7 @@ function MarketChart() {
         servedLabel={data?.interval_label}
         available={data?.intervals}
         overlays={overlays} onOverlays={setOverlays}
-        panes={panes} onPanes={setPanes}
+        panes={panes} onPanes={choosePanes}
         drawOpen={drawOpen} onDrawOpen={() => setDrawOpen(o => !o)}
         indicatorsReliable={data?.indicators_reliable ?? false}
       />
@@ -212,6 +224,7 @@ function MarketChart() {
               // The SERIES identity, not the bars. A poll brings a new array
               // for the same series and must not reset the reader's view.
               seriesId={`${symbol}:${range}:${data?.interval ?? ""}`}
+              onRemovePane={id => setPanes(p => p.filter(x => x !== id))}
               // Session shading only means something on intraday bars — a
               // daily bar IS a session, so marking its boundaries would draw a
               // divider between every pair of bars.
