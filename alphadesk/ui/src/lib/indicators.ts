@@ -398,17 +398,23 @@ export function adx(bars: ChartBar[], period = 14): { adx: Point[]; plusDI: Poin
  * the server; the rest are computed above. */
 export type PaneId = "rsi" | "macd" | "stoch" | "williams" | "cci" | "roc" | "mfi" | "atr" | "obv" | "adx"
 
-export const PANE_INDICATORS: { id: PaneId; label: string; group: string }[] = [
-  { id: "rsi",      label: "Relative Strength Index (9)",   group: "Momentum" },
-  { id: "stoch",    label: "Stochastic Oscillator (14, 3)", group: "Momentum" },
-  { id: "williams", label: "Williams %R (14)",              group: "Momentum" },
-  { id: "cci",      label: "Commodity Channel Index (20)",  group: "Momentum" },
-  { id: "roc",      label: "Rate of Change (12)",           group: "Momentum" },
-  { id: "macd",     label: "MACD (12, 26, 9)",              group: "Trend" },
-  { id: "adx",      label: "Average Directional Index (14)", group: "Trend" },
-  { id: "atr",      label: "Average True Range (14)",       group: "Volatility" },
-  { id: "mfi",      label: "Money Flow Index (14)",         group: "Volume" },
-  { id: "obv",      label: "On-Balance Volume",             group: "Volume" },
+/** `minBars` is the indicator's own WARM-UP: how many bars it needs before it
+ * produces anything worth drawing. Per indicator on purpose. A single global
+ * threshold has to be set to the hungriest one — MACD's 26+9 — and then hides
+ * RSI-9 from a 24-bar month that supports it fine, which is what made a switch
+ * to the 1M range silently drop every pane the reader had chosen. */
+export const PANE_INDICATORS: { id: PaneId; label: string; group: string; minBars: number }[] = [
+  { id: "rsi",      label: "Relative Strength Index (9)",    group: "Momentum",   minBars: 9 },
+  { id: "stoch",    label: "Stochastic Oscillator (14, 3)",  group: "Momentum",   minBars: 17 },
+  { id: "williams", label: "Williams %R (14)",               group: "Momentum",   minBars: 14 },
+  { id: "cci",      label: "Commodity Channel Index (20)",   group: "Momentum",   minBars: 20 },
+  { id: "roc",      label: "Rate of Change (12)",            group: "Momentum",   minBars: 13 },
+  { id: "macd",     label: "MACD (12, 26, 9)",               group: "Trend",      minBars: 35 },
+  // Wilder smooths twice, so ADX needs about two periods before it settles.
+  { id: "adx",      label: "Average Directional Index (14)", group: "Trend",      minBars: 28 },
+  { id: "atr",      label: "Average True Range (14)",        group: "Volatility", minBars: 14 },
+  { id: "mfi",      label: "Money Flow Index (14)",          group: "Volume",     minBars: 15 },
+  { id: "obv",      label: "On-Balance Volume",              group: "Volume",     minBars: 2 },
 ]
 
 export type OverlayId =

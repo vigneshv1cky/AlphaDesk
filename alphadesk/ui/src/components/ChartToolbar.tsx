@@ -135,7 +135,7 @@ function Item({ selected, onClick, children }: {
 export function ChartToolbar({
   type, onType, scale, onScale,
   overlays, onOverlays, panes, onPanes, indicatorsReliable,
-  interval, onInterval, servedInterval, servedLabel, available, drawOpen, onDrawOpen,
+  interval, onInterval, servedInterval, servedLabel, available, barCount = 0, drawOpen, onDrawOpen,
 }: {
   type: SeriesKind
   onType: (t: SeriesKind) => void
@@ -156,6 +156,9 @@ export function ChartToolbar({
   drawOpen: boolean
   onDrawOpen: () => void
   indicatorsReliable: boolean
+  /** Bars on this range, so an indicator that cannot warm up on them is not
+   * offered as though it could. */
+  barCount?: number
 }) {
   const toggle = (id: OverlayId) =>
     onOverlays(overlays.includes(id) ? overlays.filter(o => o !== id) : [...overlays, id])
@@ -208,6 +211,7 @@ export function ChartToolbar({
             overlays={overlays} toggle={toggle}
             panes={panes} onPanes={onPanes}
             indicatorsReliable={indicatorsReliable}
+            barCount={barCount}
           />
         )}
       </Menu>
@@ -277,12 +281,13 @@ export function ChartRanges({ range, onRange }: {
 /** The indicator picker: a search box over a grouped list, the way theirs is.
  * With a dozen entries a flat list is already hard to scan, and the groups are
  * how a reader thinks about them — averages, then bands, then volume. */
-function IndicatorMenu({ overlays, toggle, panes, onPanes, indicatorsReliable }: {
+function IndicatorMenu({ overlays, toggle, panes, onPanes, indicatorsReliable, barCount }: {
   overlays: OverlayId[]
   toggle: (id: OverlayId) => void
   panes: PaneId[]
   onPanes: (v: PaneId[]) => void
   indicatorsReliable: boolean
+  barCount: number
 }) {
   const [q, setQ] = useState("")
   const needle = q.trim().toLowerCase()
@@ -297,11 +302,14 @@ function IndicatorMenu({ overlays, toggle, panes, onPanes, indicatorsReliable }:
    * a reader looking for "stochastic" should not have to know that it draws
    * under the price rather than over it. */
   const paneGroups = useMemo(() => {
-    const hits = PANE_INDICATORS.filter(o => !needle || o.label.toLowerCase().includes(needle))
+    // Only what this range has the bars to warm up. Offering MACD on a 24-bar
+    // month would tick a box and draw nothing.
+    const hits = PANE_INDICATORS.filter(o =>
+      (!needle || o.label.toLowerCase().includes(needle)) && barCount >= o.minBars)
     const by = new Map<string, typeof PANE_INDICATORS>()
     for (const o of hits) by.set(o.group, [...(by.get(o.group) ?? []), o])
     return [...by.entries()]
-  }, [needle])
+  }, [needle, barCount])
 
   const togglePane = (id: PaneId) =>
     onPanes(panes.includes(id) ? panes.filter(p => p !== id) : [...panes, id])

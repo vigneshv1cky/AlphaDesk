@@ -240,3 +240,35 @@ class TestOfferableIntervals:
         # ~59 bars: roughly two a session. Thin-looking but perfectly readable,
         # and the floor must not be raised so far that it takes this with it.
         assert "4h" in prices.available_intervals("1M")
+
+
+class TestDailyCoverage:
+    """What `indicators_reliable` means on a DAILY series.
+
+    It answers whether the FEED can be trusted, and a daily bar per trading day
+    is complete by construction. It used to also fail the whole series below 35
+    bars — MACD's 26+9 warm-up — which is a real limit but MACD's alone.
+    Applying it to everything hid RSI-9 from a 24-bar month that supports it
+    fine, so switching range to 1M silently dropped every pane the reader had
+    chosen. Warm-up is per indicator and lives with each one (PANE_INDICATORS'
+    minBars).
+    """
+
+    def _bars(self, n):
+        return [{"close": 1.0 + i} for i in range(n)]
+
+    def test_a_short_daily_series_is_still_a_trustworthy_feed(self):
+        # 24 bars: too few for MACD, ample for RSI-9. The flag must not be the
+        # thing that decides that.
+        assert prices._daily_coverage(self._bars(24))["indicators_reliable"] is True
+
+    def test_coverage_is_complete_by_construction(self):
+        cov = prices._daily_coverage(self._bars(10))
+        assert cov["coverage"] == 1.0
+        assert cov["median_gap_min"] is None
+        assert cov["bar_count"] == 10 and cov["sessions"] == 10
+
+    def test_an_empty_series_is_not_reliable(self):
+        cov = prices._daily_coverage([])
+        assert cov["indicators_reliable"] is False
+        assert cov["coverage"] == 0.0

@@ -162,7 +162,12 @@ function MarketChart() {
     if (data.indicators_reliable) {
       // Built in the order the menu lists them, not the order they were
       // clicked, so the stack does not reshuffle as you toggle.
-      for (const id of PANE_INDICATORS.map(p => p.id).filter(id => panes.includes(id))) {
+      // Each indicator judges its own warm-up against the bars actually here,
+      // so a shorter range drops only what genuinely cannot be computed.
+      const drawable = PANE_INDICATORS
+        .filter(p => panes.includes(p.id) && bars.length >= p.minBars)
+        .map(p => p.id)
+      for (const id of drawable) {
         if (id === "rsi") {
           out.push(sized(rsiPane(bars, data.rsi_9, FITTED_PANE_H, "#7c3aed", {
             oversold: data.thresholds.rsi_oversold, overbought: data.thresholds.rsi_overbought,
@@ -225,6 +230,7 @@ function MarketChart() {
         panes={panes} onPanes={setPanes}
         drawOpen={drawOpen} onDrawOpen={() => setDrawOpen(o => !o)}
         indicatorsReliable={data?.indicators_reliable ?? false}
+        barCount={bars.length}
       />
       {err && <Empty>{err}</Empty>}
       {!err && !data && <Empty>loading…</Empty>}

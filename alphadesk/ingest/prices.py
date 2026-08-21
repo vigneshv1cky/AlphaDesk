@@ -795,14 +795,20 @@ def _daily_coverage(bars: list[dict]) -> dict:
     """Coverage for a DAILY series.
 
     The intraday gate asks "did the feed print in most minutes", which is
-    meaningless here — a daily bar per trading day is complete by construction.
-    What can still be true is having too few bars to seed the indicators, so
-    that is what this reports. MACD needs 26+9 before its signal line means
-    anything; below that the panes stay hidden for the same reason as ever.
+    meaningless here — a daily bar per trading day is complete by construction,
+    so a daily series is as good as this feed gets.
+
+    It used to also fail the whole series below 35 bars, MACD's 26+9 warm-up.
+    That is a real limit but it is MACD's, and applying it to everything hid
+    RSI-9 from a 24-bar month that could support it perfectly well — switching
+    range to 1M silently dropped every pane the reader had chosen. Warm-up is
+    per indicator and is judged where each one is drawn (PANE_INDICATORS'
+    minBars); what this flag answers is the question it was invented for,
+    whether the FEED can be trusted.
     """
     n = len(bars)
     return {"bar_count": n, "sessions": n, "coverage": 1.0 if n else 0.0,
-            "median_gap_min": None, "indicators_reliable": n >= 35}
+            "median_gap_min": None, "indicators_reliable": n > 0}
 
 
 def get_chart_series(symbol: str, days: int = 2, range_key: str | None = None,
