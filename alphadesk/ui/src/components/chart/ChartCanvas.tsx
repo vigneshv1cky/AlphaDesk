@@ -72,6 +72,15 @@ export function ChartCanvas({
    * gutter changes it; double-clicking there puts it back to fitting. */
   const [yZoom, setYZoom] = useState(1)
   const yDrag = useRef<{ y: number; zoom: number } | null>(null)
+  /** Rendered, so the ns-resize cursor holds for the WHOLE gesture instead of
+   * reverting to the crosshair the moment the pointer leaves the gutter. */
+  const [yResizing, setYResizing] = useState(false)
+  // One update per frame. A price-scale change invalidates every path string
+  // and re-fires the projection effect (a setState in the parent), so running
+  // that per mousemove event does several times the work a frame can show.
+  const yFrame = useRef<number | null>(null)
+  const yNext = useRef<number | null>(null)
+  useEffect(() => () => { if (yFrame.current != null) cancelAnimationFrame(yFrame.current) }, [])
   const clipId = useId()
 
   useEffect(() => {
@@ -237,13 +246,9 @@ export function ChartCanvas({
     const r = host.current!.getBoundingClientRect()
     const x = e.clientX - r.left
     const y = e.clientY - r.top
-    if (yDrag.current) {
-      // Exponential so the feel is the same at every zoom level, and so the
-      // factor can never reach zero and invert the axis. Down compresses.
-      const dy = e.clientY - yDrag.current.y
-      setYZoom(Math.min(8, Math.max(0.2, yDrag.current.zoom * Math.exp(-dy / 200))))
-      return
-    }
+    // The gutter owns this gesture via pointer capture; the host's job is to
+    // not draw a crosshair through the middle of it.
+    if (yDrag.current) return
     if (drag.current) {
       const span = drag.current.to - drag.current.from
       const shift = ((drag.current.x - e.clientX) / plotW) * span
@@ -257,7 +262,12 @@ export function ChartCanvas({
     const i = Math.round(xToIndex(s, x) - 0.5)
     onHover?.(bars[Math.max(0, Math.min(bars.length - 1, i))] ?? null, { x, y })
   }
-  const stop = () => { drag.current = null; yDrag.current = null; setPanning(false) }
+  const stop = () => { drag.current = null; setPanning(false) }
+  // Deliberately NOT cleared here or in leave(): the price gutter is a couple
+  // of hundred pixels tall and a stretch runs past the tile edge almost at
+  // once. Ending the resize on mouseleave made every drag of any size die
+  // halfway, which is most of why this felt broken rather than merely fast.
+  // Pointer capture keeps delivering to the gutter, and pointerup ends it.
   const leave = () => { stop(); setCursor(null); onHover?.(null, null) }
 
   // ── geometry, built as path strings ─────────────────────────────────────
@@ -415,7 +425,7 @@ export function ChartCanvas({
     <div
       ref={host}
       className="relative w-full select-none"
-      style={{ height, cursor: panning ? "grabbing" : "crosshair" }}
+      style={{ height, cursor: yResizing ? "ns-resize" : panning ? "grabbing" : "crosshair" }}
       onMouseDown={onDown}
       onMouseMove={onMove}
       onMouseUp={stop}
@@ -577,13 +587,39 @@ export function ChartCanvas({
         <rect
           x={plotW} y={0} width={AXIS_W} height={priceH}
           fill="transparent"
-          style={{ cursor: "ns-resize" }}
-          onMouseDown={e => {
-            // Kept off the host's handler, which would start a horizontal pan
-            // at the same time.
+          style={{ cursor: "ns-resize", touchAction: "none" }}
+          onPointerDown={e => {
+            // Capture, so the rest of the gesture keeps arriving here even once
+            // the pointer is off the gutter, off the tile, or over the AI rail.
+            // Without it a stretch of any real size ended the moment the cursor
+            // crossed the chart's edge.
             e.stopPropagation()
+            ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
             yDrag.current = { y: e.clientY, zoom: yZoom }
+            setYResizing(true)
           }}
+          onPointerMove={e => {
+            if (!yDrag.current) return
+            e.stopPropagation()
+            // Exponential: the same drag distance is the same proportional
+            // change at every zoom level, and the factor can never reach zero
+            // and invert the axis. Down compresses, matching theirs.
+            const dy = e.clientY - yDrag.current.y
+            yNext.current = Math.min(8, Math.max(0.2, yDrag.current.zoom * Math.exp(-dy / 160)))
+            if (yFrame.current == null) {
+              yFrame.current = requestAnimationFrame(() => {
+                yFrame.current = null
+                if (yNext.current != null) setYZoom(yNext.current)
+              })
+            }
+          }}
+          onPointerUp={e => {
+            e.stopPropagation()
+            ;(e.currentTarget as Element).releasePointerCapture(e.pointerId)
+            yDrag.current = null
+            setYResizing(false)
+          }}
+          onPointerCancel={() => { yDrag.current = null; setYResizing(false) }}
           onDoubleClick={e => { e.stopPropagation(); setYZoom(1) }}
         >
           <title>Drag to stretch the price scale · double-click to fit</title>
