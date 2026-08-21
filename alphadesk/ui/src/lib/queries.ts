@@ -15,6 +15,8 @@ export const keys = {
   screener: ["screener"] as const,
   system: ["system"] as const,
   tape: ["tape"] as const,
+  indices: ["indices"] as const,
+  crypto: ["crypto"] as const,
   movers: ["movers"] as const,
   quote: (symbol: string) => ["quote", symbol] as const,
   earningsWeek: (start?: string) => ["earnings-week", start ?? "current"] as const,
@@ -43,6 +45,12 @@ export const useTape = () =>
 
 export const useMovers = () =>
   useQuery({ queryKey: keys.movers, queryFn: () => api.movers(20), refetchInterval: 120_000 })
+
+export const useIndices = () =>
+  useQuery({ queryKey: keys.indices, queryFn: api.indices, refetchInterval: 60_000 })
+
+export const useCrypto = () =>
+  useQuery({ queryKey: keys.crypto, queryFn: () => api.crypto(20), refetchInterval: 120_000 })
 
 /** Quote for one symbol. Disabled when there is no symbol, so a widget can
  * mount before the board has been scoped without firing a bad request. */

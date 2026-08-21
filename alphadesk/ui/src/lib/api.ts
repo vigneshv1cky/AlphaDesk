@@ -212,6 +212,15 @@ export interface Fundamentals {
   series: Record<string, { t: string; v: number }[]>
 }
 
+/** Crypto rows reuse MoverRow: same columns, same renderer. `all` is the
+ * configured order rather than a ranking — the unsorted view. */
+export interface CryptoMovers {
+  all: MoverRow[]
+  most_active: MoverRow[]
+  gainers: MoverRow[]
+  losers: MoverRow[]
+}
+
 export interface TapeEntry {
   symbol: string
   label: string
@@ -417,6 +426,8 @@ export const api = {
   earningsWeek: (start?: string) =>
     get<EarningsWeek>(`/api/earnings/week${start ? `?start=${start}` : ""}`),
   tape: () => get<{ tape: TapeEntry[] }>("/api/tape"),
+  indices: () => get<{ indices: TapeEntry[] }>("/api/indices"),
+  crypto: (top = 20) => get<CryptoMovers>(`/api/crypto?top=${top}`),
   quote: (symbol: string) => get<Quote>(`/api/quote/${encodeURIComponent(symbol)}`),
   movers: (top = 20) => get<Movers>(`/api/movers?top=${top}`),
   tokens: (days = 1) => get<{ usage: TokenRow[] }>(`/api/tokens?days=${days}`),

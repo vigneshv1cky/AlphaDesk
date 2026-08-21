@@ -1092,6 +1092,175 @@ def market_tape() -> list[dict]:
     return out
 
 
+_index_cache: tuple[float, list[dict]] = (0.0, [])
+_INDEX_TTL_S = 60
+
+
+def index_board() -> list[dict]:
+    """The cross-asset panel: indices, rates, commodities and FX.
+
+    Same shape and same upstream as market_tape(), against the wider
+    INDEX_BOARD list — see the config note for why the two lists are separate
+    rather than one shared with the strip.
+    """
+    global _index_cache
+    ts, cached = _index_cache
+    if cached and time.time() - ts < _INDEX_TTL_S:
+        return cached
+
+    from alphadesk.config import INDEX_BOARD
+    pairs = []
+    for entry in INDEX_BOARD:
+        sym, _, label = entry.partition(":")
+        pairs.append((sym.strip(), (label or sym).strip()))
+    if not pairs:
+        return []
+
+    out: list[dict] = []
+    try:
+        import yfinance as yf
+        data = yf.download([s for s, _ in pairs], period="5d", interval="1d",
+                           group_by="ticker", progress=False, threads=True,
+                           auto_adjust=True)
+        for sym, label in pairs:
+            try:
+                closes = data[sym]["Close"].dropna()
+                if len(closes) < 2:
+                    continue
+                last, prev = float(closes.iloc[-1]), float(closes.iloc[-2])
+                if not prev:
+                    continue
+                out.append({"symbol": sym, "label": label,
+                            "price": round(last, 4 if last < 10 else 2),
+                            "change_pct": round(100.0 * (last - prev) / prev, 2)})
+            except Exception:
+                continue          # one bad symbol must not empty the board
+    except Exception as exc:
+        log.debug("index board failed: %s", exc)
+        return cached
+
+    if out:
+        _index_cache = (time.time(), out)
+    return out
+
+
+_crypto_cache: tuple[float, dict] = (0.0, {})
+_CRYPTO_TTL_S = 120
+_CRYPTO_SPARK_POINTS = 24
+
+
+def _rank_crypto(rows: list[dict], top: int) -> dict:
+    """The four views, split out from the fetch so the ordering is testable
+    without a network client.
+
+    `dollar_volume` is a ranking input, not a column — it is dropped on the way
+    out so nothing renders a turnover figure that is Alpaca-venue-only.
+    """
+    by_turnover = sorted(rows, key=lambda r: r["dollar_volume"], reverse=True)
+    by_change = sorted(rows, key=lambda r: r["change_pct"], reverse=True)
+
+    def strip(rs):
+        return [{k: v for k, v in r.items() if k != "dollar_volume"} for r in rs[:top]]
+
+    return {
+        # "All" keeps the config's own order — the reader's list, unsorted.
+        "all": strip(rows),
+        "most_active": strip(by_turnover),
+        "gainers": strip([r for r in by_change if r["change_pct"] > 0]),
+        "losers": strip([r for r in reversed(by_change) if r["change_pct"] < 0]),
+    }
+
+
+def crypto_movers(top: int = 20) -> dict:
+    """{all, most_active, gainers, losers} over CRYPTO_UNIVERSE.
+
+    ALPACA, not yfinance. The first cut of this scraped Yahoo and returned 4 of
+    18 rows under throttling while the same request to Alpaca returned every
+    one — and a panel that silently sheds three quarters of its rows is worse
+    than no panel, because nothing on screen says it is incomplete.
+
+    WHAT "MOST ACTIVE" MEANS HERE. The turnover is Alpaca's own venue, not
+    consolidated crypto volume — BTC prints ~11 coins a day on it. Ranking by
+    it is honest as "busiest on this feed" and wrong as "busiest in crypto",
+    the same distinction ingest/stream.py draws about IEX. Gainers and losers
+    are price-derived and carry no such caveat.
+
+    Change is measured over a ROLLING 24 HOURS, not against a previous close.
+    Crypto has no close: a daily bar's boundary is a midnight the market never
+    observed, so a session-change figure here would disagree with every venue
+    the reader can check. Hourly bars give the 24h-ago price, the 24h turnover
+    and the spark off one request; the snapshot supplies a live last price.
+    """
+    global _crypto_cache
+    ts, cached = _crypto_cache
+    if cached and time.time() - ts < _CRYPTO_TTL_S:
+        return cached
+
+    from alphadesk.config import CRYPTO_UNIVERSE
+    pairs = []
+    for entry in CRYPTO_UNIVERSE:
+        sym, _, label = entry.partition(":")
+        pairs.append((sym.strip(), (label or sym).strip()))
+    if not pairs:
+        return {}
+    symbols = [s for s, _ in pairs]
+    labels = dict(pairs)
+
+    try:
+        from datetime import datetime, timedelta, timezone
+        from alpaca.data.historical import CryptoHistoricalDataClient
+        from alpaca.data.requests import CryptoBarsRequest, CryptoSnapshotRequest
+        from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+        client = _bound(CryptoHistoricalDataClient(os.environ.get("ALPACA_API_KEY"),
+                                                   os.environ.get("ALPACA_SECRET_KEY")))
+        end_t = datetime.now(timezone.utc)
+        bars = client.get_crypto_bars(CryptoBarsRequest(
+            symbol_or_symbols=symbols,
+            timeframe=TimeFrame(1, TimeFrameUnit.Hour),
+            start=end_t - timedelta(days=2), end=end_t)).data
+        try:
+            snaps = client.get_crypto_snapshot(
+                CryptoSnapshotRequest(symbol_or_symbols=symbols))
+        except Exception:
+            snaps = {}            # bars alone still answer every column
+    except Exception as exc:
+        log.debug("crypto movers failed: %s", exc)
+        return cached
+
+    rows: list[dict] = []
+    for sym in symbols:
+        series = list(bars.get(sym) or [])
+        if len(series) < 2:
+            continue              # omit rather than render an unpriced row
+        closes = [float(b.close) for b in series]
+        snap = snaps.get(sym) if snaps else None
+        live = getattr(getattr(snap, "latest_trade", None), "price", None)
+        last = float(live) if live else closes[-1]
+        # 25 hourly bars back is 24 hours of elapsed time.
+        prev = closes[-25] if len(closes) >= 25 else closes[0]
+        if not prev or not last:
+            continue
+        window = series[-_CRYPTO_SPARK_POINTS:]
+        vol = sum(float(getattr(b, "volume", 0) or 0) for b in window)
+        dp = 6 if last < 1 else (4 if last < 100 else 2)
+        rows.append({
+            "symbol": sym,
+            "name": labels.get(sym, sym),
+            "price": round(last, dp),
+            "change_pct": round(100.0 * (last - prev) / prev, 2),
+            "volume": int(vol),
+            "dollar_volume": vol * last,
+            "spark": [round(float(b.close), dp) for b in window],
+        })
+
+    if not rows:
+        return cached
+
+    result = _rank_crypto(rows, top)
+    _crypto_cache = (time.time(), result)
+    return result
+
+
 _quote_cache: dict[str, tuple[float, dict | None]] = {}
 _QUOTE_TTL_S = 60
 

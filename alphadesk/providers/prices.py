@@ -62,5 +62,13 @@ class BuiltinPrices:
         from alphadesk.ingest import prices
         return prices.market_tape()
 
+    def index_board(self) -> list[dict]:
+        from alphadesk.ingest import prices
+        return prices.index_board()
+
+    def crypto_movers(self, top: int = 20) -> dict:
+        from alphadesk.ingest import prices
+        return prices.crypto_movers(top=top)
+
 
 register("prices", BuiltinPrices.name, BuiltinPrices)

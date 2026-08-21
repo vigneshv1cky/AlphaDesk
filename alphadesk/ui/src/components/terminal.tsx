@@ -133,6 +133,7 @@ const EXPANDED_BODY_HEIGHT = 760
 
 /** The widget header, which the section's minimum has to account for. */
 const HEADER_H = 38
+const TOOLBAR_H = 30
 
 /** Titles are ReactNode, but an aria-label has to be a string. Anything that is
  * not plain text falls back to a generic word rather than "[object Object]". */
@@ -141,7 +142,7 @@ function titleText(title: React.ReactNode): string {
 }
 
 export function Widget({
-  title, symbol, subtitle, actions, span = 12, className, bodyClassName, scroll, children,
+  title, symbol, subtitle, actions, toolbar, span = 12, className, bodyClassName, scroll, children,
   expanded, onExpandChange, expandable = true,
 }: {
   title?: React.ReactNode
@@ -150,6 +151,15 @@ export function Widget({
   symbol?: string
   subtitle?: React.ReactNode
   actions?: React.ReactNode
+  /** A strip pinned between the header and the scrolling body — tab switchers,
+   * filters, anything that selects WHAT the body shows.
+   *
+   * It cannot live in the header: at a span-4 tile the header is 278px, and
+   * three tab pills beside the title overflowed it by 63px while crushing the
+   * subtitle to zero width. It cannot live in the body either, because the
+   * body scrolls and the control naming the current view would scroll away
+   * with the rows it labels. So it gets its own row, outside the scroller. */
+  toolbar?: React.ReactNode
   /** Columns to span on the 12-col `.collage` grid. Ignored off-grid. */
   span?: number
   className?: string
@@ -196,7 +206,7 @@ export function Widget({
       style={{
         gridColumn: `span ${cols} / span ${cols}`,
         ...(bodyHeight && typeof bodyHeight === "number"
-          ? { minHeight: `${bodyHeight + HEADER_H}px` } : {}),
+          ? { minHeight: `${bodyHeight + HEADER_H + (toolbar ? TOOLBAR_H : 0)}px` } : {}),
       }}
       className={cn(
         "flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-panel",
@@ -247,6 +257,12 @@ export function Widget({
             </button>
           )}
         </header>
+      )}
+      {toolbar && (
+        <div data-slot="widget-toolbar"
+             className="flex h-[30px] shrink-0 items-center gap-0.5 border-b border-grid-line bg-panel px-2">
+          {toolbar}
+        </div>
       )}
       <div
         // A MINIMUM plus flex, not a fixed height.

@@ -272,3 +272,54 @@ class TestDailyCoverage:
         cov = prices._daily_coverage([])
         assert cov["indicators_reliable"] is False
         assert cov["coverage"] == 0.0
+
+
+class TestCryptoRanking:
+    """The four crypto views. Split out from the fetch precisely so this can be
+    pinned without a network client — the ordering is the part that would go
+    wrong silently, because every view renders the same columns."""
+
+    ROWS = [
+        {"symbol": "BTC/USD", "change_pct": 2.0, "dollar_volume": 900.0},
+        {"symbol": "ETH/USD", "change_pct": -4.0, "dollar_volume": 500.0},
+        {"symbol": "SOL/USD", "change_pct": 9.0, "dollar_volume": 100.0},
+        {"symbol": "XRP/USD", "change_pct": -1.0, "dollar_volume": 700.0},
+    ]
+
+    def test_all_preserves_the_configured_order(self):
+        """`all` is the unranked view. Sorting it would make every one of the
+        four tabs a ranking and leave the reader no way to see the list as
+        configured — the same reason inventory() is a plain alphabetical read."""
+        out = prices._rank_crypto(self.ROWS, 10)
+        assert [r["symbol"] for r in out["all"]] == [r["symbol"] for r in self.ROWS]
+
+    def test_most_active_ranks_by_turnover_not_unit_volume(self):
+        out = prices._rank_crypto(self.ROWS, 10)
+        assert [r["symbol"] for r in out["most_active"]] == [
+            "BTC/USD", "XRP/USD", "ETH/USD", "SOL/USD"]
+
+    def test_gainers_and_losers_split_on_sign_and_lead_with_the_extreme(self):
+        out = prices._rank_crypto(self.ROWS, 10)
+        assert [r["symbol"] for r in out["gainers"]] == ["SOL/USD", "BTC/USD"]
+        # Worst first: a losers list led by the mildest decline buries its own
+        # headline row.
+        assert [r["symbol"] for r in out["losers"]] == ["ETH/USD", "XRP/USD"]
+
+    def test_a_flat_row_appears_in_neither_direction(self):
+        out = prices._rank_crypto([{"symbol": "F/USD", "change_pct": 0.0,
+                                    "dollar_volume": 1.0}], 10)
+        assert out["gainers"] == [] and out["losers"] == []
+        assert len(out["all"]) == 1
+
+    def test_turnover_is_a_ranking_input_not_a_column(self):
+        """Alpaca's crypto turnover is venue-local — BTC prints ~11 coins a day
+        on it. Ranking by it is defensible; rendering it as "volume" next to an
+        equity panel's consolidated figure is not."""
+        out = prices._rank_crypto(self.ROWS, 10)
+        for view in out.values():
+            for row in view:
+                assert "dollar_volume" not in row
+
+    def test_top_clamps_every_view(self):
+        out = prices._rank_crypto(self.ROWS, 2)
+        assert all(len(v) <= 2 for v in out.values())

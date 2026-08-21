@@ -282,3 +282,38 @@ MARKET_TAPE = [
                        "^TNX:US 10Y,CL=F:Crude,GC=F:Gold,BTC-USD:Bitcoin"
     ).split(",") if s.strip()
 ]
+
+
+# The cross-asset panel, which is deliberately WIDER than the tape above it.
+# A panel that lists exactly what the ticker already scrolls past is a second
+# copy, not a second view: the strip is five things you glance at, this is the
+# board you read. Hence silver and the FX pairs, which the strip has no room
+# for. Same "symbol:label" form, same yfinance symbols.
+INDEX_BOARD = [
+    s.strip() for s in os.environ.get(
+        "INDEX_BOARD", "^GSPC:S&P 500,^DJI:Dow 30,^IXIC:Nasdaq,^RUT:Russell 2000,"
+                       "^VIX:VIX,^TNX:US 10Y,CL=F:Crude,GC=F:Gold,SI=F:Silver,"
+                       "EURUSD=X:EUR/USD,GBPUSD=X:GBP/USD,JPY=X:USD/JPY"
+    ).split(",") if s.strip()
+]
+
+# The crypto board, on Alpaca rather than yfinance: this is a keyed API, and
+# an 18-symbol hourly scrape returned 4 of 18 rows under throttling while the
+# same request to Alpaca returned all of them. Stablecoins are left out on
+# purpose — USDT/USDC in a movers list is a row that structurally cannot move.
+# Ranked by measured 24h change and turnover — which is a
+# measurement, not the composite scoring that was deleted on 2026-08-18. That
+# was a judgment about which names are INTERESTING; this is the same ordering
+# the equity movers list already takes from the provider, computed here only
+# because no screener endpoint covers crypto.
+CRYPTO_UNIVERSE = [
+    s.strip() for s in os.environ.get(
+        "CRYPTO_UNIVERSE", "BTC/USD:Bitcoin,ETH/USD:Ethereum,SOL/USD:Solana,"
+                           "XRP/USD:XRP,DOGE/USD:Dogecoin,ADA/USD:Cardano,"
+                           "AVAX/USD:Avalanche,LINK/USD:Chainlink,DOT/USD:Polkadot,"
+                           "LTC/USD:Litecoin,BCH/USD:Bitcoin Cash,UNI/USD:Uniswap,"
+                           "AAVE/USD:Aave,SHIB/USD:Shiba Inu,PEPE/USD:Pepe,"
+                           "ARB/USD:Arbitrum,POL/USD:Polygon,FIL/USD:Filecoin,"
+                           "RENDER/USD:Render,ONDO/USD:Ondo"
+    ).split(",") if s.strip()
+]

@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
-import type { MoverRow } from "@/lib/api"
-import { useMovers, useQuote } from "@/lib/queries"
+import type { MoverRow, TapeEntry } from "@/lib/api"
+import { useCrypto, useIndices, useMovers, useQuote } from "@/lib/queries"
 import { useLiveTrade } from "@/lib/live"
 import { Empty, Flash, Sparkline, Widget } from "@/components/terminal"
 import { registerWidget } from "@/widgets/registry"
@@ -133,16 +133,51 @@ function EquityOverview() {
   )
 }
 
+function TabStrip<T extends string>({ tabs, value, onChange }: {
+  tabs: readonly { id: T; label: string }[]
+  value: T
+  onChange: (id: T) => void
+}) {
+  return (
+    <>
+      {tabs.map(t => (
+        <button
+          key={t.id}
+          onClick={() => onChange(t.id)}
+          aria-pressed={value === t.id}
+          className={`rounded px-2 py-[3px] text-[12px] leading-none transition-colors ${
+            value === t.id
+              ? "bg-muted font-medium text-foreground"
+              : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+          }`}
+        >
+          {t.label}
+        </button>
+      ))}
+    </>
+  )
+}
+
 const TABS = [
   { id: "most_active", label: "Most Active" },
   { id: "gainers", label: "Gainers" },
   { id: "losers", label: "Losers" },
 ] as const
 
-function MoversTable({ rows }: { rows: MoverRow[] }) {
+/** Rows link to the analysis page only when the symbol is one it can open.
+ * ^GSPC and BTC-USD are not equities: a link that lands on an empty analysis
+ * page is worse than plain text, because it invites the click first. */
+function MoversTable({ rows, linked = true, empty }: {
+  rows: MoverRow[]; linked?: boolean; empty?: string
+}) {
   if (!rows.length) {
-    return <Empty>nothing clears the price and turnover floors right now</Empty>
+    return <Empty>{empty ?? "nothing clears the price and turnover floors right now"}</Empty>
   }
+  const RowWrap = ({ symbol, className, children }: {
+    symbol: string; className?: string; children: React.ReactNode
+  }) => linked
+    ? <Link to={`/analysis?symbol=${encodeURIComponent(symbol)}`} className={className}>{children}</Link>
+    : <div className={className}>{children}</div>
   return (
     <div>
       <div className="sticky top-0 z-10 flex items-center bg-panel px-[12px] py-[10px] text-[10px] font-medium uppercase tracking-[1px] text-muted-foreground">
@@ -153,9 +188,9 @@ function MoversTable({ rows }: { rows: MoverRow[] }) {
       {rows.map(r => {
         const up = (r.change_pct ?? 0) >= 0
         return (
-          <Link
+          <RowWrap
             key={r.symbol}
-            to={`/analysis?symbol=${encodeURIComponent(r.symbol)}`}
+            symbol={r.symbol}
             className="row-rule flex h-[44px] items-center px-[12px] text-[14px] hover:bg-muted/60"
           >
             {/* Symbol is plain foreground at normal weight — theirs is not a
@@ -180,7 +215,7 @@ function MoversTable({ rows }: { rows: MoverRow[] }) {
             <span className={`flex w-[84px] justify-end pl-2 ${up ? "text-gain" : "text-loss"}`}>
               <Sparkline points={r.spark} baseline dot />
             </span>
-          </Link>
+          </RowWrap>
         )
       })}
     </div>
@@ -200,28 +235,9 @@ function StockMovers() {
       // source, rather than spending a third of a header on a sentence that
       // truncated mid-word anyway.
       subtitle="≥ $5 · ≥ $1M turnover"
-      // The tabs belong in the header, not above the rows. They were the first
-      // children of a scrolling body, so the control that says WHICH list you
-      // are reading scrolled off the moment you read it. In the header it also
-      // stops costing a 30px band of chrome to hold three words.
-      actions={
-        <div className="flex shrink-0 items-center gap-0.5">
-          {TABS.map(t => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              aria-pressed={tab === t.id}
-              className={`rounded px-2 py-[3px] text-[12px] leading-none transition-colors ${
-                tab === t.id
-                  ? "bg-muted font-medium text-foreground"
-                  : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-      }
+      // Pinned strip, not the header and not the body — the header is 278px
+      // wide at this span and these three pills overflowed it by 63px.
+      toolbar={<TabStrip tabs={TABS} value={tab} onChange={setTab} />}
       scroll={TILE_BODY_HEIGHT}
     >
       {isPending ? <Empty>loading…</Empty> : <MoversTable rows={data?.[tab] ?? []} />}
@@ -229,5 +245,90 @@ function StockMovers() {
   )
 }
 
+/** The cross-asset board — indices, rates, commodities, FX.
+ *
+ * Deliberately wider than the ticker strip above it: a panel listing exactly
+ * what the marquee already scrolls past is a second copy, not a second view.
+ * Rows do not link, and carry no spark — the tape upstream returns a price and
+ * a change, and drawing a flat line for the rest would read as "no movement"
+ * rather than "no series". */
+function IndexMovers() {
+  const { data, isPending } = useIndices()
+  const rows = data?.indices ?? []
+  return (
+    <Widget span={4} title="Index Movers" subtitle="cross-asset"
+            scroll={TILE_BODY_HEIGHT}>
+      {isPending ? <Empty>loading…</Empty> : !rows.length ? (
+        <Empty>no cross-asset quotes right now</Empty>
+      ) : (
+        <div>
+          <div className="sticky top-0 z-10 flex items-center bg-panel px-[12px] py-[10px] text-[10px] font-medium uppercase tracking-[1px] text-muted-foreground">
+            <span className="min-w-0 flex-1">Market</span>
+            <span className="w-[96px] text-right">Last</span>
+          </div>
+          {rows.map((r: TapeEntry) => {
+            const up = (r.change_pct ?? 0) >= 0
+            return (
+              <div key={r.symbol}
+                   className="row-rule flex h-[44px] items-center px-[12px] text-[14px]">
+                <span className="flex min-w-0 flex-1 flex-col leading-tight">
+                  <span className="truncate">{r.label}</span>
+                  <span className="truncate text-[12px] text-muted-foreground">{r.symbol}</span>
+                </span>
+                <span className="flex w-[96px] flex-col items-end leading-tight">
+                  <Flash value={r.price} className="tnum">
+                    {num(r.price, r.price != null && Math.abs(r.price) < 10 ? 4 : 2)}
+                  </Flash>
+                  <span className={`tnum text-[13px] ${up ? "text-gain" : "text-loss"}`}>
+                    {r.change_pct == null ? "—" : `${up ? "+" : ""}${r.change_pct.toFixed(2)}%`}
+                  </span>
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </Widget>
+  )
+}
+
+const CRYPTO_TABS = [
+  { id: "all", label: "All" },
+  { id: "most_active", label: "Most Active" },
+  { id: "gainers", label: "Gainers" },
+  { id: "losers", label: "Losers" },
+] as const
+
+/** Crypto, on a ROLLING 24 HOURS rather than a session.
+ *
+ * The change column here is not the same measurement as the equity panel
+ * beside it: a 24/7 market has no close, so "previous close" would be a
+ * midnight boundary the market never observed and the figure would disagree
+ * with every venue the reader can check. Said in the subtitle, because two
+ * adjacent panels showing a "1D" column that means two different things is
+ * exactly the kind of quiet mismatch a terminal should not ship. */
+function CryptoMovers() {
+  const [tab, setTab] = useState<(typeof CRYPTO_TABS)[number]["id"]>("all")
+  const { data, isPending } = useCrypto()
+  return (
+    <Widget
+      span={4}
+      title="Crypto Movers"
+      // Short because a span-4 header leaves the subtitle ~110px; the full
+      // sentence is the tooltip, and the reason is the docstring upstream.
+      subtitle="rolling 24h"
+      toolbar={<TabStrip tabs={CRYPTO_TABS} value={tab} onChange={setTab} />}
+      scroll={TILE_BODY_HEIGHT}
+    >
+      {isPending ? <Empty>loading…</Empty> : (
+        <MoversTable rows={data?.[tab] ?? []} linked={false}
+                     empty={tab === "losers" ? "nothing is down over 24h" : "no crypto quotes right now"} />
+      )}
+    </Widget>
+  )
+}
+
 registerWidget({ id: "equity-overview", order: 15, component: EquityOverview })
-registerWidget({ id: "stock-movers", order: 16, component: StockMovers })
+registerWidget({ id: "index-movers", order: 16, component: IndexMovers })
+registerWidget({ id: "stock-movers", order: 17, component: StockMovers })
+registerWidget({ id: "crypto-movers", order: 18, component: CryptoMovers })

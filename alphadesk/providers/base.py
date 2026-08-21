@@ -154,3 +154,15 @@ class PriceProvider(Protocol):
         Omit a symbol you cannot price rather than reporting it as zero — a tape
         showing 0.00 reads as a crashed market, not a missing quote."""
         ...
+
+    def index_board(self) -> list[dict]:
+        """The cross-asset panel: same shape as market_tape() over a wider
+        list. Same rule about omitting what you cannot price."""
+        ...
+
+    def crypto_movers(self, top: int = 20) -> dict:
+        """{all, most_active, gainers, losers} for crypto, each
+        [{symbol, name, price, change_pct, volume, spark}]. Measure change over
+        a rolling 24 hours: a 24/7 market has no close, so a previous-close
+        figure would disagree with every venue the reader can check."""
+        ...

@@ -310,6 +310,21 @@ def api_tape():
     return {"tape": get_prices().market_tape()}
 
 
+@app.get("/api/indices")
+def api_indices():
+    """The cross-asset board: indices, rates, commodities, FX. Wider than
+    /api/tape on purpose — see INDEX_BOARD in config."""
+    from alphadesk.providers import get_prices
+    return {"indices": get_prices().index_board()}
+
+
+@app.get("/api/crypto")
+def api_crypto(top: int = 20):
+    """{all, most_active, gainers, losers} for crypto, on a rolling 24h."""
+    from alphadesk.providers import get_prices
+    return get_prices().crypto_movers(top=max(1, min(top, 50)))
+
+
 @app.get("/api/tokens")
 def api_tokens(days: int = 1):
     days = max(1, min(days, 365))   # a negative `days` becomes an invalid SQLite modifier → NULL → misleading data
