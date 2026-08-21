@@ -44,6 +44,27 @@ import type { OverlayId, PaneId } from "@/lib/indicators"
 const CHART_CHROME = 32 + 32 + 25
 const COLLAPSED = TILE_BODY_HEIGHT - CHART_CHROME
 
+/** How tall a pane needs to be depends on how much of itself it uses.
+ *
+ * A FITTED pane — MACD, CCI, ATR, OBV — is scaled to its own data, so it
+ * fills whatever box it is given and 90px shows the shape fine. A pane with
+ * a FIXED scale only ever occupies the slice its readings fall in, and the
+ * rest is empty axis: measured on 1,558 bars of NVDA, the middle 90% of
+ * RSI-9 sits between 25 and 72, which is 46% of the 0-100 range and about
+ * 42px of a 90px pane. That is why the bounded ones read flat.
+ *
+ * The fixed range is not the thing to change — auto-scaling RSI would put 45
+ * at the top of the pane and make a neutral reading look extreme, which is
+ * the whole reason it is pinned. So the HEIGHT gives way instead, and the
+ * pane itself decides which it is: anything declaring a range gets the
+ * taller box. No second list of which indicators are bounded to fall out of
+ * step with the panes.
+ */
+const FITTED_PANE_H = 90
+const BOUNDED_PANE_H = 140
+const sized = (p: Pane | null): Pane | null =>
+  p && { ...p, height: p.range ? BOUNDED_PANE_H : FITTED_PANE_H }
+
 function MarketChart() {
   const [params] = useSearchParams()
   const symbol = (params.get("symbol") || "").toUpperCase()
@@ -115,7 +136,7 @@ function MarketChart() {
   }, [data?.bars, tick, symbol])
 
   const priceHeight = expanded ? 620 : COLLAPSED
-  const OSC_HEIGHT = 90
+
 
   /** Volume always; the oscillators only once expanded, because at tile height
    * they would be 40px slivers and an indicator you cannot read still invites
@@ -136,14 +157,14 @@ function MarketChart() {
       // clicked, so the stack does not reshuffle as you toggle.
       for (const id of PANE_INDICATORS.map(p => p.id).filter(id => panes.includes(id))) {
         if (id === "rsi") {
-          out.push(rsiPane(bars, data.rsi_9, OSC_HEIGHT, "#7c3aed", {
+          out.push(sized(rsiPane(bars, data.rsi_9, FITTED_PANE_H, "#7c3aed", {
             oversold: data.thresholds.rsi_oversold, overbought: data.thresholds.rsi_overbought,
-          }))
+          })))
         } else if (id === "macd") {
-          out.push(macdPane(bars, data.macd, data.macd_signal, data.macd_hist,
-                            OSC_HEIGHT, "#2563eb", "#f59e0b", theme.gain, theme.loss))
+          out.push(sized(macdPane(bars, data.macd, data.macd_signal, data.macd_hist,
+                                  FITTED_PANE_H, "#2563eb", "#f59e0b", theme.gain, theme.loss)))
         } else {
-          out.push(oscillatorPane(id, bars, OSC_HEIGHT, theme))
+          out.push(sized(oscillatorPane(id, bars, FITTED_PANE_H, theme)))
         }
       }
     }
