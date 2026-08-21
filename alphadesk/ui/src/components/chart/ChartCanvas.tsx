@@ -669,12 +669,21 @@ export function ChartCanvas({
                 numbers came from. Only on the line kinds: a candle already
                 shows its own close, and a dot on top of one would just cover
                 the thing it was pointing at. */}
-            {hovered && (kind === "line" || kind === "area") && (
-              <circle
-                cx={indexToX(s, hoveredIdx + 0.5)} cy={yOf(hovered.c)} r={3.5}
-                fill={accent} stroke={tagBg} strokeWidth={2}
-              />
-            )}
+            {hovered && (kind === "line" || kind === "area") && (() => {
+              const mx = indexToX(s, hoveredIdx + 0.5)
+              const my = yOf(hovered.c)
+              return (
+                <g>
+                  {/* A soft halo behind the marker. The dot has to read against
+                      a line of its OWN colour, so size alone does not separate
+                      the two — the halo gives it an edge without needing a
+                      heavier ring that would start hiding the series under it. */}
+                  <circle cx={mx} cy={my} r={9} fill={accent} opacity={0.18} />
+                  <circle cx={mx} cy={my} r={5} fill={accent}
+                    stroke={tagBg} strokeWidth={2.5} />
+                </g>
+              )
+            })()}
             <rect x={plotW + 2} y={cursor.y - 8} width={AXIS_W - 4} height={16}
               fill={tagBg} stroke={tagBorder} strokeWidth={1} rx={2} />
             <text x={plotW + 6} y={cursor.y + 3.5} fill={tagFg} fontSize={11} className="tnum">
