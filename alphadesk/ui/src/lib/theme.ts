@@ -81,6 +81,15 @@ export function useChartTheme() {
       accent: read("--accent", "#3c83f5"),
       grid: read("--chart-grid", "rgba(255,255,255,0.06)"),
       text: read("--muted-foreground", "#969a9e"),
+      // The crosshair chips. They used the muted TEXT colour as a fill with
+      // black lettering, which is a dark slab in the light theme and unreadable
+      // in it — black on #5b636a. A muted SURFACE with the normal foreground
+      // reads the same way in both themes and sits back where a readout of the
+      // cursor's position belongs, behind the live price tag rather than
+      // shouting over it.
+      tagBg: read("--muted", "#26262a"),
+      tagFg: read("--foreground", "#e0e5ea"),
+      tagBorder: read("--border", "#26262a"),
     }
     // dark is the dependency: the tokens change with it.
   }, [dark])

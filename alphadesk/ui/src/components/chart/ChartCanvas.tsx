@@ -46,7 +46,7 @@ const AXIS_GAP = 12
 
 export function ChartCanvas({
   bars, kind, scale: scaleMode, height, panes = [],
-  gain, loss, accent, grid, text,
+  gain, loss, accent, grid, text, tagBg, tagFg, tagBorder,
   onProjection, onHover, overlays = [],
 }: {
   bars: ChartBar[]
@@ -61,6 +61,10 @@ export function ChartCanvas({
   accent: string
   grid: string
   text: string
+  /** Crosshair chip colours — a muted surface, not the muted text colour. */
+  tagBg: string
+  tagFg: string
+  tagBorder: string
   /** Handed out on every layout change so annotations can project against it. */
   onProjection?: (p: Projection | null) => void
   onHover?: (bar: ChartBar | null, at: { x: number; y: number } | null) => void
@@ -407,9 +411,26 @@ export function ChartCanvas({
     })
   }, [panes, priceH, bars, s, barW, half, seriesW, from, to])
 
+  /** Axis rows covered by a price tag.
+   *
+   * The last-price tag and the crosshair tag are opaque chips pinned to the
+   * gutter at whatever price they mark, so whenever that price sits near a
+   * round number the chip lands on top of the tick label and the two render
+   * over each other. The tick is the one that gives way: it is a fixed
+   * gridline a reader can infer from its neighbours, while the tag carries the
+   * number actually being asked about.
+   *
+   * 12px is the tag's half-height (8) plus half a line of 11px text, so a
+   * label is dropped exactly when it would collide rather than whenever it is
+   * merely close. */
+  const TAG_HALF = 12
+  const tagRows: number[] = []
   const ticks = priceTicks(min, max)
   const decimals = priceDecimals(ticks.length > 1 ? Math.abs(ticks[1] - ticks[0]) : 1)
   const last = bars[bars.length - 1]
+  if (last) tagRows.push(yOf(last.c))
+  if (cursor) tagRows.push(cursor.y)
+  const tagHides = (y: number) => tagRows.some(t => Math.abs(y - t) < TAG_HALF)
   const hovered = cursor ? bars[Math.max(0, Math.min(bars.length - 1, Math.round(xToIndex(s, cursor.x) - 0.5)))] : null
 
   /** Time labels, thinned to whatever fits without collision. */
@@ -458,10 +479,15 @@ export function ChartCanvas({
           const y = priceToY(s, v, log)
           return (
             <g key={v}>
+              {/* The gridline stays either way — it is behind the plot, not
+                  under the chip, and losing it would leave a visible hole in
+                  the grid every time the price passed a round number. */}
               <line x1={0} y1={y} x2={plotW} y2={y} stroke={grid} strokeWidth={1} />
+              {!tagHides(y) && (
               <text x={plotW + 6} y={y + 3.5} fill={text} fontSize={11} className="tnum">
                 {scaleMode === "percent" ? `${v.toFixed(1)}%` : v.toFixed(decimals)}
               </text>
+              )}
             </g>
           )
         })}
@@ -526,9 +552,11 @@ export function ChartCanvas({
                 stroke={text} strokeOpacity={0.35} strokeWidth={1} strokeDasharray="3 3" />
             ))}
             {axis.map((a, i) => (
-              <text key={i} x={plotW + 6} y={a.y + 3.5} fill={text} fontSize={10} className="tnum">
-                {paneAxisLabel(a.v, pane.compact)}
-              </text>
+              tagHides(a.y) ? null : (
+                <text key={i} x={plotW + 6} y={a.y + 3.5} fill={text} fontSize={10} className="tnum">
+                  {paneAxisLabel(a.v, pane.compact)}
+                </text>
+              )
             ))}
             {drawn.map((d, i) =>
               d.kind === "histogram" ? (
@@ -571,14 +599,16 @@ export function ChartCanvas({
               stroke={text} strokeWidth={1} strokeDasharray="3 3" />
             <line x1={0} y1={cursor.y} x2={plotW} y2={cursor.y}
               stroke={text} strokeWidth={1} strokeDasharray="3 3" />
-            <rect x={plotW + 2} y={cursor.y - 8} width={AXIS_W - 4} height={16} fill={text} rx={2} />
-            <text x={plotW + 6} y={cursor.y + 3.5} fill="#000" fontSize={11} className="tnum">
+            <rect x={plotW + 2} y={cursor.y - 8} width={AXIS_W - 4} height={16}
+              fill={tagBg} stroke={tagBorder} strokeWidth={1} rx={2} />
+            <text x={plotW + 6} y={cursor.y + 3.5} fill={tagFg} fontSize={11} className="tnum">
               {yToPrice(s, cursor.y, log).toFixed(decimals)}
             </text>
             {hovered && (
               <>
-                <rect x={cursor.x - 42} y={priceH + panesH + 3} width={84} height={16} fill={text} rx={2} />
-                <text x={cursor.x} y={priceH + panesH + 14.5} fill="#000" fontSize={11}
+                <rect x={cursor.x - 42} y={priceH + panesH + 3} width={84} height={16}
+                  fill={tagBg} stroke={tagBorder} strokeWidth={1} rx={2} />
+                <text x={cursor.x} y={priceH + panesH + 14.5} fill={tagFg} fontSize={11}
                   textAnchor="middle" className="tnum">
                   {new Date(hovered.t).toLocaleString("en-US", {
                     timeZone: "America/New_York", month: "short", day: "numeric",
