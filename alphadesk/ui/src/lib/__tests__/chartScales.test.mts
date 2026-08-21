@@ -7,13 +7,20 @@
  * Plain assertions over a runner because the frontend has no test harness and
  * one dependency for one file is a poor trade:
  *
- *     npx tsx src/lib/__tests__/chartScales.test.mts
+ *     pnpm test
+ *
+ * Node strips the types itself, so this still costs no dependency. That is
+ * also why the relative imports below carry an explicit `.ts`: type stripping
+ * does no extension guessing, and without it Node cannot resolve them — which
+ * is what left this file unrunnable, and therefore unrun, until now. The `@/`
+ * aliases it pulls in transitively are type-only, so they erase before Node
+ * ever has to resolve them.
  */
-import { paneExtent } from "../../components/chart/panes"
+import { paneExtent } from "../../components/chart/panes.ts"
 import {
   indexToX, xToIndex, priceToY, yToPrice, niceStep, priceTicks,
   padRange, zoomAt, visibleExtent,
-} from "../chartScales"
+} from "../chartScales.ts"
 
 let pass = 0, fail = 0
 const ok = (name, cond, extra = "") => {
