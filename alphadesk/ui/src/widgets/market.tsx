@@ -194,24 +194,36 @@ function StockMovers() {
     <Widget
       span={4}
       title="Stock Movers"
-      subtitle="≥ $5 and ≥ $1M turnover — a percentage screen without a liquidity floor is all pumps"
+      // The screen's DEFINITION, not the argument for it. The long form —
+      // "a percentage screen without a liquidity floor is all pumps" — is the
+      // reason the floors exist, and it is worth saying once, here in the
+      // source, rather than spending a third of a header on a sentence that
+      // truncated mid-word anyway.
+      subtitle="≥ $5 · ≥ $1M turnover"
+      // The tabs belong in the header, not above the rows. They were the first
+      // children of a scrolling body, so the control that says WHICH list you
+      // are reading scrolled off the moment you read it. In the header it also
+      // stops costing a 30px band of chrome to hold three words.
+      actions={
+        <div className="flex shrink-0 items-center gap-0.5">
+          {TABS.map(t => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              aria-pressed={tab === t.id}
+              className={`rounded px-2 py-[3px] text-[12px] leading-none transition-colors ${
+                tab === t.id
+                  ? "bg-muted font-medium text-foreground"
+                  : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      }
       scroll={TILE_BODY_HEIGHT}
     >
-      <div className="flex gap-1 px-3 pb-2">
-        {TABS.map(t => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`rounded-md px-2.5 py-1 text-[14px] transition-colors ${
-              tab === t.id
-                ? "bg-muted font-medium text-foreground"
-                : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
       {isPending ? <Empty>loading…</Empty> : <MoversTable rows={data?.[tab] ?? []} />}
     </Widget>
   )

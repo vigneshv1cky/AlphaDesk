@@ -209,14 +209,30 @@ export function Widget({
             <span className="shrink-0 text-[15px] font-semibold text-accent">{symbol}</span>
           )}
           {title && (
-            <h2 className="truncate text-[14px] font-semibold uppercase tracking-[0.06em] text-foreground/90">
+            // shrink-0, because the panel's NAME is the one thing in this row
+            // that has to survive. Two truncating flex items shrink in
+            // proportion to their content, so the LONGER one wins the space:
+            // Stock Movers' 78-character subtitle took 417px and left the
+            // title 92px, rendering it "STOCK …". The name is how you find the
+            // panel; the subtitle is a footnote about it.
+            <h2 className="shrink-0 text-[14px] font-semibold uppercase tracking-[0.06em] text-foreground/90">
               {title}
             </h2>
           )}
           {subtitle && (
-            <span className="truncate text-[14px] text-muted-foreground">{subtitle}</span>
+            // A step DOWN in size, not only in colour. At the title's own 14px
+            // the two read as one run-on line with a colour change in the
+            // middle rather than as a heading and its note. This is also the
+            // half that now absorbs all the shrinking, so it carries the full
+            // text on hover.
+            <span
+              title={typeof subtitle === "string" ? subtitle : undefined}
+              className="min-w-0 truncate text-[12px] text-muted-foreground"
+            >
+              {subtitle}
+            </span>
           )}
-          <div className="flex-1" />
+          <div className="min-w-0 flex-1" />
           {actions}
           {expandable && (
             <button
