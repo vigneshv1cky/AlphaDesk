@@ -4,7 +4,7 @@ import {
   clampView, indexToX, padRange, priceDecimals, priceTicks, priceToY,
   visibleExtent, xToIndex, yToPrice, zoomAt, type Scale,
 } from "@/lib/chartScales"
-import { paneAxisLabel, paneExtent, type Pane } from "@/components/chart/panes"
+import { paneAxisLabel, paneExtent, volumeColumns, type Pane, type PaneSeries } from "@/components/chart/panes"
 
 /** The chart renderer.
  *
@@ -280,15 +280,48 @@ export function ChartCanvas({
     return panes.map(pane => {
       const top = offset
       offset += pane.height
-      const ext = paneExtent(pane)
+      const byTimeIdx = new Map(bars.map((b, i) => [b.t, i]))
+      // Bucketed BEFORE the extent is taken: a summed column is taller than any
+      // bar inside it, so an extent measured on the raw points would let the
+      // columns run straight out of the pane.
+      const grouped = new Map<PaneSeries, ReturnType<typeof volumeColumns>>()
+      for (const ser of pane.series) {
+        if (ser.kind !== "histogram" || !ser.aggregate) continue
+        const entries: { i: number; v: number; up: boolean }[] = []
+        for (const p of ser.points) {
+          const i = byTimeIdx.get(p.t)
+          if (i == null || i < from - 1 || i > to + 1) continue
+          entries.push({ i, v: p.v, up: bars[i].c >= bars[i].o })
+        }
+        grouped.set(ser, volumeColumns(entries, s, plotW, 7))
+      }
+      // Only when EVERY series was grouped — a pane mixing a summed histogram
+      // with a plain line would need both to agree on one axis, and they don't.
+      const allGrouped = grouped.size > 0 && grouped.size === pane.series.length
+      const ext = allGrouped
+        ? { min: 0, max: Math.max(1, ...[...grouped.values()].flat().map(c => c.v)) }
+        : paneExtent(pane)
       const inner = Math.max(10, pane.height - 6)
       const yIn = (v: number) => {
         const r = ext.max - ext.min
         return top + 3 + (r <= 0 ? inner / 2 : inner - ((v - ext.min) / r) * inner)
       }
       const zeroY = yIn(Math.min(Math.max(0, ext.min), ext.max))
-      const byTime = new Map(bars.map((b, i) => [b.t, i]))
+      const byTime = byTimeIdx
       const drawn = pane.series.map(ser => {
+        if (ser.kind === "histogram" && grouped.has(ser)) {
+          const up: string[] = [], down: string[] = []
+          for (const c of grouped.get(ser)!) {
+            if (c.x < -c.w || c.x > plotW + c.w) continue
+            const y = yIn(c.v)
+            const h = Math.max(1, Math.abs(zeroY - y))
+            const half2 = c.w / 2
+            ;(c.up ? up : down).push(
+              `M${(c.x - half2).toFixed(1)},${Math.min(zeroY, y).toFixed(1)}h${c.w.toFixed(1)}v${h.toFixed(1)}h${(-c.w).toFixed(1)}Z`)
+          }
+          return { kind: "histogram" as const, up: up.join(""), down: down.join(""),
+                   color: ser.color, downColor: ser.downColor ?? ser.color }
+        }
         if (ser.kind === "histogram") {
           const up: string[] = [], down: string[] = []
           for (const p of ser.points) {
@@ -322,7 +355,7 @@ export function ChartCanvas({
         .map(v => ({ v, y: yIn(v) }))
       return { pane, top, drawn, levels, axis }
     })
-  }, [panes, priceH, bars, s, barW, half, plotW])
+  }, [panes, priceH, bars, s, barW, half, plotW, from, to])
 
   const ticks = priceTicks(min, max)
   const decimals = priceDecimals(ticks.length > 1 ? Math.abs(ticks[1] - ticks[0]) : 1)
@@ -373,10 +406,16 @@ export function ChartCanvas({
         })}
 
         {/* vertical grid + time axis */}
+        {/* A TICK below the axis, not a rule through the plot. The horizontal
+            grid is what a price is read against; the vertical one was crossing
+            every candle and every indicator line without any reading being
+            taken against it, which is most of what made this canvas busier
+            than theirs. The tick still says where the label points. */}
         {timeTicks.map((t, i) => (
           <g key={i}>
-            <line x1={t.x} y1={0} x2={t.x} y2={priceH + panesH} stroke={grid} strokeWidth={1} />
-            <text x={t.x} y={priceH + panesH + 15} fill={text} fontSize={11} textAnchor="middle" className="tnum">
+            <line x1={t.x} y1={priceH + panesH} x2={t.x} y2={priceH + panesH + 4}
+                  stroke={grid} strokeWidth={1} />
+            <text x={t.x} y={priceH + panesH + 16} fill={text} fontSize={11} textAnchor="middle" className="tnum">
               {t.label}
             </text>
           </g>
@@ -432,8 +471,10 @@ export function ChartCanvas({
             {drawn.map((d, i) =>
               d.kind === "histogram" ? (
                 <g key={i}>
-                  <path d={d.up} fill={d.color} fillOpacity={0.55} />
-                  <path d={d.down} fill={d.downColor} fillOpacity={0.55} />
+                  {/* Lighter than a candle body: the volume band is context
+                      for the price above it, not a second thing to read. */}
+                  <path d={d.up} fill={d.color} fillOpacity={0.42} />
+                  <path d={d.down} fill={d.downColor} fillOpacity={0.42} />
                 </g>
               ) : (
                 <g key={i}>

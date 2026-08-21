@@ -8,6 +8,7 @@ import {
   adx, atrSeries, cci, mfi, obv, roc, stochastic, williamsR,
   type PaneId, type Point,
 } from "../../lib/indicators.ts"
+import { indexToX, type Scale } from "../../lib/chartScales.ts"
 
 /** Pane definitions for the renderer.
  *
@@ -22,7 +23,14 @@ import {
  */
 
 export type PaneSeries =
-  | { kind: "histogram"; points: Point[]; color: string; downColor?: string; signs?: boolean }
+  | {
+      kind: "histogram"; points: Point[]; color: string; downColor?: string; signs?: boolean
+      /** Sum into wider columns when the bars get denser than the pixels.
+       * Opt-in because it is only meaningful for a QUANTITY: summing a bucket
+       * of volume is still volume, whereas summing a bucket of MACD histogram
+       * values is not any reading at all. */
+      aggregate?: boolean
+    }
   | { kind: "line"; points: Point[]; color: string; width?: number }
   | { kind: "area"; points: Point[]; color: string }
 
@@ -63,6 +71,9 @@ export function volumePane(bars: ChartBar[], height: number, gain: string, loss:
       downColor: loss,
       // Direction comes from the bar, not the value's sign.
       signs: false,
+      // A session of minute bars is thousands of one-pixel columns — a solid
+      // block rather than a histogram. Summed buckets are still volume.
+      aggregate: true,
     }],
   }
 }
@@ -242,4 +253,47 @@ export function oscillatorPane(
       }
     }
   }
+}
+
+/** Group a histogram's bars into columns wide enough to read.
+ *
+ * At intraday density there are several bars per pixel, and drawing one 1px
+ * column each produces a solid block that reads as a filled area rather than a
+ * histogram — which is the single biggest reason our volume band did not look
+ * like theirs. Below the threshold nothing is grouped and the bars sit on their
+ * own index, exactly as before.
+ *
+ * A column's direction is where the MAJORITY of its volume came from, not its
+ * first or last bar — one big print should not colour a quiet hour.
+ *
+ * Module scope, not a closure inside the component: it feeds a useMemo, and a
+ * function rebuilt every render either has to be left out of the deps (a lie)
+ * or put in (defeating the memo).
+ */
+export function volumeColumns(
+entries: { i: number; v: number; up: boolean }[],
+s: Scale, plotW: number, minPx: number,
+): { x: number; w: number; v: number; up: boolean }[] {
+if (!entries.length) return []
+const natural = plotW / entries.length
+if (natural >= minPx) {
+  return entries.map(e => ({
+    x: indexToX(s, e.i + 0.5), w: Math.max(1, natural * 0.7), v: e.v, up: e.up,
+  }))
+}
+const per = Math.ceil(entries.length / Math.max(1, Math.floor(plotW / minPx)))
+const out: { x: number; w: number; v: number; up: boolean }[] = []
+for (let k = 0; k < entries.length; k += per) {
+  let sum = 0, upVol = 0
+  const first = entries[k].i
+  let lastIdx = first
+  for (let j = k; j < Math.min(k + per, entries.length); j++) {
+    sum += entries[j].v
+    if (entries[j].up) upVol += entries[j].v
+    lastIdx = entries[j].i
+  }
+  const x0 = indexToX(s, first), x1 = indexToX(s, lastIdx + 1)
+  out.push({ x: (x0 + x1) / 2, w: Math.max(1, (x1 - x0) * 0.72), v: sum, up: upVol * 2 >= sum })
+}
+return out
 }

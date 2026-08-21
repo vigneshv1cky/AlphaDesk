@@ -26,13 +26,13 @@ import type { ChartRange } from "@/lib/api"
  * history has the menu, the pane and the wiring.
  */
 
-const TYPES: { id: SeriesKind; label: string }[] = [
-  { id: "candles", label: "Candlestick" },
-  { id: "line", label: "Line" },
-  { id: "bars", label: "Bar" },
+const TYPES: { id: SeriesKind; label: string; glyph: string }[] = [
+  { id: "candles", label: "Candlestick", glyph: "\u2547" },
+  { id: "line", label: "Line", glyph: "\u2197" },
+  { id: "bars", label: "Bar", glyph: "\u2540" },
   // Their name for a filled line. Kept because "Area" and "Mountain" describe
   // the same chart and theirs is the one a reader coming from it will look for.
-  { id: "area", label: "Mountain" },
+  { id: "area", label: "Mountain", glyph: "\u25e2" },
 ]
 
 /** Bar intervals. The server owns which are actually reachable for a given
@@ -56,17 +56,22 @@ const SCALES: { id: ScaleMode; label: string }[] = [
  * which, so this is only a label. */
 export const RANGES: ChartRange[] = ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y", "MAX"]
 
-const btn = "px-2 py-[3px] text-[12px] transition-colors"
-const on = "bg-accent/15 font-semibold text-accent"
-const off = "text-muted-foreground hover:bg-muted hover:text-foreground"
+// Theirs are bordered pills, not bare text. That border is most of why their
+// toolbar reads as a row of CONTROLS and ours read as a row of labels.
+const btn = "rounded-md border px-2 py-[3px] text-[12px] transition-colors"
+const on = "border-accent/40 bg-accent/15 font-semibold text-accent"
+const off = "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
 
 /** A menu that closes on outside click and on Escape. Hand-rolled for the same
  * reason the rest of the primitives are — one popover does not justify a
  * dependency, and this one has to sit inside a 440px tile without clipping. */
-function Menu({ label, active, wide, children }: {
+function Menu({ label, active, wide, chevron = true, children }: {
   label: string
   active?: boolean
   wide?: boolean
+  /** A value picker shows what it will change; a panel like "Ind" does not,
+   * which is how theirs distinguishes the two. */
+  chevron?: boolean
   children: (close: () => void) => React.ReactNode
 }) {
   const [open, setOpen] = useState(false)
@@ -92,7 +97,7 @@ function Menu({ label, active, wide, children }: {
         onClick={() => setOpen(o => !o)}
         className={`${btn} ${active || open ? on : off}`}
       >
-        {label} <span className="text-[9px]">▾</span>
+        {label}{chevron && <span className="text-[9px]"> ▾</span>}
       </button>
       {open && (
         <div className={`absolute left-0 top-full z-50 mt-1 rounded-md border border-border bg-popover py-1 shadow-lg ${
@@ -149,7 +154,10 @@ export function ChartToolbar({
 
   return (
     <div className="flex flex-wrap items-center gap-1 border-b border-grid-line px-[12px] py-1">
-      <Menu label={TYPES.find(t => t.id === type)!.label}>
+      {/* A glyph rather than the word, matching theirs — the series type is the
+          one control whose current value is legible at a glance as a picture,
+          and spelling out "Candlestick" costs the row most of its width. */}
+      <Menu label={TYPES.find(t => t.id === type)!.glyph}>
         {close => TYPES.map(t => (
           <Item key={t.id} selected={t.id === type} onClick={() => { onType(t.id); close() }}>
             {t.label}
@@ -186,7 +194,7 @@ export function ChartToolbar({
         ))}
       </Menu>
 
-      <Menu label="Ind" active={overlays.length > 0 || panes.length > 0} wide>
+      <Menu label="Ind" active={overlays.length > 0 || panes.length > 0} wide chevron={false}>
         {() => (
           <IndicatorMenu
             overlays={overlays} toggle={toggle}
@@ -217,18 +225,26 @@ export function ChartToolbar({
 /** The range strip. Theirs runs along the BOTTOM of the chart, under the time
  * axis, which is where a reader reaches for it — the top toolbar is for what
  * the chart IS, the bottom for how much of it you are looking at. */
+/** The three theirs keeps on the strip. The rest live behind the chevron —
+ * spelling out all nine turned the strip into a second toolbar. */
+const QUICK_RANGES: ChartRange[] = ["1D", "1M", "1Y"]
+
 export function ChartRanges({ range, onRange }: {
   range: ChartRange
   onRange: (r: ChartRange) => void
 }) {
+  // The active range is ALWAYS on the strip, even when it is not one of the
+  // three. Hiding the selection inside a closed menu would leave the strip
+  // showing nothing selected while the chart plainly is.
+  const shown = QUICK_RANGES.includes(range) ? QUICK_RANGES : [...QUICK_RANGES, range]
   return (
     <div className="flex flex-wrap items-center gap-1 border-t border-grid-line px-[12px] py-1">
-      {RANGES.map(r => (
+      {shown.map(r => (
         <button
           key={r}
           type="button"
           onClick={() => onRange(r)}
-          className={`px-2 py-[3px] text-[12px] tabular-nums transition-colors ${
+          className={`rounded-md px-2 py-[3px] text-[12px] tabular-nums transition-colors ${
             range === r ? "bg-accent/15 font-semibold text-accent"
                         : "text-muted-foreground hover:bg-muted hover:text-foreground"
           }`}
@@ -236,6 +252,16 @@ export function ChartRanges({ range, onRange }: {
           {r}
         </button>
       ))}
+      {/* Every range is in here, including the three above — a reader who opens
+          it looking for "1D" should find it rather than be told to look back
+          out at the strip. */}
+      <Menu label="" chevron>
+        {close => RANGES.map(r => (
+          <Item key={r} selected={r === range} onClick={() => { onRange(r); close() }}>
+            {r}
+          </Item>
+        ))}
+      </Menu>
     </div>
   )
 }

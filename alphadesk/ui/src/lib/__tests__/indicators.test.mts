@@ -173,3 +173,40 @@ const flat = Array.from({ length: 40 }, (_, i) => bar(i, 10, 10, 10))
 
 console.log(`indicators: ${pass} passed, ${fail} failed`)
 if (fail) process.exit(1)
+
+// ── Volume column aggregation ───────────────────────────────────────────────
+// The thing that made our volume band a solid block rather than a histogram.
+// Tested here rather than in the browser because it is the one piece of the
+// chart's appearance that is arithmetic: how many columns, how wide, and which
+// way each one is coloured.
+{
+  const { volumeColumns } = await import("../../components/chart/panes.ts")
+  const scale = { from: 0, to: 100, width: 400, height: 100, min: 0, max: 1 }
+  const entries = Array.from({ length: 100 }, (_, i) => ({ i, v: 10, up: i % 2 === 0 }))
+
+  const sparse = volumeColumns(entries.slice(0, 20), scale, 400, 7)
+  ok("leaves bars alone when they already fit", sparse.length === 20)
+  ok("un-bucketed columns keep their own value", sparse.every(c => c.v === 10))
+
+  const dense = volumeColumns(entries, scale, 400, 40)
+  ok("buckets when bars are thinner than the minimum", dense.length < 100 && dense.length > 0)
+  ok("bucketing conserves total volume",
+     Math.abs(dense.reduce((n, c) => n + c.v, 0) - 100 * 10) < 1e-9)
+  ok("every column is at least a pixel wide", dense.every(c => c.w >= 1))
+  ok("columns advance left to right", dense.every((c, i) => i === 0 || c.x > dense[i - 1].x))
+
+  // Direction is the majority of VOLUME, not a majority of bars: one big down
+  // print should carry its bucket even when outnumbered.
+  const lopsided = [
+    { i: 0, v: 1, up: true }, { i: 1, v: 1, up: true },
+    { i: 2, v: 1, up: true }, { i: 3, v: 500, up: false },
+  ]
+  const one = volumeColumns(lopsided, scale, 400, 1000)
+  ok("one bucket when the minimum exceeds the width", one.length === 1)
+  ok("colour follows the majority of volume, not the count", one[0].up === false)
+
+  ok("empty input yields no columns", volumeColumns([], scale, 400, 7).length === 0)
+}
+
+console.log(`with volume columns: ${pass} passed, ${fail} failed`)
+if (fail) process.exit(1)
