@@ -98,7 +98,11 @@ function Shell() {
           terminal an overlay would cover the thing you are asking about. */}
       <div className="flex min-h-0 flex-1">
       <Sidebar />
-      <main className="min-h-0 flex-1 overflow-y-auto">
+      {/* overscroll-x-contain is the backstop for the chart's horizontal pan:
+          on macOS an unprevented horizontal wheel is the browser's back
+          gesture, so a swipe that the chart does not claim would navigate away
+          from the board instead of doing nothing. */}
+      <main className="min-h-0 flex-1 overflow-y-auto overscroll-x-contain">
         <div>
           <Suspense fallback={<div className="p-2 text-[14px] text-muted-foreground">loading…</div>}>
             <Routes>

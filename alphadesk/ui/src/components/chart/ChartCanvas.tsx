@@ -167,28 +167,44 @@ export function ChartCanvas({
    *
    * preventDefault only fires on those two, which is why the listener must be
    * non-passive: React registers wheel on its root as passive, where
-   * preventDefault silently does nothing at all. */
+   * preventDefault silently does nothing at all.
+   *
+   * It must also stay ATTACHED for the whole gesture, which is why the deps
+   * below hold nothing that panning changes. With `from`/`to` in there, every
+   * wheel event tore the listener down and React re-attached it after the next
+   * paint; a trackpad swipe fires ~100 events a second, so events kept landing
+   * in the gap unprevented — and on macOS an unprevented horizontal wheel is
+   * the back-navigation gesture. Swiping left to pan would leave the page.
+   * The window is therefore read inside the state updater rather than closed
+   * over here. */
   useEffect(() => {
     const el = host.current
     if (!el) return
+    const total = bars.length
     const onWheel = (e: WheelEvent) => {
-      if (!bars.length) return
+      if (!total) return
       const sideways = e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)
       const zooming = e.ctrlKey || e.metaKey
       if (!sideways && !zooming) return       // the page's gesture, not ours
       e.preventDefault()
-      if (sideways && !zooming) {
-        const span = to - from
-        const shift = ((e.shiftKey ? e.deltaY : e.deltaX) / plotW) * span
-        setView(clampView(from + shift, to + shift, bars.length))
-        return
-      }
-      const anchor = xToIndex(s, e.clientX - el.getBoundingClientRect().left)
-      setView(zoomAt(s, anchor, e.deltaY > 0 ? 1.15 : 1 / 1.15, bars.length))
+      const x = e.clientX - el.getBoundingClientRect().left
+      const delta = e.shiftKey ? e.deltaY : e.deltaX
+      const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15
+      setView(prev => {
+        const cur = prev ?? { from: 0, to: total }
+        if (sideways && !zooming) {
+          const shift = (delta / plotW) * (cur.to - cur.from)
+          return clampView(cur.from + shift, cur.to + shift, total)
+        }
+        // Only from/to/width are consulted by xToIndex and zoomAt — the price
+        // axis plays no part in a horizontal gesture, so it is not rebuilt.
+        const sc: Scale = { from: cur.from, to: cur.to, width: plotW, height: 0, min: 0, max: 0 }
+        return zoomAt(sc, xToIndex(sc, x), factor, total)
+      })
     }
     el.addEventListener("wheel", onWheel, { passive: false })
     return () => el.removeEventListener("wheel", onWheel)
-  }, [bars.length, from, to, plotW, s])
+  }, [bars.length, plotW])
 
   const onDown = (e: React.MouseEvent) => {
     drag.current = { x: e.clientX, from, to }
