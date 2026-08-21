@@ -4,7 +4,7 @@ import {
   clampView, indexToX, padRange, priceDecimals, priceTicks, priceToY,
   visibleExtent, xToIndex, yToPrice, zoomAt, type Scale,
 } from "@/lib/chartScales"
-import { paneAxisLabel, paneExtent, volumeColumns, type Pane, type PaneSeries } from "@/components/chart/panes"
+import { paneAxisLabel, paneExtent, sessionLayout, volumeColumns, type Pane, type PaneSeries } from "@/components/chart/panes"
 
 /** The chart renderer.
  *
@@ -47,7 +47,7 @@ const AXIS_GAP = 12
 export function ChartCanvas({
   bars, kind, scale: scaleMode, height, panes = [],
   gain, loss, accent, grid, text, tagBg, tagFg, tagBorder,
-  onProjection, onHover, overlays = [], seriesId,
+  onProjection, onHover, overlays = [], seriesId, intraday = false,
 }: {
   bars: ChartBar[]
   kind: SeriesKind
@@ -73,6 +73,9 @@ export function ChartCanvas({
   /** Identity of the SERIES — symbol, range and interval. What resets the
    * view. Distinct from `bars`, which now arrives afresh on every poll. */
   seriesId?: string
+  /** Whether these bars are INTRADAY. Only then do session boundaries mean
+   * anything: on daily bars every bar is already one session. */
+  intraday?: boolean
 }) {
   const host = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState({ w: 0, h: height })
@@ -456,6 +459,14 @@ export function ChartCanvas({
   const hovered = cursor ? bars[Math.max(0, Math.min(bars.length - 1, Math.round(xToIndex(s, cursor.x) - 0.5)))] : null
 
   /** Time labels, thinned to whatever fits without collision. */
+  /** Session shading and day breaks. Memoized on the bars because it walks
+   * every one of them through a timezone conversion — cheap once, wasteful on
+   * each of the thirty-odd renders a minute the live feed now causes. */
+  const sessions = useMemo(
+    () => (intraday ? sessionLayout(bars) : { bands: [], dividers: [] }),
+    [bars, intraday],
+  )
+
   const timeTicks = useMemo(() => {
     const out: { x: number; label: string }[] = []
     const span = to - from
@@ -531,6 +542,32 @@ export function ChartCanvas({
         ))}
 
         <g clipPath={`url(#${clipId})`}>
+        {/* Extended hours, and the breaks between trading days.
+            Drawn FIRST so they sit behind the data: this is context for
+            reading the series, not a thing to read on its own. The x scale is
+            bar index, so a night between a 16:00 close and the next 09:30 open
+            is one bar wide and otherwise invisible — the divider is what keeps
+            an overnight gap from reading as a minute's move. */}
+        {sessions.bands.map((b, i) => {
+          const x0 = indexToX(s, b.from)
+          const x1 = indexToX(s, b.to)
+          if (x1 < 0 || x0 > seriesW) return null
+          return (
+            <rect key={`b${i}`} x={x0} y={0} width={Math.max(1, x1 - x0)}
+              height={priceH + panesH} fill={tagBg} opacity={0.55}>
+              <title>{b.kind === "pre" ? "Pre-market" : "After hours"}</title>
+            </rect>
+          )
+        })}
+        {sessions.dividers.map((idx, i) => {
+          const x = indexToX(s, idx)
+          if (x < 0 || x > seriesW) return null
+          return (
+            <line key={`d${i}`} x1={x} y1={0} x2={x} y2={priceH + panesH}
+              stroke={text} strokeWidth={1} strokeDasharray="2 4" opacity={0.35} />
+          )
+        })}
+
         {/* the series */}
         {kind === "area" && <path d={paths.area} fill={accent} fillOpacity={0.14} />}
         {(kind === "line" || kind === "area") && (

@@ -212,6 +212,10 @@ function MarketChart() {
               // The SERIES identity, not the bars. A poll brings a new array
               // for the same series and must not reset the reader's view.
               seriesId={`${symbol}:${range}:${data?.interval ?? ""}`}
+              // Session shading only means something on intraday bars — a
+              // daily bar IS a session, so marking its boundaries would draw a
+              // divider between every pair of bars.
+              intraday={!!data?.interval && !["1d", "1wk", "1mo"].includes(data.interval)}
               {...theme}
             />
             <ChartDrawings
