@@ -169,8 +169,18 @@ export function Widget({
         </header>
       )}
       <div
-        style={bodyHeight ? { height: typeof bodyHeight === "number" ? `${bodyHeight}px` : bodyHeight } : undefined}
-        className={cn("min-h-0 min-w-0", bodyHeight && "overflow-y-auto", bodyClassName)}
+        // A MINIMUM plus flex, not a fixed height.
+        //
+        // Grid rows stretch every tile to the tallest one in the row, so the
+        // moment a chart grew for its indicator panes the quote panel beside
+        // it was stretched with it while its body stayed pinned at 402px —
+        // three hundred pixels of empty panel below the last row of data. The
+        // body now takes whatever the row gives it and scrolls inside that, so
+        // the neighbour's height buys extra rows instead of blank space.
+        style={bodyHeight ? {
+          minHeight: typeof bodyHeight === "number" ? `${bodyHeight}px` : bodyHeight,
+        } : undefined}
+        className={cn("min-h-0 min-w-0", bodyHeight && "flex-1 overflow-y-auto", bodyClassName)}
       >
         {children}
       </div>
