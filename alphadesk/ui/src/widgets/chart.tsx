@@ -147,7 +147,6 @@ function MarketChart() {
         servedLabel={data?.interval_label}
         overlays={overlays} onOverlays={setOverlays}
         panes={panes} onPanes={setPanes}
-        expanded={expanded} onExpand={() => setExpanded(e => !e)}
         drawOpen={drawOpen} onDrawOpen={() => setDrawOpen(o => !o)}
         fundamentals={fundamentals}
         metrics={metrics}

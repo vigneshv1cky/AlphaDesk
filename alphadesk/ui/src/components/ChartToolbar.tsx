@@ -3,7 +3,11 @@ import { OVERLAYS, type OverlayId } from "@/lib/indicators"
 import type { ScaleMode, SeriesKind } from "@/components/chart/ChartCanvas"
 import type { ChartRange, Fundamentals, MetricPeriod, MetricStyle } from "@/lib/api"
 
-/** The chart's controls: series type, range, scale, indicators, expand.
+/** The chart's controls: series type, interval, scale, indicators, metrics.
+ *
+ * Expanding is NOT here. It is a property of the tile rather than of the chart,
+ * so it lives in the widget header alongside every other tile's — this toolbar
+ * carried a second copy of it, which is one control too many for one action.
  *
  * Modelled on the toolbar their board carries (type · interval · Lin · Ind ·
  * Metrics) rather than invented.
@@ -117,7 +121,7 @@ function Item({ selected, onClick, children }: {
 
 export function ChartToolbar({
   type, onType, scale, onScale,
-  overlays, onOverlays, panes, onPanes, expanded, onExpand, indicatorsReliable,
+  overlays, onOverlays, panes, onPanes, indicatorsReliable,
   interval, onInterval, servedInterval, servedLabel, drawOpen, onDrawOpen,
   fundamentals, metrics, onToggleMetric,
   metricPeriod, onMetricPeriod, metricStyle, onMetricStyle,
@@ -135,8 +139,6 @@ export function ChartToolbar({
   onOverlays: (v: OverlayId[]) => void
   panes: boolean
   onPanes: (v: boolean) => void
-  expanded: boolean
-  onExpand: () => void
   drawOpen: boolean
   onDrawOpen: () => void
   indicatorsReliable: boolean
@@ -223,15 +225,9 @@ export function ChartToolbar({
       >
         ✎
       </button>
-
-      <button
-        type="button"
-        onClick={onExpand}
-        aria-label={expanded ? "Collapse chart" : "Expand chart"}
-        className={`${btn} ${off}`}
-      >
-        {expanded ? "⤡" : "⤢"}
-      </button>
+      {/* No expand button here. Expanding is a WIDGET action, not a chart one,
+          and it now lives in the widget header where every other tile carries
+          it — one control in one place beats the same control twice. */}
     </div>
   )
 }
