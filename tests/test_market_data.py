@@ -212,3 +212,31 @@ class TestOfferableIntervals:
 
     def test_unknown_range_is_treated_as_a_day(self):
         assert prices.available_intervals("nonsense") == prices.available_intervals("1D")
+
+    def test_estimate_tracks_the_window_actually_fetched(self):
+        # Intraday is fetched over `span + 3` CALENDAR days, not over the
+        # range's nominal length. Estimating from the nominal length read 1D as
+        # a single session and made 30-minute bars look too sparse to offer
+        # when they are ~50. Measured hourly counts, which the estimate must
+        # stay close to:
+        for rng, served in (("1M", 197), ("3M", 560), ("6M", 1094), ("1Y", 2031)):
+            est = prices._estimated_bars(prices.RANGE_DAYS[rng], "1h")
+            assert 0.75 * served <= est <= 1.25 * served, f"{rng}: est {est} vs {served}"
+
+    def test_one_day_still_offers_its_finer_intervals(self):
+        # The regression the estimator fix exists to prevent.
+        offered = prices.available_intervals("1D")
+        for iv in ("15m", "30m"):
+            assert iv in offered, f"1D dropped {iv}"
+
+    def test_monthly_bars_need_more_than_a_year(self):
+        # Twelve points is not a chart. Five years of them is.
+        for rng in ("YTD", "1Y"):
+            assert "1mo" not in prices.available_intervals(rng)
+        for rng in ("5Y", "MAX"):
+            assert "1mo" in prices.available_intervals(rng)
+
+    def test_four_hour_bars_survive_a_month(self):
+        # ~59 bars: roughly two a session. Thin-looking but perfectly readable,
+        # and the floor must not be raised so far that it takes this with it.
+        assert "4h" in prices.available_intervals("1M")

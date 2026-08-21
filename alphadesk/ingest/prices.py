@@ -683,12 +683,26 @@ RANGE_DAYS = {"1D": 1, "5D": 5, "1M": 31, "3M": 93, "6M": 186,
 INTRADAY_MAX_OFFER_DAYS = 93
 
 # Below this an "interval" is a handful of points, not a chart — 4-hour bars
-# over one day is two of them, and a weekly bar over a month is four.
-_MIN_OFFERABLE_BARS = 10
+# over one day is a couple of them, and a monthly bar over a year is twelve.
+#
+# 13 rather than a rounder number because it sits in a real gap: monthly over
+# a year estimates 12 and is genuinely too thin to read, while weekly over a
+# quarter estimates 13.3 and is a usable chart. The threshold is calibrated to
+# the menu it governs, not chosen for tidiness.
+_MIN_OFFERABLE_BARS = 13
 
-# A regular US session. Only an estimate for the offer decision; the feed also
-# prints extended hours, which makes this conservative in the right direction.
-_SESSION_MINUTES = 390
+# Intraday bars are fetched over `span + 3` CALENDAR days (see the window built
+# in get_chart_series), and the feed prints roughly an eight-hour day once
+# extended hours are counted. Two-thirds of calendar days are trading days.
+#
+# Estimating from RANGE_DAYS alone was wrong in a way that mattered: it read
+# the 1D range as one day when the fetch actually covers four, so 1D/1m came
+# out as 390 bars against 1,553 served and 30-minute bars looked too sparse to
+# offer when they are ~50. Checked against measured counts, this lands within a
+# few percent on hourly at every range (1Y: estimates 2,031, serves 2,031).
+_INTRADAY_LOOKBACK_PAD_DAYS = 3
+_FEED_MINUTES_PER_SESSION = 480
+_TRADING_DAY_RATIO = 252 / 365
 
 
 def _interval_minutes(interval: str) -> Optional[int]:
@@ -707,12 +721,13 @@ def _interval_minutes(interval: str) -> Optional[int]:
 def _estimated_bars(span_days: int, interval: str) -> float:
     mins = _interval_minutes(interval)
     if mins:
-        return span_days * _SESSION_MINUTES / mins
+        window = span_days + _INTRADAY_LOOKBACK_PAD_DAYS
+        return window * _TRADING_DAY_RATIO * (_FEED_MINUTES_PER_SESSION / mins)
     if interval == "1d":
-        return span_days * 252 / 365      # trading days, not calendar days
+        return span_days * _TRADING_DAY_RATIO   # trading days, not calendar days
     if interval == "1wk":
         return span_days / 7
-    return span_days / 30.4               # 1mo
+    return span_days / 30.4                     # 1mo
 
 
 def available_intervals(range_key: str) -> list[str]:
