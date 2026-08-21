@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import type { ChartBar } from "@/lib/api"
 import {
   clampView, indexToX, padRange, priceDecimals, priceTicks, priceToY,
@@ -68,6 +68,11 @@ export function ChartCanvas({
   // State, not just the ref: the grab cursor is rendered, and a ref mutation
   // does not re-render, so reading drag.current in the style never changed it.
   const [panning, setPanning] = useState(false)
+  /** Manual price-scale zoom, 1 = fit the visible bars. Dragging the price
+   * gutter changes it; double-clicking there puts it back to fitting. */
+  const [yZoom, setYZoom] = useState(1)
+  const yDrag = useRef<{ y: number; zoom: number } | null>(null)
+  const clipId = useId()
 
   useEffect(() => {
     if (!host.current) return
@@ -81,7 +86,12 @@ export function ChartCanvas({
 
   // A new series resets the window to "everything", the way loading a symbol
   // should — keeping a stale zoom across a range change strands the reader.
-  useEffect(() => { setView(bars.length ? { from: 0, to: bars.length } : null) }, [bars])
+  useEffect(() => {
+    setView(bars.length ? { from: 0, to: bars.length } : null)
+    // A hand-set price scale belongs to the series it was set on; carrying it
+    // onto a different symbol or range would silently misframe the new one.
+    setYZoom(1)
+  }, [bars])
 
   const panesH = panes.reduce((n, p) => n + p.height, 0)
   const priceH = Math.max(40, box.h - AXIS_H - panesH)
@@ -91,13 +101,21 @@ export function ChartCanvas({
 
   const { min, max } = useMemo(() => {
     const ext = visibleExtent(bars, from, to)
-    if (scaleMode !== "percent") return padRange(ext.min, ext.max)
-    // Percent rebases to the first visible bar, so two names of very different
-    // price can be compared on one axis.
-    const base = bars[Math.max(0, Math.floor(from))]?.c
-    if (!base) return padRange(ext.min, ext.max)
-    return padRange((ext.min / base - 1) * 100, (ext.max / base - 1) * 100)
-  }, [bars, from, to, scaleMode])
+    const fitted = (() => {
+      if (scaleMode !== "percent") return padRange(ext.min, ext.max)
+      // Percent rebases to the first visible bar, so two names of very
+      // different price can be compared on one axis.
+      const base = bars[Math.max(0, Math.floor(from))]?.c
+      if (!base) return padRange(ext.min, ext.max)
+      return padRange((ext.min / base - 1) * 100, (ext.max / base - 1) * 100)
+    })()
+    if (yZoom === 1) return fitted
+    // Expand or contract about the MIDDLE of the fitted range, so the series
+    // stays put while the scale opens up around it rather than sliding.
+    const centre = (fitted.min + fitted.max) / 2
+    const half = (fitted.max - fitted.min) / 2 / yZoom
+    return { min: centre - half, max: centre + half }
+  }, [bars, from, to, scaleMode, yZoom])
 
   // Memoized on its six numbers, and that memo is load-bearing rather than an
   // optimization. `s` feeds the projection effect's dep array, and the effect
@@ -188,7 +206,12 @@ export function ChartCanvas({
       if (!sideways && !zooming) return       // the page's gesture, not ours
       e.preventDefault()
       const x = e.clientX - el.getBoundingClientRect().left
-      const delta = e.shiftKey ? e.deltaY : e.deltaX
+      // Whichever axis actually carries the movement. Reading deltaY whenever
+      // shift was held looked right and panned by exactly zero: the BROWSER
+      // already rewrites a shift+wheel into deltaX, so the axis being read was
+      // the one guaranteed to be 0. Platforms that do not rewrite it leave the
+      // movement on deltaY, so both have to be tolerated.
+      const delta = Math.abs(e.deltaX) >= Math.abs(e.deltaY) ? e.deltaX : e.deltaY
       const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15
       setView(prev => {
         const cur = prev ?? { from: 0, to: total }
@@ -214,6 +237,13 @@ export function ChartCanvas({
     const r = host.current!.getBoundingClientRect()
     const x = e.clientX - r.left
     const y = e.clientY - r.top
+    if (yDrag.current) {
+      // Exponential so the feel is the same at every zoom level, and so the
+      // factor can never reach zero and invert the axis. Down compresses.
+      const dy = e.clientY - yDrag.current.y
+      setYZoom(Math.min(8, Math.max(0.2, yDrag.current.zoom * Math.exp(-dy / 200))))
+      return
+    }
     if (drag.current) {
       const span = drag.current.to - drag.current.from
       const shift = ((drag.current.x - e.clientX) / plotW) * span
@@ -227,7 +257,7 @@ export function ChartCanvas({
     const i = Math.round(xToIndex(s, x) - 0.5)
     onHover?.(bars[Math.max(0, Math.min(bars.length - 1, i))] ?? null, { x, y })
   }
-  const stop = () => { drag.current = null; setPanning(false) }
+  const stop = () => { drag.current = null; yDrag.current = null; setPanning(false) }
   const leave = () => { stop(); setCursor(null); onHover?.(null, null) }
 
   // ── geometry, built as path strings ─────────────────────────────────────
@@ -392,6 +422,17 @@ export function ChartCanvas({
       onMouseLeave={leave}
     >
       <svg width="100%" height={height} className="block">
+        <defs>
+          {/* Everything that draws data is clipped to the plot. Without it a
+              panned series runs straight under the price gutter and collides
+              with the axis labels and the price tag — the bars are still drawn
+              past the edge on purpose (a partially visible candle at the edge
+              is correct), they just must not be VISIBLE there. */}
+          <clipPath id={clipId}>
+            <rect x={0} y={0} width={plotW} height={priceH + panesH} />
+          </clipPath>
+        </defs>
+
         {/* horizontal grid + price axis */}
         {ticks.map(v => {
           const y = priceToY(s, v, log)
@@ -421,6 +462,7 @@ export function ChartCanvas({
           </g>
         ))}
 
+        <g clipPath={`url(#${clipId})`}>
         {/* the series */}
         {kind === "area" && <path d={paths.area} fill={accent} fillOpacity={0.14} />}
         {(kind === "line" || kind === "area") && (
@@ -488,6 +530,8 @@ export function ChartCanvas({
           </g>
         ))}
 
+        </g>
+
         {/* last price, tagged on the axis */}
         {last && (
           <g>
@@ -525,6 +569,25 @@ export function ChartCanvas({
             )}
           </g>
         )}
+
+        {/* The price gutter, grabbable. Rendered LAST so it is on top of the
+            axis labels: a transparent rect still takes the pointer, and if the
+            labels sat above it a drag begun exactly on "44.00" would fall
+            through to the pan handler instead. */}
+        <rect
+          x={plotW} y={0} width={AXIS_W} height={priceH}
+          fill="transparent"
+          style={{ cursor: "ns-resize" }}
+          onMouseDown={e => {
+            // Kept off the host's handler, which would start a horizontal pan
+            // at the same time.
+            e.stopPropagation()
+            yDrag.current = { y: e.clientY, zoom: yZoom }
+          }}
+          onDoubleClick={e => { e.stopPropagation(); setYZoom(1) }}
+        >
+          <title>Drag to stretch the price scale · double-click to fit</title>
+        </rect>
       </svg>
     </div>
   )
