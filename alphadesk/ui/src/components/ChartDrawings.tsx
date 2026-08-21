@@ -16,12 +16,19 @@ import type { Projection } from "@/components/chart/ChartCanvas"
  * either way.
  */
 
+/** Lines and a measure, and nothing else.
+ *
+ * Rectangles, ellipses, Fibonacci retracements and free text were here and are
+ * gone. They are annotation — decoration over a chart — where a line marks a
+ * level you are actually reading against and the measure answers a question
+ * with a number. This terminal reads market data rather than presenting it to
+ * anyone, so the shapes had no audience. Git history has them.
+ */
 export type Tool =
-  | "none" | "hline" | "vline" | "trend" | "ray"
-  | "rect" | "ellipse" | "fib" | "measure" | "text"
+  | "none" | "hline" | "vline" | "trend" | "ray" | "measure"
 
 /** Tools that need a second click to complete. The rest place on one. */
-const TWO_CLICK: Tool[] = ["trend", "ray", "rect", "ellipse", "fib", "measure"]
+const TWO_CLICK: Tool[] = ["trend", "ray", "measure"]
 
 type Anchor = { time: string; price: number }
 export type Drawing = {
@@ -29,13 +36,7 @@ export type Drawing = {
   kind: Exclude<Tool, "none">
   a: Anchor
   b?: Anchor
-  text?: string
 }
-
-/** Fibonacci retracement levels. 0 and 1 are the anchors themselves; the rest
- * are the conventional ratios, which is why they are pinned rather than
- * configurable — a "fib" drawn on other numbers is not a fib. */
-const FIB = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1]
 
 let seq = 0
 const nextId = () => `d${++seq}`
@@ -58,8 +59,6 @@ export function ChartDrawings({
   const [pending, setPending] = useState<Anchor | null>(null)
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null)
   /** Where a text label is being typed, before it becomes a drawing. */
-  const [typing, setTyping] = useState<{ at: Anchor; x: number; y: number } | null>(null)
-  const [draft, setDraft] = useState("")
   // Bumped whenever the chart moves, to force a re-projection.
   const [, setTick] = useState(0)
 
@@ -86,13 +85,12 @@ export function ChartDrawings({
   const commit = (d: Drawing) => { onChange([...drawings, d]); onToolDone() }
 
   const onClick = (e: React.MouseEvent) => {
-    if (tool === "none" || typing) return
+    if (tool === "none") return
     const r = wrap.current!.getBoundingClientRect()
     const px = { x: e.clientX - r.left, y: e.clientY - r.top }
     const at = unproject(px.x, px.y)
     if (!at) return
 
-    if (tool === "text") { setTyping({ at, ...px }); setDraft(""); return }
     if (!TWO_CLICK.includes(tool)) { commit({ id: nextId(), kind: tool, a: at }); return }
     if (!pending) { setPending(at); return }
     commit({ id: nextId(), kind: tool, a: pending, b: at })
@@ -109,7 +107,7 @@ export function ChartDrawings({
   useEffect(() => {
     const esc = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return
-      setPending(null); setTyping(null); onToolDone()
+      setPending(null); onToolDone()
     }
     document.addEventListener("keydown", esc)
     return () => document.removeEventListener("keydown", esc)
@@ -117,7 +115,6 @@ export function ChartDrawings({
 
   const width = wrap.current?.clientWidth ?? 0
   const stroke = "var(--accent)"
-  const muted = "var(--muted-foreground)"
 
   /** Elapsed time between two anchors, for the measure readout. Anchors carry
    * an ISO timestamp, so this is real elapsed time rather than a bar count —
@@ -146,13 +143,6 @@ export function ChartDrawings({
     if (d.kind === "vline") {
       return <line key={d.id} x1={a.x} y1={0} x2={a.x} y2={height} stroke={stroke} strokeWidth={1} strokeDasharray="4 3" opacity={op} />
     }
-    if (d.kind === "text") {
-      return (
-        <text key={d.id} x={a.x} y={a.y} fill={stroke} fontSize={12} opacity={op}>
-          {d.text}
-        </text>
-      )
-    }
 
     const bAnchor = ghost && cursor ? null : d.b
     const b = bAnchor ? project(bAnchor) : cursor
@@ -177,38 +167,6 @@ export function ChartDrawings({
     const box = {
       x: Math.min(a.x, b.x), y: Math.min(a.y, b.y),
       w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y),
-    }
-    if (d.kind === "rect") {
-      return <rect key={d.id} {...{ x: box.x, y: box.y, width: box.w, height: box.h }}
-        fill={stroke} fillOpacity={ghost ? 0.08 : 0.1} stroke={stroke} strokeWidth={1} strokeDasharray={dash} />
-    }
-    if (d.kind === "ellipse") {
-      return <ellipse key={d.id} cx={box.x + box.w / 2} cy={box.y + box.h / 2} rx={box.w / 2} ry={box.h / 2}
-        fill={stroke} fillOpacity={ghost ? 0.08 : 0.1} stroke={stroke} strokeWidth={1} strokeDasharray={dash} />
-    }
-    if (d.kind === "fib") {
-      const hi = Math.max(d.a.price, bAnchor?.price ?? d.a.price)
-      const lo = Math.min(d.a.price, bAnchor?.price ?? d.a.price)
-      if (ghost) return <rect key={d.id} {...{ x: box.x, y: box.y, width: box.w, height: box.h }}
-        fill={stroke} fillOpacity={0.06} stroke={stroke} strokeDasharray="4 3" strokeWidth={1} />
-      return (
-        <g key={d.id}>
-          {FIB.map(level => {
-            const price = hi - (hi - lo) * level
-            const p = project({ time: d.a.time, price })
-            if (!p) return null
-            return (
-              <g key={level}>
-                <line x1={box.x} y1={p.y} x2={box.x + box.w} y2={p.y}
-                  stroke={stroke} strokeWidth={1} strokeOpacity={level === 0 || level === 1 ? 0.9 : 0.5} />
-                <text x={box.x + box.w + 4} y={p.y + 3} fill={muted} fontSize={10} className="tnum">
-                  {(level * 100).toFixed(1)}% · {price.toFixed(2)}
-                </text>
-              </g>
-            )
-          })}
-        </g>
-      )
     }
     // measure
     const from = d.a.price
@@ -242,7 +200,7 @@ export function ChartDrawings({
         zIndex: 10,
         // Only intercept the mouse while a tool is armed — otherwise the chart
         // keeps its own crosshair, pan and zoom.
-        pointerEvents: tool === "none" && !typing ? "none" : "auto",
+        pointerEvents: tool === "none" ? "none" : "auto",
         cursor: tool === "none" ? "default" : "crosshair",
       }}
     >
@@ -253,23 +211,6 @@ export function ChartDrawings({
         </svg>
       )}
 
-      {typing && (
-        <input
-          autoFocus
-          value={draft}
-          onChange={e => setDraft(e.target.value)}
-          onBlur={() => { setTyping(null); onToolDone() }}
-          onKeyDown={e => {
-            if (e.key === "Enter" && draft.trim()) {
-              commit({ id: nextId(), kind: "text", a: typing.at, text: draft.trim() })
-              setTyping(null)
-            } else if (e.key === "Escape") { setTyping(null); onToolDone() }
-          }}
-          placeholder="Label…"
-          className="absolute z-20 w-[160px] rounded border border-accent bg-popover px-1.5 py-0.5 text-[12px] outline-none"
-          style={{ left: typing.x, top: typing.y - 10 }}
-        />
-      )}
     </div>
   )
 }
@@ -293,11 +234,7 @@ export function DrawingToolbar({
     { id: "ray", label: "Ray", glyph: "➚" },
     { id: "hline", label: "Horizontal line", glyph: "─" },
     { id: "vline", label: "Vertical line", glyph: "│" },
-    { id: "rect", label: "Rectangle", glyph: "▭" },
-    { id: "ellipse", label: "Ellipse", glyph: "◯" },
-    { id: "fib", label: "Fibonacci retracement", glyph: "≡" },
     { id: "measure", label: "Measure", glyph: "⇕" },
-    { id: "text", label: "Text label", glyph: "A" },
   ]
   const cls = (on: boolean) =>
     `flex h-7 w-7 items-center justify-center rounded text-[13px] transition-colors ${
