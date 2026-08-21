@@ -152,19 +152,32 @@ export function ChartCanvas({
    * page scrolled underneath it at the same time. A non-passive listener on
    * the host element is the only way to own the gesture.
    *
-   * A horizontal gesture PANS instead of zooming. A trackpad swipe sends
-   * deltaX with deltaY at ~0, and the old handler read only deltaY — so
-   * `deltaY > 0` was false and every sideways swipe zoomed IN. Shift+wheel is
-   * the mouse equivalent and moves on deltaY, which is where the browser puts
-   * it once shift is held. */
+   * A PLAIN vertical wheel is deliberately left alone. This chart sits in a
+   * scrolling board and can fill most of the viewport once expanded, so
+   * claiming that gesture turns the tile into a scroll trap — the page stops
+   * moving as soon as the pointer crosses the chart, which is far more
+   * annoying than reaching for the range strip. Only gestures the page has no
+   * use for are taken:
+   *
+   *   sideways (trackpad swipe / shift+wheel) → pan. A swipe sends deltaX with
+   *     deltaY at ~0; reading only deltaY meant every sideways swipe zoomed IN
+   *     instead. The page does not scroll horizontally, so this costs nothing.
+   *   ctrl/cmd+wheel → zoom. That is also what a trackpad PINCH reports, so
+   *     pinch-to-zoom works without anyone being told about a modifier.
+   *
+   * preventDefault only fires on those two, which is why the listener must be
+   * non-passive: React registers wheel on its root as passive, where
+   * preventDefault silently does nothing at all. */
   useEffect(() => {
     const el = host.current
     if (!el) return
     const onWheel = (e: WheelEvent) => {
       if (!bars.length) return
-      e.preventDefault()
       const sideways = e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)
-      if (sideways) {
+      const zooming = e.ctrlKey || e.metaKey
+      if (!sideways && !zooming) return       // the page's gesture, not ours
+      e.preventDefault()
+      if (sideways && !zooming) {
         const span = to - from
         const shift = ((e.shiftKey ? e.deltaY : e.deltaX) / plotW) * span
         setView(clampView(from + shift, to + shift, bars.length))
