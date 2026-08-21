@@ -470,18 +470,58 @@ export function ChartCanvas({
     [bars, intraday],
   )
 
+  /** Time labels, at the granularity the VISIBLE window needs.
+   *
+   * The year is the part that used to go missing. Labels were always "Aug 18",
+   * so a five-year chart read as five Augusts and panning back into history
+   * told you the month and the day of a year you had no way to name. Which
+   * year matters exactly when the window cannot imply it, so that is when it
+   * is drawn:
+   *
+   *   window longer than ~10 months, or straddling New Year → "Aug 2025",
+   *     dropping the day, which is noise at that zoom and was the only thing
+   *     making room for the year an issue.
+   *   window inside a year that is not THIS one → "Aug 18, 2025". This is the
+   *     scrolled-into-the-past case: a short window deep in old data looks
+   *     exactly like a short window in the present otherwise.
+   *   window inside the current year → "Aug 18", unchanged. The year is
+   *     already the reader's default assumption, and repeating it on every
+   *     tick of a one-month chart is clutter.
+   */
   const timeTicks = useMemo(() => {
     const out: { x: number; label: string }[] = []
     const span = to - from
     const stride = Math.max(1, Math.round(span / Math.max(2, Math.floor(seriesW / 90))))
     const daily = span > 400 || (bars.length > 1 &&
       Date.parse(bars[bars.length - 1].t) - Date.parse(bars[bars.length - 2].t) >= 86_400_000)
-    for (let i = Math.max(0, Math.ceil(from)); i < Math.min(bars.length, to); i += stride) {
+
+    const lo = Math.max(0, Math.ceil(from))
+    const hi = Math.min(bars.length - 1, Math.floor(to) - 1)
+    const yearOf = (t: string) =>
+      Number(new Date(t).toLocaleDateString("en-US", { year: "numeric", timeZone: "America/New_York" }))
+
+    let mode: "monthYear" | "dayYear" | "day" = "day"
+    if (daily && hi > lo) {
+      const days = (Date.parse(bars[hi].t) - Date.parse(bars[lo].t)) / 86_400_000
+      const firstYear = yearOf(bars[lo].t)
+      const lastYear = yearOf(bars[hi].t)
+      const thisYear = Number(
+        new Date().toLocaleDateString("en-US", { year: "numeric", timeZone: "America/New_York" }))
+      if (days > 300 || firstYear !== lastYear) mode = "monthYear"
+      else if (lastYear !== thisYear) mode = "dayYear"
+    }
+
+    const opts: Intl.DateTimeFormatOptions =
+      mode === "monthYear" ? { month: "short", year: "numeric", timeZone: "America/New_York" }
+      : mode === "dayYear" ? { month: "short", day: "numeric", year: "numeric", timeZone: "America/New_York" }
+      : { month: "short", day: "numeric", timeZone: "America/New_York" }
+
+    for (let i = lo; i < Math.min(bars.length, to); i += stride) {
       const d = new Date(bars[i].t)
       out.push({
         x: indexToX(s, i + 0.5),
         label: daily
-          ? d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" })
+          ? d.toLocaleDateString("en-US", opts)
           : d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }),
       })
     }
