@@ -379,9 +379,13 @@ export function ChartCanvas({
       // Only when EVERY series was grouped — a pane mixing a summed histogram
       // with a plain line would need both to agree on one axis, and they don't.
       const allGrouped = grouped.size > 0 && grouped.size === pane.series.length
+      const onScreen = (t: string) => {
+        const i = byTimeIdx.get(t)
+        return i != null && i >= from - 1 && i <= to + 1
+      }
       const ext = allGrouped
         ? { min: 0, max: Math.max(1, ...[...grouped.values()].flat().map(c => c.v)) }
-        : paneExtent(pane)
+        : paneExtent(pane, onScreen)
       const inner = Math.max(10, pane.height - 6)
       const yIn = (v: number) => {
         const r = ext.max - ext.min

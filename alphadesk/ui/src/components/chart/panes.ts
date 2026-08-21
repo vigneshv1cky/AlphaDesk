@@ -122,12 +122,25 @@ export function macdPane(
   }
 }
 
-/** The min/max a pane's own axis should span. */
-export function paneExtent(pane: Pane): { min: number; max: number } {
+/** The min/max a pane's own axis should span.
+ *
+ * `visible` limits it to the bars on screen, which is what the price pane has
+ * always done and what these did not. Scaling a pane to the WHOLE series meant
+ * one spike anywhere in it set the scale forever: on a 5-session NVDA window
+ * a single -1.35 MACD print against a typical +-0.1 left the middle 90% of
+ * every series inside a quarter of the pane, and zooming into a calm stretch
+ * did not recover the detail, because the outlier was still counted while
+ * being nowhere on screen. Omitted, the whole series is measured, which is
+ * still right for a caller that draws all of it.
+ */
+export function paneExtent(
+  pane: Pane, visible?: (t: string) => boolean,
+): { min: number; max: number } {
   if (pane.range) return pane.range
   let min = Infinity, max = -Infinity
   for (const s of pane.series) {
     for (const p of s.points) {
+      if (visible && !visible(p.t)) continue
       if (p.v < min) min = p.v
       if (p.v > max) max = p.v
     }
