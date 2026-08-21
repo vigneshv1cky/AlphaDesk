@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ChartBar } from "@/lib/api"
 import {
-  indexToX, padRange, priceDecimals, priceTicks, priceToY,
+  clampView, indexToX, padRange, priceDecimals, priceTicks, priceToY,
   visibleExtent, xToIndex, yToPrice, zoomAt, type Scale,
 } from "@/lib/chartScales"
 import { paneAxisLabel, paneExtent, type Pane } from "@/components/chart/panes"
@@ -65,6 +65,9 @@ export function ChartCanvas({
   const [view, setView] = useState<{ from: number; to: number } | null>(null)
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null)
   const drag = useRef<{ x: number; from: number; to: number } | null>(null)
+  // State, not just the ref: the grab cursor is rendered, and a ref mutation
+  // does not re-render, so reading drag.current in the style never changed it.
+  const [panning, setPanning] = useState(false)
 
   useEffect(() => {
     if (!host.current) return
@@ -142,25 +145,52 @@ export function ChartCanvas({
   }, [onProjection, bars, indexByTime, s, yOf, fromDisplay, log, plotW])
 
   // ── interaction ─────────────────────────────────────────────────────────
-  const onWheel = (e: React.WheelEvent) => {
-    if (!view || !bars.length) return
-    e.preventDefault()
-    const r = host.current!.getBoundingClientRect()
-    const anchor = xToIndex(s, e.clientX - r.left)
-    setView(zoomAt(s, anchor, e.deltaY > 0 ? 1.15 : 1 / 1.15, bars.length))
-  }
+
+  /** Wheel is bound here rather than as an `onWheel` prop because React
+   * registers wheel on the root container as PASSIVE, which makes
+   * `preventDefault()` silently do nothing — the chart would zoom while the
+   * page scrolled underneath it at the same time. A non-passive listener on
+   * the host element is the only way to own the gesture.
+   *
+   * A horizontal gesture PANS instead of zooming. A trackpad swipe sends
+   * deltaX with deltaY at ~0, and the old handler read only deltaY — so
+   * `deltaY > 0` was false and every sideways swipe zoomed IN. Shift+wheel is
+   * the mouse equivalent and moves on deltaY, which is where the browser puts
+   * it once shift is held. */
+  useEffect(() => {
+    const el = host.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      if (!bars.length) return
+      e.preventDefault()
+      const sideways = e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)
+      if (sideways) {
+        const span = to - from
+        const shift = ((e.shiftKey ? e.deltaY : e.deltaX) / plotW) * span
+        setView(clampView(from + shift, to + shift, bars.length))
+        return
+      }
+      const anchor = xToIndex(s, e.clientX - el.getBoundingClientRect().left)
+      setView(zoomAt(s, anchor, e.deltaY > 0 ? 1.15 : 1 / 1.15, bars.length))
+    }
+    el.addEventListener("wheel", onWheel, { passive: false })
+    return () => el.removeEventListener("wheel", onWheel)
+  }, [bars.length, from, to, plotW, s])
+
   const onDown = (e: React.MouseEvent) => {
-    if (!view) return
-    drag.current = { x: e.clientX, from: view.from, to: view.to }
+    drag.current = { x: e.clientX, from, to }
+    setPanning(true)
   }
   const onMove = (e: React.MouseEvent) => {
     const r = host.current!.getBoundingClientRect()
     const x = e.clientX - r.left
     const y = e.clientY - r.top
-    if (drag.current && view) {
+    if (drag.current) {
       const span = drag.current.to - drag.current.from
       const shift = ((drag.current.x - e.clientX) / plotW) * span
-      setView({ from: drag.current.from + shift, to: drag.current.to + shift })
+      // Clamped like every other view change — an unclamped drag could push
+      // the series off the edge and leave a blank chart with no way back.
+      setView(clampView(drag.current.from + shift, drag.current.to + shift, bars.length))
       return
     }
     if (x > plotW || y > priceH) { setCursor(null); onHover?.(null, null); return }
@@ -168,7 +198,7 @@ export function ChartCanvas({
     const i = Math.round(xToIndex(s, x) - 0.5)
     onHover?.(bars[Math.max(0, Math.min(bars.length - 1, i))] ?? null, { x, y })
   }
-  const stop = () => { drag.current = null }
+  const stop = () => { drag.current = null; setPanning(false) }
   const leave = () => { stop(); setCursor(null); onHover?.(null, null) }
 
   // ── geometry, built as path strings ─────────────────────────────────────
@@ -293,8 +323,7 @@ export function ChartCanvas({
     <div
       ref={host}
       className="relative w-full select-none"
-      style={{ height, cursor: drag.current ? "grabbing" : "crosshair" }}
-      onWheel={onWheel}
+      style={{ height, cursor: panning ? "grabbing" : "crosshair" }}
       onMouseDown={onDown}
       onMouseMove={onMove}
       onMouseUp={stop}

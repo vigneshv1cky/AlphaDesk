@@ -109,19 +109,30 @@ export function padRange(min: number, max: number, frac = 0.08): { min: number; 
   return { min: min - pad, max: max + pad }
 }
 
+/** Keep a view window overlapping the series.
+ *
+ * Allows a little empty space on either side — room to draw into the future is
+ * worth having — but never lets the bars slide entirely off screen. Panning
+ * and zooming share this one rule so they cannot disagree about where the edge
+ * of the world is; an unclamped pan strands the reader on blank canvas with no
+ * way back except changing the range.
+ */
+export function clampView(from: number, to: number, total: number): { from: number; to: number } {
+  const span = to - from
+  let f = from, t = to
+  if (t > total + span * 0.3) { t = total + span * 0.3; f = t - span }
+  if (f < -span * 0.3) { f = -span * 0.3; t = f + span }
+  return { from: f, to: t }
+}
+
 /** Zoom about a fixed bar index, so the bar under the cursor stays put — the
  * behaviour every charting tool has, and its absence is immediately obvious. */
 export function zoomAt(s: Scale, anchorIndex: number, factor: number, total: number): { from: number; to: number } {
   const span = s.to - s.from
   const next = Math.max(5, Math.min(total * 3, span * factor))
   const ratio = span === 0 ? 0.5 : (anchorIndex - s.from) / span
-  let from = anchorIndex - ratio * next
-  let to = from + next
-  // Allow a little empty space on the right (room to draw into the future),
-  // but never let the series slide entirely out of view.
-  if (to > total + next * 0.3) { to = total + next * 0.3; from = to - next }
-  if (from < -next * 0.3) { from = -next * 0.3; to = from + next }
-  return { from, to }
+  const from = anchorIndex - ratio * next
+  return clampView(from, from + next, total)
 }
 
 /** The min/max of whatever is actually on screen, so the y axis tracks the
