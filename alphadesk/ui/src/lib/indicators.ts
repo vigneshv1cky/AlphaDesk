@@ -146,11 +146,41 @@ export function tema(bars: ChartBar[], period: number): Point[] {
   }))
 }
 
-/** True range, the input to Keltner's width. */
-function atr(bars: ChartBar[], period: number): (number | null)[] {
-  const tr: number[] = bars.map((b, i) =>
+/** True range: the greater of today's spread and the two gaps to yesterday's
+ * close. The input to ATR, Keltner's width and ADX alike. */
+function trueRange(bars: ChartBar[]): number[] {
+  return bars.map((b, i) =>
     i === 0 ? b.h - b.l
       : Math.max(b.h - b.l, Math.abs(b.h - bars[i - 1].c), Math.abs(b.l - bars[i - 1].c)))
+}
+
+/** Wilder's smoothing: the running average he defined for ATR, ADX and RSI —
+ * a 1/period EMA seeded on a simple mean. Distinct from `ema`, whose 2/(n+1)
+ * factor makes it turn roughly twice as fast, so the two are NOT
+ * interchangeable even though both are "smoothed averages". */
+function rma(values: (number | null)[], period: number): (number | null)[] {
+  const out: (number | null)[] = new Array(values.length).fill(null)
+  let prev: number | null = null
+  let seed = 0, seen = 0
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i]
+    if (v == null || !Number.isFinite(v)) continue
+    if (prev == null) {
+      seed += v
+      if (++seen === period) { prev = seed / period; out[i] = prev }
+    } else {
+      prev = (prev * (period - 1) + v) / period
+      out[i] = prev
+    }
+  }
+  return out
+}
+
+/** Keltner's width. A SIMPLE mean of true range, not Wilder's — kept as it
+ * was so the existing channel does not silently move; the ATR pane below uses
+ * Wilder's, which is what "ATR" means when it is the thing being read. */
+function atr(bars: ChartBar[], period: number): (number | null)[] {
+  const tr = trueRange(bars)
   const out: (number | null)[] = new Array(bars.length).fill(null)
   let sum = 0
   for (let i = 0; i < bars.length; i++) {
@@ -210,6 +240,176 @@ export function envelopes(bars: ChartBar[], period = 20, pct = 2.5): {
     lower: mid.map(p => ({ t: p.t, v: p.v * (1 - k) })),
   }
 }
+
+/* ── Oscillators ─────────────────────────────────────────────────────────────
+ *
+ * These draw in their OWN pane rather than over price, because none of them is
+ * in price units — %R runs -100..0, OBV is a share count, ATR is a spread.
+ *
+ * All computed here from the bars already on screen, like the overlays above.
+ * RSI and MACD stay server-side because the server is also what measures
+ * whether the feed can support them; these inherit that same verdict rather
+ * than making their own (see CHART_MIN_COVERAGE) — an oscillator on a sparse
+ * feed is precisely the chart that looks right and is not.
+ */
+
+/** Highest high and lowest low over the window ending at `i`. */
+function extremes(bars: ChartBar[], i: number, period: number): { hi: number; lo: number } {
+  let hi = -Infinity, lo = Infinity
+  for (let j = i - period + 1; j <= i; j++) {
+    if (bars[j].h > hi) hi = bars[j].h
+    if (bars[j].l < lo) lo = bars[j].l
+  }
+  return { hi, lo }
+}
+
+const typicalPrice = (b: ChartBar) => (b.h + b.l + b.c) / 3
+
+/** Stochastic oscillator. %K is where the close sits inside the window's
+ * range; %D is its 3-period average. A window with no range at all is 50 —
+ * dead centre — rather than a divide by zero. */
+export function stochastic(bars: ChartBar[], kPeriod = 14, dPeriod = 3): { k: Point[]; d: Point[] } {
+  const kRaw: (number | null)[] = new Array(bars.length).fill(null)
+  for (let i = kPeriod - 1; i < bars.length; i++) {
+    const { hi, lo } = extremes(bars, i, kPeriod)
+    kRaw[i] = hi === lo ? 50 : ((bars[i].c - lo) / (hi - lo)) * 100
+  }
+  const dRaw: (number | null)[] = new Array(bars.length).fill(null)
+  for (let i = kPeriod + dPeriod - 2; i < bars.length; i++) {
+    let sum = 0
+    for (let j = i - dPeriod + 1; j <= i; j++) sum += kRaw[j] ?? 0
+    dRaw[i] = sum / dPeriod
+  }
+  return { k: zip(bars, kRaw), d: zip(bars, dRaw) }
+}
+
+/** Williams %R — the stochastic measured from the top of the range, so it runs
+ * -100 (at the low) to 0 (at the high). */
+export function williamsR(bars: ChartBar[], period = 14): Point[] {
+  const out: (number | null)[] = new Array(bars.length).fill(null)
+  for (let i = period - 1; i < bars.length; i++) {
+    const { hi, lo } = extremes(bars, i, period)
+    out[i] = hi === lo ? -50 : ((hi - bars[i].c) / (hi - lo)) * -100
+  }
+  return zip(bars, out)
+}
+
+/** Commodity Channel Index. The 0.015 is Lambert's constant, chosen so most
+ * readings land inside ±100; it is not a unit conversion. */
+export function cci(bars: ChartBar[], period = 20): Point[] {
+  const tp = bars.map(typicalPrice)
+  const out: (number | null)[] = new Array(bars.length).fill(null)
+  for (let i = period - 1; i < bars.length; i++) {
+    let sum = 0
+    for (let j = i - period + 1; j <= i; j++) sum += tp[j]
+    const mean = sum / period
+    let dev = 0
+    for (let j = i - period + 1; j <= i; j++) dev += Math.abs(tp[j] - mean)
+    const md = dev / period
+    out[i] = md === 0 ? 0 : (tp[i] - mean) / (0.015 * md)
+  }
+  return zip(bars, out)
+}
+
+/** Rate of change, as a percentage of the close `period` bars back. */
+export function roc(bars: ChartBar[], period = 12): Point[] {
+  const out: (number | null)[] = new Array(bars.length).fill(null)
+  for (let i = period; i < bars.length; i++) {
+    const base = bars[i - period].c
+    out[i] = base === 0 ? null : ((bars[i].c - base) / base) * 100
+  }
+  return zip(bars, out)
+}
+
+/** Money Flow Index — RSI weighted by volume, so it needs volume to mean
+ * anything. A window with no turnover at all yields nothing rather than the
+ * 100 the formula would otherwise report from an empty denominator. */
+export function mfi(bars: ChartBar[], period = 14): Point[] {
+  const tp = bars.map(typicalPrice)
+  const out: (number | null)[] = new Array(bars.length).fill(null)
+  for (let i = period; i < bars.length; i++) {
+    let pos = 0, neg = 0
+    for (let j = i - period + 1; j <= i; j++) {
+      const flow = tp[j] * (bars[j].v ?? 0)
+      if (tp[j] > tp[j - 1]) pos += flow
+      else if (tp[j] < tp[j - 1]) neg += flow
+    }
+    if (pos + neg === 0) continue
+    out[i] = neg === 0 ? 100 : 100 - 100 / (1 + pos / neg)
+  }
+  return zip(bars, out)
+}
+
+/** Average true range, Wilder's smoothing. In price units, so its pane scale
+ * is the symbol's own — not comparable across symbols. */
+export function atrSeries(bars: ChartBar[], period = 14): Point[] {
+  return zip(bars, rma(trueRange(bars), period))
+}
+
+/** On-balance volume: a running total that adds the day's volume on an up
+ * close and subtracts it on a down one. The LEVEL is arbitrary — only its
+ * direction, and whether it agrees with price, carries information. */
+export function obv(bars: ChartBar[]): Point[] {
+  const out: (number | null)[] = new Array(bars.length).fill(null)
+  let acc = 0
+  for (let i = 0; i < bars.length; i++) {
+    const v = bars[i].v ?? 0
+    if (i > 0) {
+      if (bars[i].c > bars[i - 1].c) acc += v
+      else if (bars[i].c < bars[i - 1].c) acc -= v
+    }
+    out[i] = acc
+  }
+  return zip(bars, out)
+}
+
+/** ADX with its two directional lines. ADX measures trend STRENGTH only — it
+ * says nothing about direction, which is what +DI/-DI are drawn alongside it
+ * for. Conventionally read as trending above 25. */
+export function adx(bars: ChartBar[], period = 14): { adx: Point[]; plusDI: Point[]; minusDI: Point[] } {
+  const n = bars.length
+  const plusDM: number[] = new Array(n).fill(0)
+  const minusDM: number[] = new Array(n).fill(0)
+  for (let i = 1; i < n; i++) {
+    const up = bars[i].h - bars[i - 1].h
+    const down = bars[i - 1].l - bars[i].l
+    // Only the LARGER of the two moves counts, and only if it is outward.
+    plusDM[i] = up > down && up > 0 ? up : 0
+    minusDM[i] = down > up && down > 0 ? down : 0
+  }
+  const trS = rma(trueRange(bars), period)
+  const pS = rma(plusDM, period)
+  const mS = rma(minusDM, period)
+  const pdi: (number | null)[] = new Array(n).fill(null)
+  const mdi: (number | null)[] = new Array(n).fill(null)
+  const dx: (number | null)[] = new Array(n).fill(null)
+  for (let i = 0; i < n; i++) {
+    const t = trS[i], p = pS[i], m = mS[i]
+    if (t == null || p == null || m == null || t === 0) continue
+    const P = (100 * p) / t, M = (100 * m) / t
+    pdi[i] = P
+    mdi[i] = M
+    dx[i] = P + M === 0 ? 0 : (100 * Math.abs(P - M)) / (P + M)
+  }
+  return { adx: zip(bars, rma(dx, period)), plusDI: zip(bars, pdi), minusDI: zip(bars, mdi) }
+}
+
+/** The indicators that get their own pane under price. RSI and MACD come from
+ * the server; the rest are computed above. */
+export type PaneId = "rsi" | "macd" | "stoch" | "williams" | "cci" | "roc" | "mfi" | "atr" | "obv" | "adx"
+
+export const PANE_INDICATORS: { id: PaneId; label: string; group: string }[] = [
+  { id: "rsi",      label: "Relative Strength Index (9)",   group: "Momentum" },
+  { id: "stoch",    label: "Stochastic Oscillator (14, 3)", group: "Momentum" },
+  { id: "williams", label: "Williams %R (14)",              group: "Momentum" },
+  { id: "cci",      label: "Commodity Channel Index (20)",  group: "Momentum" },
+  { id: "roc",      label: "Rate of Change (12)",           group: "Momentum" },
+  { id: "macd",     label: "MACD (12, 26, 9)",              group: "Trend" },
+  { id: "adx",      label: "Average Directional Index (14)", group: "Trend" },
+  { id: "atr",      label: "Average True Range (14)",       group: "Volatility" },
+  { id: "mfi",      label: "Money Flow Index (14)",         group: "Volume" },
+  { id: "obv",      label: "On-Balance Volume",             group: "Volume" },
+]
 
 export type OverlayId =
   | "sma20" | "sma50" | "ema20" | "ema50" | "wma20" | "dema20" | "tema20"

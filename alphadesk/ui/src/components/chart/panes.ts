@@ -1,5 +1,13 @@
 import type { ChartBar } from "@/lib/api"
-import type { Point } from "@/lib/indicators"
+// Relative with an explicit extension, not the usual `@/` alias: this is a
+// VALUE import now, and `pnpm test` runs these files through bare Node, which
+// knows nothing about Vite's alias. The type-only import this replaced was
+// erased before Node ever tried to resolve it, so the alias cost nothing then
+// and breaks the scale-math test now.
+import {
+  adx, atrSeries, cci, mfi, obv, roc, stochastic, williamsR,
+  type PaneId, type Point,
+} from "../../lib/indicators.ts"
 
 /** Pane definitions for the renderer.
  *
@@ -129,5 +137,109 @@ export function paneExtent(pane: Pane): { min: number; max: number } {
   return {
     min: histogram && min === 0 ? 0 : min - pad,
     max: histogram && max === 0 ? 0 : max + pad,
+  }
+}
+
+/** The panes computed in the browser rather than served.
+ *
+ * One builder rather than eight exports: every one of these is the same shape
+ * — a series or two, a scale, and the conventional reference lines — and the
+ * differences between them are data, not control flow the caller should have
+ * to know. Returns null when the series is too short to draw, which the caller
+ * filters out; a pane with one point in it is a horizontal line that means
+ * nothing.
+ *
+ * Bounded oscillators declare a FIXED range for the same reason RSI does:
+ * fitted to its own data, a %R sitting quietly at -55 all session would be
+ * drawn touching both edges of the pane and read as violent.
+ */
+export function oscillatorPane(
+  id: Exclude<PaneId, "rsi" | "macd">,
+  bars: ChartBar[],
+  height: number,
+  theme: { gain: string; loss: string },
+): Pane | null {
+  const base = { id, height }
+  const enough = (pts: Point[]) => pts.length >= 2
+
+  switch (id) {
+    case "stoch": {
+      const { k, d } = stochastic(bars, 14, 3)
+      if (!enough(k)) return null
+      return {
+        ...base, label: "Stoch 14,3", range: { min: 0, max: 100 }, levels: [20, 50, 80],
+        series: [
+          { kind: "line", points: k, color: "#4c8dff", width: 1.5 },
+          { kind: "line", points: d, color: "#f5a524", width: 1.5 },
+        ],
+      }
+    }
+    case "williams": {
+      const pts = williamsR(bars, 14)
+      if (!enough(pts)) return null
+      return {
+        ...base, label: "%R 14", range: { min: -100, max: 0 }, levels: [-80, -50, -20],
+        series: [{ kind: "line", points: pts, color: "#9353d3", width: 1.5 }],
+      }
+    }
+    case "cci": {
+      const pts = cci(bars, 20)
+      if (!enough(pts)) return null
+      // Unbounded in principle, so fitted — but the ±100 rails still drawn,
+      // because they are what the reading is conventionally judged against.
+      return {
+        ...base, label: "CCI 20", levels: [-100, 0, 100],
+        series: [{ kind: "line", points: pts, color: "#5ec6d6", width: 1.5 }],
+      }
+    }
+    case "roc": {
+      const pts = roc(bars, 12)
+      if (!enough(pts)) return null
+      return {
+        ...base, label: "ROC 12", levels: [0],
+        series: [{ kind: "line", points: pts, color: "#17c964", width: 1.5 }],
+      }
+    }
+    case "mfi": {
+      const pts = mfi(bars, 14)
+      if (!enough(pts)) return null       // no volume on this feed → no pane
+      return {
+        ...base, label: "MFI 14", range: { min: 0, max: 100 }, levels: [20, 50, 80],
+        series: [{ kind: "line", points: pts, color: "#d6a35e", width: 1.5 }],
+      }
+    }
+    case "atr": {
+      const pts = atrSeries(bars, 14)
+      if (!enough(pts)) return null
+      // Price units, so it gets the plain axis rather than compact notation.
+      return {
+        ...base, label: "ATR 14",
+        series: [{ kind: "line", points: pts, color: "#f31260", width: 1.5 }],
+      }
+    }
+    case "obv": {
+      const pts = obv(bars)
+      if (!enough(pts)) return null
+      // Share counts run to the millions, and the LEVEL carries no meaning —
+      // only the slope — so compact notation loses nothing worth keeping.
+      return {
+        ...base, label: "OBV", compact: true, levels: [0],
+        series: [{ kind: "area", points: pts, color: "#7ea6f0" }],
+      }
+    }
+    case "adx": {
+      const { adx: a, plusDI, minusDI } = adx(bars, 14)
+      if (!enough(a)) return null
+      // 25 is the conventional trending/not line. ADX alone says nothing about
+      // WHICH way, which is why both directional lines are drawn with it.
+      return {
+        ...base, label: "ADX 14", range: { min: 0, max: 100 }, levels: [25],
+        series: [
+          { kind: "line", points: plusDI, color: theme.gain, width: 1 },
+          { kind: "line", points: minusDI, color: theme.loss, width: 1 },
+          { kind: "line", points: a, color: "#8f9bb3", width: 1.5 },
+        ],
+      }
+    }
   }
 }

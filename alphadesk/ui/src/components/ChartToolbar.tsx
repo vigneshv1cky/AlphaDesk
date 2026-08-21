@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { OVERLAYS, type OverlayId } from "@/lib/indicators"
+import { OVERLAYS, PANE_INDICATORS, type OverlayId, type PaneId } from "@/lib/indicators"
 import type { ScaleMode, SeriesKind } from "@/components/chart/ChartCanvas"
 import type { ChartRange } from "@/lib/api"
 
@@ -138,8 +138,8 @@ export function ChartToolbar({
   servedLabel?: string
   overlays: OverlayId[]
   onOverlays: (v: OverlayId[]) => void
-  panes: boolean
-  onPanes: (v: boolean) => void
+  panes: PaneId[]
+  onPanes: (v: PaneId[]) => void
   drawOpen: boolean
   onDrawOpen: () => void
   indicatorsReliable: boolean
@@ -186,7 +186,7 @@ export function ChartToolbar({
         ))}
       </Menu>
 
-      <Menu label="Ind" active={overlays.length > 0 || panes} wide>
+      <Menu label="Ind" active={overlays.length > 0 || panes.length > 0} wide>
         {() => (
           <IndicatorMenu
             overlays={overlays} toggle={toggle}
@@ -246,18 +246,31 @@ export function ChartRanges({ range, onRange }: {
 function IndicatorMenu({ overlays, toggle, panes, onPanes, indicatorsReliable }: {
   overlays: OverlayId[]
   toggle: (id: OverlayId) => void
-  panes: boolean
-  onPanes: (v: boolean) => void
+  panes: PaneId[]
+  onPanes: (v: PaneId[]) => void
   indicatorsReliable: boolean
 }) {
   const [q, setQ] = useState("")
+  const needle = q.trim().toLowerCase()
   const groups = useMemo(() => {
-    const needle = q.trim().toLowerCase()
     const hits = OVERLAYS.filter(o => !needle || o.label.toLowerCase().includes(needle))
     const by = new Map<string, typeof OVERLAYS>()
     for (const o of hits) by.set(o.group, [...(by.get(o.group) ?? []), o])
     return [...by.entries()]
-  }, [q])
+  }, [needle])
+
+  /** Pane indicators are grouped the same way and searched by the same box —
+   * a reader looking for "stochastic" should not have to know that it draws
+   * under the price rather than over it. */
+  const paneGroups = useMemo(() => {
+    const hits = PANE_INDICATORS.filter(o => !needle || o.label.toLowerCase().includes(needle))
+    const by = new Map<string, typeof PANE_INDICATORS>()
+    for (const o of hits) by.set(o.group, [...(by.get(o.group) ?? []), o])
+    return [...by.entries()]
+  }, [needle])
+
+  const togglePane = (id: PaneId) =>
+    onPanes(panes.includes(id) ? panes.filter(p => p !== id) : [...panes, id])
 
   return (
     <>
@@ -270,7 +283,7 @@ function IndicatorMenu({ overlays, toggle, panes, onPanes, indicatorsReliable }:
         className="mb-1 w-full border-b border-grid-line bg-transparent px-3 py-2 text-[13px] outline-none placeholder:text-muted-foreground"
       />
       <div className="max-h-[280px] overflow-y-auto">
-        {groups.length === 0 && (
+        {groups.length === 0 && paneGroups.length === 0 && (
           <p className="px-3 py-3 text-[12px] text-muted-foreground">No indicator matches “{q}”.</p>
         )}
         {groups.map(([group, items]) => (
@@ -286,17 +299,32 @@ function IndicatorMenu({ overlays, toggle, panes, onPanes, indicatorsReliable }:
             ))}
           </div>
         ))}
-        <div className="bg-panel-header px-3 py-1 text-[10px] font-medium uppercase tracking-[1px] text-muted-foreground">
-          Panes
-        </div>
-        <Item selected={panes} onClick={() => onPanes(!panes)}>RSI / MACD</Item>
-        {!indicatorsReliable && (
+        {!indicatorsReliable && paneGroups.length > 0 && (
           // The server measured this feed too sparse to support them, and it
-          // hides them rather than draw something that looks right.
-          <p className="px-3 py-1 text-[11px] leading-snug text-muted-foreground">
-            Hidden for this symbol — the feed is too sparse to compute them honestly.
-          </p>
+          // hides them rather than draw something that looks right. That
+          // verdict covers the browser-computed oscillators too: they read the
+          // same bars, so they inherit the same doubt.
+          <>
+            <div className="bg-panel-header px-3 py-1 text-[10px] font-medium uppercase tracking-[1px] text-muted-foreground">
+              Panes
+            </div>
+            <p className="px-3 py-1 text-[11px] leading-snug text-muted-foreground">
+              Hidden for this symbol — the feed is too sparse to compute them honestly.
+            </p>
+          </>
         )}
+        {indicatorsReliable && paneGroups.map(([group, items]) => (
+          <div key={group}>
+            <div className="bg-panel-header px-3 py-1 text-[10px] font-medium uppercase tracking-[1px] text-muted-foreground">
+              {group}
+            </div>
+            {items.map(o => (
+              <Item key={o.id} selected={panes.includes(o.id)} onClick={() => togglePane(o.id)}>
+                <span className="truncate">{o.label}</span>
+              </Item>
+            ))}
+          </div>
+        ))}
       </div>
     </>
   )

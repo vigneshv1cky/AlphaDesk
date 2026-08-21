@@ -6,14 +6,15 @@ import { OhlcvStrip } from "@/components/chart/OhlcvStrip"
 import { ChartDrawings } from "@/components/ChartDrawings"
 import { useChartTheme } from "@/lib/theme"
 import { buildOverlays } from "@/lib/indicators"
-import { macdPane, rsiPane, volumePane, type Pane } from "@/components/chart/panes"
+import { macdPane, oscillatorPane, rsiPane, volumePane, type Pane } from "@/components/chart/panes"
 import { ChartRanges, ChartToolbar } from "@/components/ChartToolbar"
 import { DrawingToolbar, type Drawing, type Tool } from "@/components/ChartDrawings"
 import type { ChartBar } from "@/lib/api"
 import { Empty, Widget } from "@/components/terminal"
+import { PANE_INDICATORS } from "@/lib/indicators"
 import { registerWidget } from "@/widgets/registry"
 import { TILE_BODY_HEIGHT } from "@/widgets/tile"
-import type { OverlayId } from "@/lib/indicators"
+import type { OverlayId, PaneId } from "@/lib/indicators"
 
 /** The chart tile on the Markets board.
  *
@@ -48,7 +49,7 @@ function MarketChart() {
   const [scale, setScale] = useState<ScaleMode>("linear")
   const [interval, setInterval] = useState("1m")
   const [overlays, setOverlays] = useState<OverlayId[]>([])
-  const [panes, setPanes] = useState(false)
+  const [panes, setPanes] = useState<PaneId[]>([])
   const [expanded, setExpanded] = useState(false)
   // Drawings live here, not inside PriceChart: that component is torn down and
   // rebuilt on every range or series change, and annotations must outlive both.
@@ -72,24 +73,49 @@ function MarketChart() {
   useEffect(() => { setData(null); load(symbol, range, interval) }, [symbol, range, interval])
 
   const priceHeight = expanded ? 620 : COLLAPSED
+  const OSC_HEIGHT = 90
 
   /** Volume always; the oscillators only once expanded, because at tile height
-   * they would be two 40px slivers and an indicator you cannot read still
-   * invites you to read it. */
+   * they would be 40px slivers and an indicator you cannot read still invites
+   * you to read it.
+   *
+   * Every one of them is gated on `indicators_reliable`, RSI and MACD included.
+   * The browser-computed ones read the same bars the server measured, so they
+   * inherit the same verdict rather than each forming its own — an oscillator
+   * on a feed too sparse to support it draws identically to a real one, which
+   * is exactly what makes it dangerous (CLAUDE.md's second invariant). */
   const stacked: Pane[] = useMemo(() => {
     if (!data) return []
     const out: (Pane | null)[] = [
       volumePane(data.bars, Math.round(priceHeight * 0.22), theme.gain, theme.loss),
     ]
-    if (expanded && panes && data.indicators_reliable) {
-      out.push(rsiPane(data.bars, data.rsi_9, 90, "#7c3aed", {
-        oversold: data.thresholds.rsi_oversold, overbought: data.thresholds.rsi_overbought,
-      }))
-      out.push(macdPane(data.bars, data.macd, data.macd_signal, data.macd_hist,
-                        90, "#2563eb", "#f59e0b", theme.gain, theme.loss))
+    if (expanded && data.indicators_reliable) {
+      // Built in the order the menu lists them, not the order they were
+      // clicked, so the stack does not reshuffle as you toggle.
+      for (const id of PANE_INDICATORS.map(p => p.id).filter(id => panes.includes(id))) {
+        if (id === "rsi") {
+          out.push(rsiPane(data.bars, data.rsi_9, OSC_HEIGHT, "#7c3aed", {
+            oversold: data.thresholds.rsi_oversold, overbought: data.thresholds.rsi_overbought,
+          }))
+        } else if (id === "macd") {
+          out.push(macdPane(data.bars, data.macd, data.macd_signal, data.macd_hist,
+                            OSC_HEIGHT, "#2563eb", "#f59e0b", theme.gain, theme.loss))
+        } else {
+          out.push(oscillatorPane(id, data.bars, OSC_HEIGHT, theme))
+        }
+      }
     }
     return out.filter(Boolean) as Pane[]
   }, [data, expanded, panes, priceHeight, theme])
+
+  /** The canvas GROWS with the panes instead of the price pane paying for them.
+   * Panes are subtracted from the canvas height inside the renderer, so a fixed
+   * height meant each new oscillator ate the chart it was meant to annotate —
+   * eight of them would have left the 40px floor. Only when expanded, where the
+   * tile has no fixed body height and can take it. */
+  const canvasHeight = priceHeight + (expanded
+    ? stacked.filter(p => p.id !== "volume").reduce((n, p) => n + p.height, 0)
+    : 0)
 
   // The early return comes AFTER every hook. Returning before one makes the
   // hook order differ between renders, which React cannot recover from — lint
@@ -139,7 +165,7 @@ function MarketChart() {
               bars={data.bars}
               kind={type}
               scale={scale}
-              height={priceHeight}
+              height={canvasHeight}
               panes={stacked}
               overlays={buildOverlays(data.bars, overlays)}
               onProjection={setProjection}
@@ -153,7 +179,11 @@ function MarketChart() {
               drawings={drawings}
               onChange={setDrawings}
               visible={drawVisible}
-              height={priceHeight}
+              // Matches the canvas, not the price pane: this is the surface
+              // drawings are placed on, and it covered the whole canvas before
+              // panes could grow it. Where a drawing LANDS is the projection's
+              // business either way.
+              height={canvasHeight}
             />
           </div>
           {drawOpen && (
