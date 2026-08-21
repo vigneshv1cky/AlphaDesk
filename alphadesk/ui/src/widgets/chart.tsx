@@ -29,7 +29,16 @@ import type { OverlayId } from "@/lib/indicators"
  * indicator you cannot read still invites you to read it.
  */
 
-const COLLAPSED = 318
+/** What the canvas shares its tile with: the toolbar and the range strip (32
+ * each) plus the OHLCV readout and its top padding (25).
+ *
+ * The canvas takes whatever is left, rather than a number picked independently
+ * of the tile it has to fit inside. Those two used to be unrelated constants
+ * that happened to disagree by five pixels — enough to put a scrollbar on the
+ * chart, and a chart you scroll to see the bottom of is not a chart. Deriving
+ * it means a change to the tile height cannot silently reintroduce that. */
+const CHART_CHROME = 32 + 32 + 25
+const COLLAPSED = TILE_BODY_HEIGHT - CHART_CHROME
 
 function MarketChart() {
   const [params] = useSearchParams()
