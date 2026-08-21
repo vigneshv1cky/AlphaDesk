@@ -1,12 +1,17 @@
 import { useEffect, useRef, useState } from "react"
-import { useSearchParams } from "react-router-dom"
 import { api, type SymbolHit } from "@/lib/api"
+import { useBoardSymbols } from "@/lib/boardSymbols"
 
-/** Pick the symbol the whole board is scoped to.
+/** Add a symbol to the board's strip and scope the board to it.
  *
- * Opened from a `+` beside the symbol chip, the way theirs is, rather than
+ * Opened from a `+` beside the symbol chips, the way theirs is, rather than
  * sitting in the header as a permanent input — the board is usually already
  * scoped, and a search box you are not using is chrome.
+ *
+ * Picking APPENDS a chip rather than replacing the one already there, so the
+ * board accumulates the names you are working through and switching between
+ * them is one click instead of one search. Picking a symbol already on the
+ * strip just activates that chip.
  *
  * Results come from the cached Alpaca asset list server-side, so it can only
  * ever offer symbols the terminal will actually render. A free-text box would
@@ -18,7 +23,7 @@ import { api, type SymbolHit } from "@/lib/api"
  * than a curated list we would have to invent.
  */
 export function SymbolSearch() {
-  const [params, setParams] = useSearchParams()
+  const { add } = useBoardSymbols()
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState("")
   const [hits, setHits] = useState<SymbolHit[]>([])
@@ -51,11 +56,7 @@ export function SymbolSearch() {
   }, [open])
 
   const pick = (symbol: string) => {
-    const next = new URLSearchParams(params)
-    next.set("symbol", symbol)
-    // A filing chosen for the previous company must not survive the switch.
-    next.delete("accession")
-    setParams(next, { replace: true })
+    add(symbol)          // appends a chip and makes it active; see lib/boardSymbols
     setQ("")
     setOpen(false)
   }

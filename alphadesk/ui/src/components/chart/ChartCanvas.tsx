@@ -96,7 +96,18 @@ export function ChartCanvas({
     return padRange((ext.min / base - 1) * 100, (ext.max / base - 1) * 100)
   }, [bars, from, to, scaleMode])
 
-  const s: Scale = { from, to, width: plotW, height: priceH, min, max }
+  // Memoized on its six numbers, and that memo is load-bearing rather than an
+  // optimization. `s` feeds the projection effect's dep array, and the effect
+  // calls onProjection() — which is a setState in the parent. A fresh object
+  // literal here made those deps differ on every render, so the effect re-ran
+  // after every commit and set state again: an infinite render loop that React
+  // ends by refusing to commit. The first paint had already landed, so the
+  // board looked correct and then silently stopped responding to anything —
+  // no symbol change, no chip, no toolbar. Keep every field primitive.
+  const s: Scale = useMemo(
+    () => ({ from, to, width: plotW, height: priceH, min, max }),
+    [from, to, plotW, priceH, min, max],
+  )
   const log = scaleMode === "log"
   const base = bars[Math.max(0, Math.floor(from))]?.c ?? 1
   const toDisplay = useCallback(
