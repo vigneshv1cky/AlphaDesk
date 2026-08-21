@@ -162,3 +162,53 @@ class TestIntervalResolution:
         assert series["interval"] == "15m"
         assert series["interval_label"] == "15 mins"
         assert series["interval_requested"] == "15m"
+
+
+class TestOfferableIntervals:
+    """Which intervals a range is allowed to OFFER.
+
+    Distinct from resolve_interval, which answers what a request gets served.
+    This decides what may be asked for at all, and it exists because the
+    answers differ wildly in cost: measured warm, 3M of hourly returns in 0.7s
+    while 1Y of hourly takes 9-14s and draws 2,031 points into a 449px tile.
+    """
+
+    def test_every_range_offers_its_own_default(self):
+        # The toolbar shows the served interval as the current value, so a
+        # default missing from its own menu would render a selection that
+        # cannot be re-selected.
+        for rng in ("1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y", "MAX"):
+            served = prices.resolve_interval(rng, None)
+            assert served in prices.available_intervals(rng), f"{rng} omits {served}"
+
+    def test_nothing_offered_would_be_downgraded(self):
+        # The whole point: an offered interval must come back as itself, so the
+        # "showing X instead" notice becomes unreachable rather than routine.
+        for rng in ("1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y", "MAX"):
+            for iv in prices.available_intervals(rng):
+                assert prices.resolve_interval(rng, iv) == iv, f"{rng}/{iv} downgrades"
+
+    def test_intraday_stops_after_three_months(self):
+        # The expensive band. 6M/YTD/1Y hourly cost seconds and are unreadable
+        # at tile width, so they are not offered at all.
+        for rng in ("6M", "YTD", "1Y", "5Y", "MAX"):
+            for iv in prices.available_intervals(rng):
+                assert prices._interval_minutes(iv) is None, f"{rng} still offers {iv}"
+
+    def test_three_months_keeps_hourly(self):
+        # Deliberately retained: 0.7s, 1.25 bars per pixel, and the only route
+        # to intraday structure in an older period is zooming a longer series.
+        assert "1h" in prices.available_intervals("3M")
+
+    def test_no_range_offers_a_handful_of_bars(self):
+        for rng in ("1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y", "MAX"):
+            span = prices.RANGE_DAYS[rng]
+            for iv in prices.available_intervals(rng):
+                assert prices._estimated_bars(span, iv) >= prices._MIN_OFFERABLE_BARS
+
+    def test_every_range_offers_something(self):
+        for rng in ("1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y", "MAX"):
+            assert prices.available_intervals(rng), f"{rng} offers nothing"
+
+    def test_unknown_range_is_treated_as_a_day(self):
+        assert prices.available_intervals("nonsense") == prices.available_intervals("1D")

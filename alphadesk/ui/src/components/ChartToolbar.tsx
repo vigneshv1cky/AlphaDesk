@@ -135,7 +135,7 @@ function Item({ selected, onClick, children }: {
 export function ChartToolbar({
   type, onType, scale, onScale,
   overlays, onOverlays, panes, onPanes, indicatorsReliable,
-  interval, onInterval, servedInterval, servedLabel, drawOpen, onDrawOpen,
+  interval, onInterval, servedInterval, servedLabel, available, drawOpen, onDrawOpen,
 }: {
   type: SeriesKind
   onType: (t: SeriesKind) => void
@@ -146,6 +146,9 @@ export function ChartToolbar({
   /** What the server actually served — may be coarser than asked. */
   servedInterval?: string
   servedLabel?: string
+  /** The interval ids this range may offer, from the server. Undefined before
+   * the first response, when the full list is the honest thing to show. */
+  available?: string[]
   overlays: OverlayId[]
   onOverlays: (v: OverlayId[]) => void
   panes: PaneId[]
@@ -174,7 +177,7 @@ export function ChartToolbar({
             active={!!servedInterval && servedInterval !== interval}>
         {close => (
           <>
-            {INTERVALS.map(i => (
+            {INTERVALS.filter(i => !available || available.includes(i.id)).map(i => (
               <Item key={i.id} selected={i.id === interval} onClick={() => { onInterval(i.id); close() }}>
                 {i.label}
               </Item>

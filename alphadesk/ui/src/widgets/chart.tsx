@@ -193,6 +193,7 @@ function MarketChart() {
         onInterval={iv => { setInterval(iv); setIntervalPinned(true) }}
         servedInterval={data?.interval}
         servedLabel={data?.interval_label}
+        available={data?.intervals}
         overlays={overlays} onOverlays={setOverlays}
         panes={panes} onPanes={setPanes}
         drawOpen={drawOpen} onDrawOpen={() => setDrawOpen(o => !o)}

@@ -671,6 +671,74 @@ RANGE_DAYS = {"1D": 1, "5D": 5, "1M": 31, "3M": 93, "6M": 186,
               "YTD": 365, "1Y": 365, "5Y": 1825, "MAX": 20000}
 
 
+# Sub-daily bars come off Alpaca's intraday feed, and the cost of that fetch
+# scales with the SPAN asked for, not with the bars returned. Measured against
+# a warm server: 3M of hourly is 0.7s, 6M is 3.5s, and YTD/1Y are 9-14s — and
+# a year of hourly is 2,031 points in a 449px tile, 4.5 bars to the pixel, so
+# it draws indistinguishably from the daily series that answers in 5ms. The
+# terminal was offering all ten intervals for every range and charging seconds
+# for resolution the screen cannot show.
+#
+# 3M is the cut: the last span where intraday is both quick and legible.
+INTRADAY_MAX_OFFER_DAYS = 93
+
+# Below this an "interval" is a handful of points, not a chart — 4-hour bars
+# over one day is two of them, and a weekly bar over a month is four.
+_MIN_OFFERABLE_BARS = 10
+
+# A regular US session. Only an estimate for the offer decision; the feed also
+# prints extended hours, which makes this conservative in the right direction.
+_SESSION_MINUTES = 390
+
+
+def _interval_minutes(interval: str) -> Optional[int]:
+    """Bar length in minutes, or None for daily and coarser."""
+    spec = CHART_INTERVALS.get(interval)
+    if not spec:
+        return None
+    unit = str(spec["unit"])
+    if unit == "Min":
+        return int(spec["n"])
+    if unit == "Hour":
+        return int(spec["n"]) * 60
+    return None
+
+
+def _estimated_bars(span_days: int, interval: str) -> float:
+    mins = _interval_minutes(interval)
+    if mins:
+        return span_days * _SESSION_MINUTES / mins
+    if interval == "1d":
+        return span_days * 252 / 365      # trading days, not calendar days
+    if interval == "1wk":
+        return span_days / 7
+    return span_days / 30.4               # 1mo
+
+
+def available_intervals(range_key: str) -> list[str]:
+    """Which intervals this range should actually OFFER.
+
+    The policy lives here rather than in the UI for the same reason CHART_RANGES
+    does: the two must not be able to disagree about what "1Y" can serve. The
+    UI renders this list and nothing else, so a combination that would be
+    downgraded, or that would cost seconds to draw as an unreadable smear, is
+    never presented rather than merely regretted afterwards.
+    """
+    span = RANGE_DAYS.get((range_key or "1D").upper(), 1)
+    out = []
+    for key in CHART_INTERVALS:
+        intraday = _interval_minutes(key) is not None
+        # Never offer something that would come back as a different series.
+        if resolve_interval(range_key, key) != key:
+            continue
+        if intraday and span > INTRADAY_MAX_OFFER_DAYS:
+            continue
+        if _estimated_bars(span, key) < _MIN_OFFERABLE_BARS:
+            continue
+        out.append(key)
+    return out
+
+
 def resolve_interval(range_key: str, wanted: str | None) -> str:
     """The finest interval that can actually cover `range_key`.
 
@@ -788,6 +856,9 @@ def get_chart_series(symbol: str, days: int = 2, range_key: str | None = None,
                 "interval_label": CHART_INTERVALS[used]["label"],
                 "interval_requested": (interval or "").lower() or None,
                 "range": (range_key or "").upper() or None,
+                # What the toolbar may offer for THIS range. Travels with the
+                # series so the client never has to hold a copy of the policy.
+                "intervals": available_intervals(range_key or "1D"),
                 **(stats if stats is not None else _coverage_stats(bars)),
             }
     except Exception as exc:

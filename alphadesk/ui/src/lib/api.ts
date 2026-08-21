@@ -270,6 +270,10 @@ export interface ChartSeries {
   interval?: string
   interval_label?: string
   interval_requested?: string | null
+  /** Which intervals this RANGE may offer. Decided by the server, which owns
+   * the range/interval mapping, so the toolbar can render it without keeping a
+   * second copy of the policy that could drift. */
+  intervals?: string[]
   range?: string | null
   bars: ChartBar[]
   rsi_9: (number | null)[]
