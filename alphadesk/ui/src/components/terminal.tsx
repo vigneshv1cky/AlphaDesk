@@ -82,6 +82,9 @@ export function Sparkline({
  * dependency arrow the wrong way. */
 const EXPANDED_BODY_HEIGHT = 760
 
+/** The widget header, which the section's minimum has to account for. */
+const HEADER_H = 38
+
 /** Titles are ReactNode, but an aria-label has to be a string. Anything that is
  * not plain text falls back to a generic word rather than "[object Object]". */
 function titleText(title: React.ReactNode): string {
@@ -133,7 +136,19 @@ export function Widget({
       data-expanded={isOpen || undefined}
       // Inline gridColumn, not a Tailwind class: `col-span-${n}` is built at
       // runtime and would be purged from the stylesheet.
-      style={{ gridColumn: `span ${cols} / span ${cols}` }}
+      // The tile's floor lives HERE, not on the body.
+      //
+      // A minimum on the body is a floor its content simply exceeds, so every
+      // tile grew to fit everything it had — Market News rendered all sixty
+      // headlines at 4,026px and nothing scrolled at all. On the section it
+      // reserves the tile's normal height while leaving the body free to be a
+      // fixed box that scrolls inside it, and grid stretch still lets a tall
+      // neighbour hand this one extra room to fill.
+      style={{
+        gridColumn: `span ${cols} / span ${cols}`,
+        ...(bodyHeight && typeof bodyHeight === "number"
+          ? { minHeight: `${bodyHeight + HEADER_H}px` } : {}),
+      }}
       className={cn(
         "flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-panel",
         className,
@@ -177,12 +192,22 @@ export function Widget({
         // three hundred pixels of empty panel below the last row of data. The
         // body now takes whatever the row gives it and scrolls inside that, so
         // the neighbour's height buys extra rows instead of blank space.
-        style={bodyHeight ? {
-          minHeight: typeof bodyHeight === "number" ? `${bodyHeight}px` : bodyHeight,
-        } : undefined}
-        className={cn("min-h-0 min-w-0", bodyHeight && "flex-1 overflow-y-auto", bodyClassName)}
+        style={typeof bodyHeight === "string" ? { height: bodyHeight } : undefined}
+        className={cn("min-h-0 min-w-0", bodyHeight && "relative flex-1", bodyClassName)}
       >
-        {children}
+        {bodyHeight ? (
+          // Absolutely positioned, which is the only thing that actually stops
+          // the content sizing the tile.
+          //
+          // A grid row is auto-sized to its items' MAX-CONTENT, and that walks
+          // into a flex container's children whatever their flex-basis — so
+          // `flex-1` alone did not stop sixty headlines demanding 4,026px, it
+          // just stopped them scrolling on the way. Taken out of flow, the
+          // content contributes no height at all: the section rests on its own
+          // minimum, and a taller neighbour still stretches it and gets filled
+          // rather than leaving a gap.
+          <div className="absolute inset-0 overflow-y-auto">{children}</div>
+        ) : children}
       </div>
     </section>
   )

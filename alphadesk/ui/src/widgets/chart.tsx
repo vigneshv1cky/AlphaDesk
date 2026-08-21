@@ -33,15 +33,16 @@ import type { OverlayId, PaneId } from "@/lib/indicators"
  * rest of the board.
  */
 
-/** What the canvas shares its tile with: the toolbar and the range strip (32
- * each) plus the OHLCV readout and its top padding (25).
+/** What the canvas shares its tile with: the toolbar and the range strip (34
+ * each, measured — bordered pill buttons made them taller than the 32 this
+ * first assumed) plus the OHLCV readout and its top padding (43).
  *
  * The canvas takes whatever is left, rather than a number picked independently
  * of the tile it has to fit inside. Those two used to be unrelated constants
  * that happened to disagree by five pixels — enough to put a scrollbar on the
  * chart, and a chart you scroll to see the bottom of is not a chart. Deriving
  * it means a change to the tile height cannot silently reintroduce that. */
-const CHART_CHROME = 32 + 32 + 25
+const CHART_CHROME = 34 + 34 + 43
 const COLLAPSED = TILE_BODY_HEIGHT - CHART_CHROME
 
 /** How tall a pane needs to be depends on how much of itself it uses.
