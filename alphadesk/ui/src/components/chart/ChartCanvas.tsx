@@ -456,7 +456,10 @@ export function ChartCanvas({
   if (last) tagRows.push(yOf(last.c))
   if (cursor) tagRows.push(cursor.y)
   const tagHides = (y: number) => tagRows.some(t => Math.abs(y - t) < TAG_HALF)
-  const hovered = cursor ? bars[Math.max(0, Math.min(bars.length - 1, Math.round(xToIndex(s, cursor.x) - 0.5)))] : null
+  const hoveredIdx = cursor
+    ? Math.max(0, Math.min(bars.length - 1, Math.round(xToIndex(s, cursor.x) - 0.5)))
+    : -1
+  const hovered = cursor ? bars[hoveredIdx] : null
 
   /** Time labels, thinned to whatever fits without collision. */
   /** Session shading and day breaks. Memoized on the bars because it walks
@@ -658,6 +661,20 @@ export function ChartCanvas({
               stroke={text} strokeWidth={1} strokeDasharray="3 3" />
             <line x1={0} y1={cursor.y} x2={plotW} y2={cursor.y}
               stroke={text} strokeWidth={1} strokeDasharray="3 3" />
+            {/* The bar being read, marked ON the series.
+                The vertical rule says which COLUMN the cursor is in, which is
+                not the same as which point the OHLCV strip is quoting — at a
+                few bars to the pixel they can differ by several bars, and the
+                rule alone leaves the reader to guess where on the line the
+                numbers came from. Only on the line kinds: a candle already
+                shows its own close, and a dot on top of one would just cover
+                the thing it was pointing at. */}
+            {hovered && (kind === "line" || kind === "area") && (
+              <circle
+                cx={indexToX(s, hoveredIdx + 0.5)} cy={yOf(hovered.c)} r={3.5}
+                fill={accent} stroke={tagBg} strokeWidth={2}
+              />
+            )}
             <rect x={plotW + 2} y={cursor.y - 8} width={AXIS_W - 4} height={16}
               fill={tagBg} stroke={tagBorder} strokeWidth={1} rx={2} />
             <text x={plotW + 6} y={cursor.y + 3.5} fill={tagFg} fontSize={11} className="tnum">
