@@ -10,7 +10,7 @@ holds, closes or scores a position. The trading endpoints (/api/picks/*,
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from alphadesk.ledger import store
@@ -178,6 +178,65 @@ def api_chart(symbol: str, days: int = 2, range: str | None = None,
     return series
 
 
+@app.get("/api/stream/{symbol}")
+async def api_stream(symbol: str, request: Request):
+    """Live trades for ONE symbol, pushed as Server-Sent Events.
+
+    SSE rather than a websocket because this is one-way: the browser never has
+    anything to say back, and EventSource brings its own reconnect, its own
+    backoff and plain-HTTP transport for free. A websocket would add a second
+    protocol to operate for no capability this needs.
+
+    The upstream connection is shared and reference counted (ingest/stream.py)
+    — Alpaca's free tier allows one per account, so this holds a reference for
+    as long as the reader is here and drops it on disconnect.
+
+    Async on purpose. Every other endpoint here is a sync def on the 40-worker
+    threadpool, and a long-lived one of those would park a worker per viewer;
+    this sits on the event loop instead, where an idle reader costs a sleeping
+    task.
+    """
+    from alphadesk.ingest.stream import stream as market
+
+    sym = "".join(c for c in symbol.upper() if c.isalnum() or c in ".-")[:12]
+    if not sym:
+        raise HTTPException(400, "bad symbol")
+
+    async def events():
+        import asyncio
+        import json as _json
+
+        subscribed = market.acquire(sym)
+        # Say so immediately rather than leaving the client to infer it from
+        # silence — on this feed silence is also what a quiet stock looks like.
+        yield f"event: hello\ndata: {_json.dumps({'symbol': sym, 'live': subscribed})}\n\n"
+        last_sent = None
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                tick = market.latest(sym) if subscribed else None
+                if tick and tick.get("at") != last_sent:
+                    last_sent = tick.get("at")
+                    yield f"data: {_json.dumps(tick)}\n\n"
+                else:
+                    # A comment line keeps proxies from timing the connection
+                    # out while a symbol is genuinely quiet.
+                    yield ": keep-alive\n\n"
+                await asyncio.sleep(0.25)
+        finally:
+            if subscribed:
+                market.release(sym)
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        # nginx and friends buffer text/event-stream by default, which turns a
+        # live feed into a batch delivered whenever the buffer fills.
+        "X-Accel-Buffering": "no",
+    })
+
+
 @app.get("/api/quote/{symbol}")
 def api_quote(symbol: str):
     """The equity-overview block for one symbol."""
@@ -273,6 +332,11 @@ def api_system():
         "uptime_s": round(_process_age_s()),
         "market": market_session(),
         "news": store.news_health(),
+        # The live feed: whether the shared upstream socket is up and which
+        # symbols currently have a reader. Worth surfacing for the same reason
+        # the provider list is — "why is the price not moving" is usually
+        # "nothing is subscribed", not "the market is quiet".
+        "stream": _stream_status(),
         # Which plugins this deployment has, and which are selected. Worth
         # showing: with providers pluggable, "why is there no news" is usually
         # "the feed you configured isn't the one you think".
@@ -285,6 +349,17 @@ def api_system():
             },
         },
     }
+
+
+def _stream_status() -> dict:
+    """Never let a status read start a connection: importing the module is
+    free, but `status()` on a stream nobody asked for would be a side effect
+    of looking at the health page."""
+    try:
+        from alphadesk.ingest.stream import stream as market
+        return market.status()
+    except Exception:
+        return {"connected": False, "available": False, "symbols": []}
 
 
 @app.get("/api/earnings")

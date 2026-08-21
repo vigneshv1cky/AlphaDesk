@@ -13,6 +13,7 @@ import type { ChartBar } from "@/lib/api"
 import { Empty, Widget } from "@/components/terminal"
 import { PANE_INDICATORS } from "@/lib/indicators"
 import { useChartSeries } from "@/lib/queries"
+import { useLiveTrade } from "@/lib/live"
 import { registerWidget } from "@/widgets/registry"
 import { TILE_BODY_HEIGHT } from "@/widgets/tile"
 import type { OverlayId, PaneId } from "@/lib/indicators"
@@ -87,6 +88,27 @@ function MarketChart() {
     if (wantedInterval == null && data?.interval) setInterval(data.interval)
   }, [wantedInterval, data?.interval])
 
+  /** The live edge, pushed. The polled series owns the bars; a trade only
+   * moves the one still forming, so the right edge and the price tag track the
+   * market between refreshes without the history ever being invented here.
+   *
+   * The array LENGTH never changes, which is what keeps this from disturbing
+   * the reader: the canvas resets its view on series identity and follows
+   * growth, and a tick is neither. */
+  const { tick, live } = useLiveTrade(symbol)
+  const bars = useMemo(() => {
+    const src = data?.bars
+    if (!src?.length || !tick || tick.stale || tick.symbol !== symbol) return src ?? []
+    const last = src[src.length - 1]
+    if (tick.price === last.c) return src
+    return [...src.slice(0, -1), {
+      ...last,
+      c: tick.price,
+      h: Math.max(last.h, tick.price),
+      l: Math.min(last.l, tick.price),
+    }]
+  }, [data?.bars, tick, symbol])
+
   const priceHeight = expanded ? 620 : COLLAPSED
   const OSC_HEIGHT = 90
 
@@ -102,26 +124,26 @@ function MarketChart() {
   const stacked: Pane[] = useMemo(() => {
     if (!data) return []
     const out: (Pane | null)[] = [
-      volumePane(data.bars, Math.round(priceHeight * 0.22), theme.gain, theme.loss),
+      volumePane(bars, Math.round(priceHeight * 0.22), theme.gain, theme.loss),
     ]
     if (expanded && data.indicators_reliable) {
       // Built in the order the menu lists them, not the order they were
       // clicked, so the stack does not reshuffle as you toggle.
       for (const id of PANE_INDICATORS.map(p => p.id).filter(id => panes.includes(id))) {
         if (id === "rsi") {
-          out.push(rsiPane(data.bars, data.rsi_9, OSC_HEIGHT, "#7c3aed", {
+          out.push(rsiPane(bars, data.rsi_9, OSC_HEIGHT, "#7c3aed", {
             oversold: data.thresholds.rsi_oversold, overbought: data.thresholds.rsi_overbought,
           }))
         } else if (id === "macd") {
-          out.push(macdPane(data.bars, data.macd, data.macd_signal, data.macd_hist,
+          out.push(macdPane(bars, data.macd, data.macd_signal, data.macd_hist,
                             OSC_HEIGHT, "#2563eb", "#f59e0b", theme.gain, theme.loss))
         } else {
-          out.push(oscillatorPane(id, data.bars, OSC_HEIGHT, theme))
+          out.push(oscillatorPane(id, bars, OSC_HEIGHT, theme))
         }
       }
     }
     return out.filter(Boolean) as Pane[]
-  }, [data, expanded, panes, priceHeight, theme])
+  }, [data, bars, expanded, panes, priceHeight, theme])
 
   /** The canvas GROWS with the panes instead of the price pane paying for them.
    * Panes are subtracted from the canvas height inside the renderer, so a fixed
@@ -148,7 +170,7 @@ function MarketChart() {
       span={8}
       symbol={symbol}
       title="Chart"
-      subtitle={data ? `${data.bar_count} bars · ${data.sessions} sessions${isFetching ? " · updating…" : ""}` : undefined}
+      subtitle={data ? `${data.bar_count} bars · ${data.sessions} sessions${live ? " · live" : ""}${isFetching ? " · updating…" : ""}` : undefined}
       scroll={expanded ? undefined : TILE_BODY_HEIGHT}
       // Controlled, so the header's ⤢ and the toolbar's drive ONE state. The
       // chart cannot expand on its own terms — the price pane grows and the
@@ -174,17 +196,17 @@ function MarketChart() {
       {!err && !data && <Empty>loading…</Empty>}
       {!err && data && (
         <div className="relative px-[12px] pt-1">
-          <OhlcvStrip bar={hovered ?? data.bars[data.bars.length - 1] ?? null}
+          <OhlcvStrip bar={hovered ?? bars[bars.length - 1] ?? null}
                       live={hovered == null} symbol={data.symbol}
-                      first={data.bars[0] ?? null} at={hoverAt} />
+                      first={bars[0] ?? null} at={hoverAt} />
           <div className="relative">
             <ChartCanvas
-              bars={data.bars}
+              bars={bars}
               kind={type}
               scale={scale}
               height={canvasHeight}
               panes={stacked}
-              overlays={buildOverlays(data.bars, overlays)}
+              overlays={buildOverlays(bars, overlays)}
               onProjection={setProjection}
               onHover={(b, at) => { setHovered(b); setHoverAt(at) }}
               // The SERIES identity, not the bars. A poll brings a new array

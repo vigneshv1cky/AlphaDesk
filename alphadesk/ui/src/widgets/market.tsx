@@ -2,6 +2,7 @@ import { useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import type { MoverRow } from "@/lib/api"
 import { useMovers, useQuote } from "@/lib/queries"
+import { useLiveTrade } from "@/lib/live"
 import { Empty, Sparkline, Widget } from "@/components/terminal"
 import { registerWidget } from "@/widgets/registry"
 import { TILE_BODY_HEIGHT } from "@/widgets/tile"
@@ -37,6 +38,7 @@ function EquityOverview() {
   const [params] = useSearchParams()
   const symbol = (params.get("symbol") || "").toUpperCase()
   const { data: q, isPending, error } = useQuote(symbol)
+  const { tick } = useLiveTrade(symbol)
 
   if (!symbol) {
     return (
@@ -52,7 +54,19 @@ function EquityOverview() {
     return <Widget span={4} symbol={symbol} title="Equity Overview"><Empty>loading…</Empty></Widget>
   }
 
-  const up = (q.change ?? 0) >= 0
+  /** The headline price rides the live feed; everything below it stays on the
+   * quote. Change is RECOMPUTED against the previous close rather than left as
+   * the quote reported it — showing a moved price beside a change that has not
+   * moved would be the two disagreeing on screen. Only the fields a trade
+   * actually determines are touched; the ranges, multiples and targets are the
+   * quote's to state. */
+  const fresh = tick && !tick.stale && tick.symbol === q.symbol ? tick.price : null
+  const price = fresh ?? q.price
+  const prev = q.previous_close
+  const change = fresh != null && prev ? fresh - prev : q.change
+  const changePct = fresh != null && prev ? ((fresh - prev) / prev) * 100 : q.change_pct
+
+  const up = (change ?? 0) >= 0
   return (
     <Widget span={4} symbol={q.symbol} title="Equity Overview" scroll={TILE_BODY_HEIGHT}>
       <div className="px-3 pb-2">
@@ -60,9 +74,9 @@ function EquityOverview() {
           {q.exchange} · {q.currency}
         </div>
         <div className="text-[15px] font-medium">{q.name}</div>
-        <div className="num mt-1 text-[26px] font-semibold leading-none">{num(q.price)}</div>
+        <div className="num mt-1 text-[26px] font-semibold leading-none">{num(price)}</div>
         <div className={`num mt-1 text-[14px] ${up ? "text-gain" : "text-loss"}`}>
-          {up ? "+" : ""}{num(q.change)} ({up ? "+" : ""}{num(q.change_pct)}%)
+          {up ? "+" : ""}{num(change)} ({up ? "+" : ""}{num(changePct)}%)
         </div>
       </div>
       <Row label="Previous Close" value={num(q.previous_close)} />
