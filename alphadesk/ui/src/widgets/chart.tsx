@@ -59,9 +59,16 @@ const COLLAPSED = TILE_BODY_HEIGHT - CHART_CHROME
  * pane itself decides which it is: anything declaring a range gets the
  * taller box. No second list of which indicators are bounded to fall out of
  * step with the panes.
+ *
+ * Both are larger than the ratio alone calls for. Once panes scaled to the
+ * visible window a fitted one used about 80% of its box, so the proportion was
+ * already right at 90px and it still read flat — 90px is simply short for a
+ * band carrying three series and a zero line. These are sized to be READ, at
+ * the cost of a taller tile, which is visible and is undone by removing the
+ * indicator.
  */
-const FITTED_PANE_H = 90
-const BOUNDED_PANE_H = 140
+const FITTED_PANE_H = 120
+const BOUNDED_PANE_H = 170
 const sized = (p: Pane | null): Pane | null =>
   p && { ...p, height: p.range ? BOUNDED_PANE_H : FITTED_PANE_H }
 
