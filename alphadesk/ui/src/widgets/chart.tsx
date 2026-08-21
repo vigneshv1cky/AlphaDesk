@@ -23,10 +23,14 @@ import type { OverlayId, PaneId } from "@/lib/indicators"
  * Scoped by ?symbol= like every other tile, so one chip re-points the chart,
  * the quote panel and the AI rail together.
  *
- * Expanding takes the tile to the full width of the board and gives the price
- * pane the height the indicator panes need — which is why RSI and MACD are
- * only offered once expanded. At 440px they would be two 40px slivers, and an
- * indicator you cannot read still invites you to read it.
+ * Expanding takes the tile to the full width of the board. It is NOT what
+ * makes room for indicators: panes used to require it, which meant ticking RSI
+ * on a closed tile did nothing, and auto-opening the tile to compensate turned
+ * one menu click into the chart taking over the board — then hid the panes
+ * again the moment it was closed. A pane is simply drawn, and the tile grows
+ * by exactly the height the panes need. Adding one costs a taller tile, which
+ * is the honest price and is reversible by removing it; it does not cost the
+ * rest of the board.
  */
 
 /** What the canvas shares its tile with: the toolbar and the range strip (32
@@ -62,17 +66,6 @@ function MarketChart() {
   const [overlays, setOverlays] = useState<OverlayId[]>([])
   const [panes, setPanes] = useState<PaneId[]>([])
 
-  /** Choosing a pane indicator opens the tile if it is closed.
-   *
-   * Panes only render once expanded — at tile height they would be 40px
-   * slivers — but the menu offered them either way, so ticking RSI on a
-   * collapsed tile did nothing at all and said nothing about why. Either the
-   * option should have been unavailable or the choice should take effect;
-   * taking effect is the one that gives the reader what they asked for. */
-  const choosePanes = (next: PaneId[]) => {
-    if (next.length > panes.length) setExpanded(true)
-    setPanes(next)
-  }
   const [expanded, setExpanded] = useState(false)
   // Drawings live here, not inside PriceChart: that component is torn down and
   // rebuilt on every range or series change, and annotations must outlive both.
@@ -138,7 +131,7 @@ function MarketChart() {
     const out: (Pane | null)[] = [
       volumePane(bars, Math.round(priceHeight * 0.22), theme.gain, theme.loss),
     ]
-    if (expanded && data.indicators_reliable) {
+    if (data.indicators_reliable) {
       // Built in the order the menu lists them, not the order they were
       // clicked, so the stack does not reshuffle as you toggle.
       for (const id of PANE_INDICATORS.map(p => p.id).filter(id => panes.includes(id))) {
@@ -155,16 +148,17 @@ function MarketChart() {
       }
     }
     return out.filter(Boolean) as Pane[]
-  }, [data, bars, expanded, panes, priceHeight, theme])
+  }, [data, bars, panes, priceHeight, theme])
 
   /** The canvas GROWS with the panes instead of the price pane paying for them.
    * Panes are subtracted from the canvas height inside the renderer, so a fixed
    * height meant each new oscillator ate the chart it was meant to annotate —
    * eight of them would have left the 40px floor. Only when expanded, where the
    * tile has no fixed body height and can take it. */
-  const canvasHeight = priceHeight + (expanded
-    ? stacked.filter(p => p.id !== "volume").reduce((n, p) => n + p.height, 0)
-    : 0)
+  const oscHeight = stacked
+    .filter(p => p.id !== "volume")
+    .reduce((n, p) => n + p.height, 0)
+  const canvasHeight = priceHeight + oscHeight
 
   // The early return comes AFTER every hook. Returning before one makes the
   // hook order differ between renders, which React cannot recover from — lint
@@ -183,7 +177,7 @@ function MarketChart() {
       symbol={symbol}
       title="Chart"
       subtitle={data ? `${data.bar_count} bars · ${data.sessions} sessions${live ? " · live" : ""}${isFetching ? " · updating…" : ""}` : undefined}
-      scroll={expanded ? undefined : TILE_BODY_HEIGHT}
+      scroll={expanded || oscHeight ? undefined : TILE_BODY_HEIGHT}
       // Controlled, so the header's ⤢ and the toolbar's drive ONE state. The
       // chart cannot expand on its own terms — the price pane grows and the
       // oscillator panes only appear once there is height to read them — so
@@ -200,7 +194,7 @@ function MarketChart() {
         servedLabel={data?.interval_label}
         available={data?.intervals}
         overlays={overlays} onOverlays={setOverlays}
-        panes={panes} onPanes={choosePanes}
+        panes={panes} onPanes={setPanes}
         drawOpen={drawOpen} onDrawOpen={() => setDrawOpen(o => !o)}
         indicatorsReliable={data?.indicators_reliable ?? false}
       />
