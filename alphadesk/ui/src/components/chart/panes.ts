@@ -103,28 +103,6 @@ export function macdPane(
   }
 }
 
-/** Fundamentals. Quarterly points land on a handful of bars across a long
- * range, so `bars` is only used to decide the pane is worth drawing at all. */
-export function metricsPane(
-  series: { id: string; label: string; points: Point[] }[],
-  height: number, style: "bars" | "line" | "area", palette: string[],
-): Pane | null {
-  const usable = series.filter(s => s.points.length >= 2)
-  if (!usable.length) return null
-  return {
-    id: "metrics",
-    height,
-    compact: true,
-    label: usable.map(s => s.label).join(" · "),
-    series: usable.map((s, i) => {
-      const color = palette[i % palette.length]
-      if (style === "line") return { kind: "line", color, points: s.points, width: 2 } as PaneSeries
-      if (style === "area") return { kind: "area", color, points: s.points } as PaneSeries
-      return { kind: "histogram", color, points: s.points, signs: true } as PaneSeries
-    }),
-  }
-}
-
 /** The min/max a pane's own axis should span. */
 export function paneExtent(pane: Pane): { min: number; max: number } {
   if (pane.range) return pane.range
