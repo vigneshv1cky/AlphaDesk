@@ -74,8 +74,23 @@ export function Sparkline({
 
 /* ── Widget: the tiled panel every surface is built from ────────────────── */
 
+/** An expanded tile gets height as well as width. Width alone does nothing for
+ * the tiles that are actually too small — a quote list or a headline feed is
+ * long, not wide, and stretching it sideways only shortens the scroll it was
+ * already doing. Lives here rather than in widgets/tile.ts because Widget owns
+ * its own body box, and a primitive importing from widgets/ would point the
+ * dependency arrow the wrong way. */
+const EXPANDED_BODY_HEIGHT = 760
+
+/** Titles are ReactNode, but an aria-label has to be a string. Anything that is
+ * not plain text falls back to a generic word rather than "[object Object]". */
+function titleText(title: React.ReactNode): string {
+  return typeof title === "string" ? title : "panel"
+}
+
 export function Widget({
   title, symbol, subtitle, actions, span = 12, className, bodyClassName, scroll, children,
+  expanded, onExpandChange, expandable = true,
 }: {
   title?: React.ReactNode
   /** Rendered in accent blue before the title, the way AlphaSpace prefixes a
@@ -90,14 +105,35 @@ export function Widget({
   /** Fixed body height with internal scroll — keeps one long widget from
    * stretching its whole grid row. */
   scroll?: number | string
+  /** Expansion state, when the OWNER needs it. A widget whose body changes
+   * shape on expand has to know — the chart grows its price pane and only
+   * offers RSI/MACD once there is height to read them — and it must be the
+   * same state its own toolbar button drives, or the two controls disagree
+   * about whether the tile is open. Omit both and the tile expands on its own. */
+  expanded?: boolean
+  onExpandChange?: (next: boolean) => void
+  /** Opt out for a tile the header control makes no sense on. */
+  expandable?: boolean
   children?: React.ReactNode
 }) {
+  // Uncontrolled fallback, so a tile with nothing to coordinate still expands
+  // without its parent holding state it otherwise has no use for.
+  const [selfExpanded, setSelfExpanded] = React.useState(false)
+  const isOpen = expanded ?? selfExpanded
+  const toggle = () =>
+    expanded === undefined ? setSelfExpanded(v => !v) : onExpandChange?.(!expanded)
+
+  const cols = isOpen ? 12 : span
+  // A caller that drops `scroll` when open (the chart, whose canvas sizes
+  // itself) keeps that behaviour; a fixed-height body just gets taller.
+  const bodyHeight = isOpen && typeof scroll === "number" ? EXPANDED_BODY_HEIGHT : scroll
   return (
     <section
       data-slot="widget"
+      data-expanded={isOpen || undefined}
       // Inline gridColumn, not a Tailwind class: `col-span-${n}` is built at
       // runtime and would be purged from the stylesheet.
-      style={{ gridColumn: `span ${span} / span ${span}` }}
+      style={{ gridColumn: `span ${cols} / span ${cols}` }}
       className={cn(
         "flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-panel",
         className,
@@ -118,14 +154,23 @@ export function Widget({
           )}
           <div className="flex-1" />
           {actions}
-          {/* The lock / expand affordances AlphaSpace puts on every widget.
-              Inert for now — they mark where per-widget controls belong. */}
-          <span className="shrink-0 text-[14px] leading-none text-muted-foreground/40">⤢</span>
+          {expandable && (
+            <button
+              type="button"
+              onClick={toggle}
+              aria-expanded={isOpen}
+              aria-label={isOpen ? `Collapse ${titleText(title)}` : `Expand ${titleText(title)}`}
+              title={isOpen ? "Collapse" : "Expand to full width"}
+              className="shrink-0 text-[14px] leading-none text-muted-foreground/40 transition-colors hover:text-foreground"
+            >
+              {isOpen ? "⤡" : "⤢"}
+            </button>
+          )}
         </header>
       )}
       <div
-        style={scroll ? { height: typeof scroll === "number" ? `${scroll}px` : scroll } : undefined}
-        className={cn("min-h-0 min-w-0", scroll && "overflow-y-auto", bodyClassName)}
+        style={bodyHeight ? { height: typeof bodyHeight === "number" ? `${bodyHeight}px` : bodyHeight } : undefined}
+        className={cn("min-h-0 min-w-0", bodyHeight && "overflow-y-auto", bodyClassName)}
       >
         {children}
       </div>

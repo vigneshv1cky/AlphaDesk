@@ -127,11 +127,17 @@ function MarketChart() {
 
   return (
     <Widget
-      span={expanded ? 12 : 8}
+      span={8}
       symbol={symbol}
       title="Chart"
       subtitle={data ? `${data.bar_count} bars · ${data.sessions} sessions` : undefined}
       scroll={expanded ? undefined : TILE_BODY_HEIGHT}
+      // Controlled, so the header's ⤢ and the toolbar's drive ONE state. The
+      // chart cannot expand on its own terms — the price pane grows and the
+      // oscillator panes only appear once there is height to read them — so
+      // the widget must not keep a second opinion about whether it is open.
+      expanded={expanded}
+      onExpandChange={setExpanded}
     >
       <ChartToolbar
         type={type} onType={setType}
