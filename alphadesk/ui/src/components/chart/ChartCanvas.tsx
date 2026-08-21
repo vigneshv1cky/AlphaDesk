@@ -36,6 +36,13 @@ export type Projection = {
 
 const AXIS_W = 62      // right price gutter
 const AXIS_H = 22      // bottom time gutter
+// Breathing room between the newest bar and the price axis. Reserved in the
+// SCALE rather than added as a one-off margin on the initial view, so it
+// survives every zoom and pan instead of closing up the first time you touch
+// the chart. The grid, the axis labels and the price tag still run the full
+// width — the gap is for the series, which otherwise ends flush against the
+// numbers describing it.
+const AXIS_GAP = 12
 
 export function ChartCanvas({
   bars, kind, scale: scaleMode, height, panes = [],
@@ -105,6 +112,9 @@ export function ChartCanvas({
   const panesH = panes.reduce((n, p) => n + p.height, 0)
   const priceH = Math.max(40, box.h - AXIS_H - panesH)
   const plotW = Math.max(10, box.w - AXIS_W)
+  // Where the SERIES lives. `plotW` stays the full drawing width, so anything
+  // that belongs to the axis rather than to the data keeps reaching it.
+  const seriesW = Math.max(10, plotW - AXIS_GAP)
   const from = view?.from ?? 0
   const to = view?.to ?? Math.max(1, bars.length)
 
@@ -135,8 +145,8 @@ export function ChartCanvas({
   // board looked correct and then silently stopped responding to anything —
   // no symbol change, no chip, no toolbar. Keep every field primitive.
   const s: Scale = useMemo(
-    () => ({ from, to, width: plotW, height: priceH, min, max }),
-    [from, to, plotW, priceH, min, max],
+    () => ({ from, to, width: seriesW, height: priceH, min, max }),
+    [from, to, seriesW, priceH, min, max],
   )
   const log = scaleMode === "log"
   const base = bars[Math.max(0, Math.floor(from))]?.c ?? 1
@@ -225,18 +235,18 @@ export function ChartCanvas({
       setView(prev => {
         const cur = prev ?? { from: 0, to: total }
         if (sideways && !zooming) {
-          const shift = (delta / plotW) * (cur.to - cur.from)
+          const shift = (delta / seriesW) * (cur.to - cur.from)
           return clampView(cur.from + shift, cur.to + shift, total)
         }
         // Only from/to/width are consulted by xToIndex and zoomAt — the price
         // axis plays no part in a horizontal gesture, so it is not rebuilt.
-        const sc: Scale = { from: cur.from, to: cur.to, width: plotW, height: 0, min: 0, max: 0 }
+        const sc: Scale = { from: cur.from, to: cur.to, width: seriesW, height: 0, min: 0, max: 0 }
         return zoomAt(sc, xToIndex(sc, x), factor, total)
       })
     }
     el.addEventListener("wheel", onWheel, { passive: false })
     return () => el.removeEventListener("wheel", onWheel)
-  }, [bars.length, plotW])
+  }, [bars.length, seriesW])
 
   const onDown = (e: React.MouseEvent) => {
     drag.current = { x: e.clientX, from, to }
@@ -251,7 +261,7 @@ export function ChartCanvas({
     if (yDrag.current) return
     if (drag.current) {
       const span = drag.current.to - drag.current.from
-      const shift = ((drag.current.x - e.clientX) / plotW) * span
+      const shift = ((drag.current.x - e.clientX) / seriesW) * span
       // Clamped like every other view change — an unclamped drag could push
       // the series off the edge and leave a blank chart with no way back.
       setView(clampView(drag.current.from + shift, drag.current.to + shift, bars.length))
@@ -271,7 +281,7 @@ export function ChartCanvas({
   const leave = () => { stop(); setCursor(null); onHover?.(null, null) }
 
   // ── geometry, built as path strings ─────────────────────────────────────
-  const barW = Math.max(1, (plotW / Math.max(1, to - from)) * 0.7)
+  const barW = Math.max(1, (seriesW / Math.max(1, to - from)) * 0.7)
   const half = barW / 2
 
   const paths = useMemo(() => {
@@ -285,7 +295,7 @@ export function ChartCanvas({
       const b = bars[i]
       if (!b) continue
       const x = indexToX(s, i + 0.5)
-      if (x < -barW || x > plotW + barW) continue
+      if (x < -barW || x > seriesW + barW) continue
       const up = b.c >= b.o
       const yO = yOf(b.o), yC = yOf(b.c), yH = yOf(b.h), yL = yOf(b.l)
       if (kind === "candles" || kind === "bars") {
@@ -310,9 +320,9 @@ export function ChartCanvas({
       upBody: upBody.join(""), downBody: downBody.join(""),
       upWick: upWick.join(""), downWick: downWick.join(""),
       line: line.join(""),
-      area: line.length ? `${line.join("")}L${plotW},${priceH}L${indexToX(s, lo + 0.5).toFixed(1)},${priceH}Z` : "",
+      area: line.length ? `${line.join("")}L${seriesW},${priceH}L${indexToX(s, lo + 0.5).toFixed(1)},${priceH}Z` : "",
     }
-  }, [bars, s, kind, yOf, barW, half, plotW, priceH, from, to])
+  }, [bars, s, kind, yOf, barW, half, seriesW, priceH, from, to])
 
   /** Each pane's own geometry: offset, scale and batched paths. */
   const paneLayout = useMemo(() => {
@@ -333,7 +343,7 @@ export function ChartCanvas({
           if (i == null || i < from - 1 || i > to + 1) continue
           entries.push({ i, v: p.v, up: bars[i].c >= bars[i].o })
         }
-        grouped.set(ser, volumeColumns(entries, s, plotW, 7))
+        grouped.set(ser, volumeColumns(entries, s, seriesW, 7))
       }
       // Only when EVERY series was grouped — a pane mixing a summed histogram
       // with a plain line would need both to agree on one axis, and they don't.
@@ -352,7 +362,7 @@ export function ChartCanvas({
         if (ser.kind === "histogram" && grouped.has(ser)) {
           const up: string[] = [], down: string[] = []
           for (const c of grouped.get(ser)!) {
-            if (c.x < -c.w || c.x > plotW + c.w) continue
+            if (c.x < -c.w || c.x > seriesW + c.w) continue
             const y = yIn(c.v)
             const h = Math.max(1, Math.abs(zeroY - y))
             const half2 = c.w / 2
@@ -368,7 +378,7 @@ export function ChartCanvas({
             const i = byTime.get(p.t)
             if (i == null) continue
             const x = indexToX(s, i + 0.5)
-            if (x < -barW || x > plotW + barW) continue
+            if (x < -barW || x > seriesW + barW) continue
             const y = yIn(p.v)
             const h = Math.max(1, Math.abs(zeroY - y))
             const topY = Math.min(zeroY, y)
@@ -387,7 +397,7 @@ export function ChartCanvas({
           return `${n === 0 ? "M" : "L"}${indexToX(s, i + 0.5).toFixed(1)},${yIn(p.v).toFixed(1)}`
         }).filter(Boolean).join("")
         const areaD = ser.kind === "area" && d
-          ? `${d}L${plotW},${top + pane.height}L0,${top + pane.height}Z` : ""
+          ? `${d}L${seriesW},${top + pane.height}L0,${top + pane.height}Z` : ""
         return { kind: ser.kind, d, areaD, color: ser.color, width: (ser as { width?: number }).width ?? 1.5 }
       })
       const levels = (pane.levels ?? []).map(v => ({ v, y: yIn(v) }))
@@ -395,7 +405,7 @@ export function ChartCanvas({
         .map(v => ({ v, y: yIn(v) }))
       return { pane, top, drawn, levels, axis }
     })
-  }, [panes, priceH, bars, s, barW, half, plotW, from, to])
+  }, [panes, priceH, bars, s, barW, half, seriesW, from, to])
 
   const ticks = priceTicks(min, max)
   const decimals = priceDecimals(ticks.length > 1 ? Math.abs(ticks[1] - ticks[0]) : 1)
@@ -406,7 +416,7 @@ export function ChartCanvas({
   const timeTicks = useMemo(() => {
     const out: { x: number; label: string }[] = []
     const span = to - from
-    const stride = Math.max(1, Math.round(span / Math.max(2, Math.floor(plotW / 90))))
+    const stride = Math.max(1, Math.round(span / Math.max(2, Math.floor(seriesW / 90))))
     const daily = span > 400 || (bars.length > 1 &&
       Date.parse(bars[bars.length - 1].t) - Date.parse(bars[bars.length - 2].t) >= 86_400_000)
     for (let i = Math.max(0, Math.ceil(from)); i < Math.min(bars.length, to); i += stride) {
@@ -419,7 +429,7 @@ export function ChartCanvas({
       })
     }
     return out
-  }, [bars, s, from, to, plotW])
+  }, [bars, s, from, to, seriesW])
 
   return (
     <div
