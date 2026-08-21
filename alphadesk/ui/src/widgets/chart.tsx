@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { api, type ChartRange, type ChartSeries } from "@/lib/api"
 import { ChartCanvas, type Projection, type ScaleMode, type SeriesKind } from "@/components/chart/ChartCanvas"
@@ -44,6 +44,7 @@ function MarketChart() {
 
   const [data, setData] = useState<ChartSeries | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
   const [range, setRange] = useState<ChartRange>("1D")
   const [type, setType] = useState<SeriesKind>("line")
   const [scale, setScale] = useState<ScaleMode>("linear")
@@ -62,15 +63,40 @@ function MarketChart() {
   const [hoverAt, setHoverAt] = useState<{ x: number; y: number } | null>(null)
   const theme = useChartTheme()
 
+  /** Fetch WITHOUT throwing the current series away first.
+   *
+   * Blanking the chart to show a placeholder meant every range change tore the
+   * canvas down and put a loading panel in its place — the chart vanished,
+   * text appeared where it had been, and the chart came back. Keeping the last
+   * series on screen while the next one lands makes a range change a redraw
+   * rather than a teardown, and there is nothing to place a layer over.
+   *
+   * The response is guarded by a request id: now that a stale series stays
+   * visible, a slow reply for a range you have already moved off must not be
+   * allowed to land on top of a newer one. */
+  const reqId = useRef(0)
   const load = useCallback((sym: string, r: ChartRange, iv: string) => {
     if (!sym) return
+    const id = ++reqId.current
     setErr(null)
-    api.chartRange(sym, r, iv).then(setData).catch(e => { setData(null); setErr(String(e.message ?? e)) })
+    setLoading(true)
+    api.chartRange(sym, r, iv)
+      .then(d => { if (id === reqId.current) setData(d) })
+      .catch(e => {
+        if (id !== reqId.current) return
+        setData(null)
+        setErr(String(e.message ?? e))
+      })
+      .finally(() => { if (id === reqId.current) setLoading(false) })
   }, [])
+
+  // A different SYMBOL does clear it: holding one company's bars under another
+  // company's name is the one version of this that would actually mislead.
+  useEffect(() => { setData(null) }, [symbol])
 
   // eslint-disable-next-line react-hooks/exhaustive-deps -- follow the scoped
   // symbol, range and interval, not this component's own identity
-  useEffect(() => { setData(null); load(symbol, range, interval) }, [symbol, range, interval])
+  useEffect(() => { load(symbol, range, interval) }, [symbol, range, interval])
 
   const priceHeight = expanded ? 620 : COLLAPSED
   const OSC_HEIGHT = 90
@@ -133,7 +159,7 @@ function MarketChart() {
       span={8}
       symbol={symbol}
       title="Chart"
-      subtitle={data ? `${data.bar_count} bars · ${data.sessions} sessions` : undefined}
+      subtitle={data ? `${data.bar_count} bars · ${data.sessions} sessions${loading ? " · updating…" : ""}` : undefined}
       scroll={expanded ? undefined : TILE_BODY_HEIGHT}
       // Controlled, so the header's ⤢ and the toolbar's drive ONE state. The
       // chart cannot expand on its own terms — the price pane grows and the
