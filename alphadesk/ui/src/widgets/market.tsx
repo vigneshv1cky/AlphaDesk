@@ -71,12 +71,24 @@ function EquityOverview() {
     <Widget span={4} symbol={q.symbol} title="Equity Overview" scroll={TILE_BODY_HEIGHT}>
       <div className="px-3 pb-2">
         <div className="text-[12px] text-muted-foreground">
-          {q.exchange} · {q.currency}
+          {[q.exchange_name || q.exchange, q.quote_source].filter(Boolean).join(" - ")} · {q.currency}
         </div>
-        <div className="text-[15px] font-medium">{q.name}</div>
+        <div className="text-[15px] font-medium">{q.name} ({q.symbol})</div>
         <div className="num mt-1 text-[26px] font-semibold leading-none">{num(price)}</div>
-        <div className={`num mt-1 text-[14px] ${up ? "text-gain" : "text-loss"}`}>
-          {up ? "+" : ""}{num(change)} ({up ? "+" : ""}{num(changePct)}%)
+        <div className="mt-1 flex flex-wrap items-baseline gap-x-2">
+          <span className={`num text-[14px] ${up ? "text-gain" : "text-loss"}`}>
+            {up ? "+" : ""}{num(change)} ({up ? "+" : ""}{num(changePct)}%)
+          </span>
+          {/* When this price was struck. A quote panel with no time on it looks
+              identical whether it is a second old or an hour — the same reason
+              the live ticks carry their age. */}
+          {(tick?.at || q.as_of) && (
+            <span className="text-[12px] text-muted-foreground">
+              As of {new Date(tick?.at || q.as_of!).toLocaleTimeString("en-US", {
+                timeZone: "America/New_York", hour: "numeric", minute: "2-digit", second: "2-digit",
+              })} ET
+            </span>
+          )}
         </div>
       </div>
       <Row label="Previous Close" value={num(q.previous_close)} />
@@ -96,6 +108,14 @@ function EquityOverview() {
       <Row label="Price/Book" value={num(q.price_to_book)} />
       <Row label="Beta (5Y Monthly)" value={num(q.beta)} />
       <Row label="EPS (TTM)" value={num(q.eps_ttm)} />
+      <Row label="Earnings Date" value={q.earnings_date ?? "—"} />
+      <Row
+        label="Forward Dividend & Yield"
+        value={q.dividend_rate
+          ? `${num(q.dividend_rate)} (${num(q.dividend_yield)}%)`
+          : q.dividend_yield ? `${num(q.dividend_yield)}%` : "—"}
+      />
+      <Row label="Ex-Dividend Date" value={q.ex_dividend_date ?? "—"} />
       <Row label="1y Target Est" value={num(q.target_mean)} />
       <Row
         label="Analyst Target Range"

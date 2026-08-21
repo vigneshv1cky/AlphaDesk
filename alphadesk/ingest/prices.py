@@ -1117,6 +1117,34 @@ def quote(symbol: str) -> Optional[dict]:
         if not info.get("previousClose"):
             raise ValueError("no quote data")
 
+        from datetime import datetime, timezone
+
+        from alphadesk.config import ET
+
+        def _epoch_date(v):
+            """A calendar DATE, read in UTC.
+
+            yfinance encodes these as UNIX seconds, but two different things
+            arrive that way. An ex-dividend date is a date-stamp — midnight UTC
+            standing for the day itself — so converting it to Eastern moves it
+            back an evening and reports the wrong day: 2026-06-04 arrives as
+            00:00Z and reads as June 3rd in New York. Earnings, by contrast, is
+            a real instant (20:00Z, after the close) and survives either
+            reading. UTC is the one that is right for both.
+            """
+            try:
+                return datetime.fromtimestamp(float(v), timezone.utc).date().isoformat()
+            except Exception:
+                return None
+
+        def _epoch_ts(v):
+            """A moment, in Eastern — this one IS an instant, and the terminal
+            states times in market time."""
+            try:
+                return datetime.fromtimestamp(float(v), timezone.utc).astimezone(ET).isoformat()
+            except Exception:
+                return None
+
         rt = _live_last_trade(sym)
         prev = float(info["previousClose"])
         last = rt[0] if rt else info.get("regularMarketPrice") or prev
@@ -1124,6 +1152,14 @@ def quote(symbol: str) -> Optional[dict]:
             "symbol": sym,
             "name": info.get("longName") or info.get("shortName") or sym,
             "exchange": info.get("exchange"),
+            # The venue as a reader recognises it ("NasdaqGS"), plus how the
+            # price is sourced. `exchange` alone is the terse code, NMS.
+            "exchange_name": info.get("fullExchangeName") or info.get("exchange"),
+            "quote_source": info.get("quoteSourceName"),
+            # When this quote was struck. Without it a stale panel and a live
+            # one look the same, which is the same complaint the stream's
+            # `stale` flag answers for ticks.
+            "as_of": _epoch_ts(info.get("regularMarketTime")),
             "currency": info.get("currency") or "USD",
             "price": round(float(last), 2),
             "change": round(float(last) - prev, 2),
@@ -1150,6 +1186,12 @@ def quote(symbol: str) -> Optional[dict]:
             "beta": info.get("beta"),
             "eps_ttm": info.get("trailingEps"),
             "dividend_yield": info.get("dividendYield"),
+            # The annual rate beside the yield, which is how a dividend is
+            # quoted — a percentage alone does not say what you receive.
+            "dividend_rate": info.get("dividendRate"),
+            "ex_dividend_date": _epoch_date(info.get("exDividendDate")),
+            "earnings_date": _epoch_date(
+                info.get("earningsTimestamp") or info.get("earningsTimestampStart")),
             "target_mean": info.get("targetMeanPrice"),
             "target_low": info.get("targetLowPrice"),
             "target_high": info.get("targetHighPrice"),

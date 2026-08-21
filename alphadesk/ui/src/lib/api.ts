@@ -140,6 +140,12 @@ export interface Quote {
   target_high: number | null
   analyst_rating: string | null
   analyst_count: number | null
+  exchange_name?: string | null
+  quote_source?: string | null
+  as_of?: string | null
+  dividend_rate?: number | null
+  ex_dividend_date?: string | null
+  earnings_date?: string | null
 }
 
 export interface MoverRow {
