@@ -65,13 +65,18 @@ const off = "border-border text-muted-foreground hover:bg-muted hover:text-foreg
 /** A menu that closes on outside click and on Escape. Hand-rolled for the same
  * reason the rest of the primitives are — one popover does not justify a
  * dependency, and this one has to sit inside a 440px tile without clipping. */
-function Menu({ label, active, wide, chevron = true, children }: {
+function Menu({ label, active, wide, chevron = true, up = false, children }: {
   label: string
   active?: boolean
   wide?: boolean
   /** A value picker shows what it will change; a panel like "Ind" does not,
    * which is how theirs distinguishes the two. */
   chevron?: boolean
+  /** Open upward. Required for anything on the BOTTOM edge of a tile: the
+   * widget clips to its own box, so a menu dropped downward from there is
+   * rendered entirely outside the clip and is simply invisible — it opens,
+   * it responds, and nothing appears. */
+  up?: boolean
   children: (close: () => void) => React.ReactNode
 }) {
   const [open, setOpen] = useState(false)
@@ -100,9 +105,9 @@ function Menu({ label, active, wide, chevron = true, children }: {
         {label}{chevron && <span className="text-[9px]"> ▾</span>}
       </button>
       {open && (
-        <div className={`absolute left-0 top-full z-50 mt-1 rounded-md border border-border bg-popover py-1 shadow-lg ${
-          wide ? "w-[320px]" : "min-w-[168px]"
-        }`}>
+        <div className={`absolute left-0 z-50 rounded-md border border-border bg-popover py-1 shadow-lg ${
+          up ? "bottom-full mb-1" : "top-full mt-1"
+        } ${wide ? "w-[320px]" : "min-w-[168px]"}`}>
           {children(() => setOpen(false))}
         </div>
       )}
@@ -255,7 +260,7 @@ export function ChartRanges({ range, onRange }: {
       {/* Every range is in here, including the three above — a reader who opens
           it looking for "1D" should find it rather than be told to look back
           out at the strip. */}
-      <Menu label="" chevron>
+      <Menu label="" chevron up>
         {close => RANGES.map(r => (
           <Item key={r} selected={r === range} onClick={() => { onRange(r); close() }}>
             {r}
