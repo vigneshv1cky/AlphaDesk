@@ -31,12 +31,18 @@ import { cn } from "@/lib/utils"
  * line, which reads as "this did not move" rather than the truth, "we do not
  * have the data" — the same distinction the chart's indicator gate makes. */
 export function Sparkline({
-  points, className, width = 64, height = 18,
+  points, className, width = 64, height = 18, baseline = false, dot = false,
 }: {
   points: number[]
   className?: string
   width?: number
   height?: number
+  /** A dashed rule at the FIRST value — the level the day is measured from,
+   * which is what turns a squiggle into a gain or a loss at a glance. */
+  baseline?: boolean
+  /** Mark where the series ends, so the latest point is findable rather than
+   * being wherever the line happens to stop. */
+  dot?: boolean
 }) {
   if (!points || points.length < 2) {
     return <span className="inline-block" style={{ width, height }} aria-hidden="true" />
@@ -58,6 +64,8 @@ export function Sparkline({
       return `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`
     })
     .join(" ")
+  const yAt = (v: number) => (span === 0 ? height / 2 : pad + h - ((v - min) / span) * h)
+  const last = points[points.length - 1]
   return (
     <svg
       width={width}
@@ -67,7 +75,13 @@ export function Sparkline({
       role="img"
       aria-label="recent trend"
     >
+      {baseline && (
+        <line x1={0} y1={yAt(points[0])} x2={width} y2={yAt(points[0])}
+          stroke="currentColor" strokeWidth="1" strokeDasharray="2 2" opacity={0.35}
+          vectorEffect="non-scaling-stroke" />
+      )}
       <path d={d} fill="none" stroke="currentColor" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+      {dot && <circle cx={width} cy={yAt(last)} r={1.8} fill="currentColor" />}
     </svg>
   )
 }

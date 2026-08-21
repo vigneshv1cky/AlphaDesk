@@ -143,12 +143,10 @@ function MoversTable({ rows }: { rows: MoverRow[] }) {
   }
   return (
     <div>
-      <div className="sticky top-0 z-10 flex items-center bg-panel px-[12px] py-[14px] text-[10px] font-medium uppercase tracking-[1px] text-muted-foreground">
-        <span className="w-[72px] shrink-0">Symbol</span>
-        <span className="min-w-0 flex-1" />
-        <span className="w-[71px] text-right">Price</span>
-        <span className="w-[76px] text-right">Chg %</span>
-        <span className="w-[80px] text-right">1D</span>
+      <div className="sticky top-0 z-10 flex items-center bg-panel px-[12px] py-[10px] text-[10px] font-medium uppercase tracking-[1px] text-muted-foreground">
+        <span className="w-[64px] shrink-0">Symbol</span>
+        <span className="min-w-0 flex-1 text-right">Price</span>
+        <span className="w-[84px] text-right">1D</span>
       </div>
       {rows.map(r => {
         const up = (r.change_pct ?? 0) >= 0
@@ -156,21 +154,29 @@ function MoversTable({ rows }: { rows: MoverRow[] }) {
           <Link
             key={r.symbol}
             to={`/analysis?symbol=${encodeURIComponent(r.symbol)}`}
-            className="flex h-[33px] items-center px-[12px] text-[14px] hover:bg-muted/60"
+            className="flex h-[44px] items-center px-[12px] text-[14px] hover:bg-muted/60"
           >
             {/* Symbol is plain foreground at normal weight — theirs is not a
                 link colour and not bold. Colour in a grid is reserved for
                 direction, so spending it on every ticker spends it on nothing. */}
-            <span className="w-[72px] shrink-0 truncate">{r.symbol}</span>
-            <span className="min-w-0 flex-1 truncate pr-3 text-muted-foreground">{r.name ?? ""}</span>
-            <span className="tnum w-[71px] text-right">{r.price?.toFixed(2) ?? "—"}</span>
-            <span className={`tnum w-[76px] text-right ${up ? "text-gain" : "text-loss"}`}>
-              {r.change_pct == null ? "—" : `${up ? "+" : ""}${r.change_pct.toFixed(2)}%`}
+            <span className="w-[64px] shrink-0 truncate">{r.symbol}</span>
+            {/* Price over change, in ONE cell, the way theirs stacks them.
+                The company name that used to sit here is gone: this tile is a
+                third of the board, and the column it had left truncated every
+                name to one or two characters — "Direxion Shares ETF Trust…"
+                rendered as "D". A column that can only ever show an initial is
+                width spent on nothing, and dropping it is what buys the price
+                and its change enough room to sit together. */}
+            <span className="flex min-w-0 flex-1 flex-col items-end leading-tight">
+              <span className="tnum">{r.price?.toFixed(2) ?? "—"}</span>
+              <span className={`tnum text-[13px] ${up ? "text-gain" : "text-loss"}`}>
+                {r.change_pct == null ? "—" : `${up ? "+" : ""}${r.change_pct.toFixed(2)}%`}
+              </span>
             </span>
-            {/* Tinted by direction, same as the change cell — the line and the
+            {/* Tinted by direction, same as the change — the line and the
                 number must never disagree about which way the day went. */}
-            <span className={`flex w-[80px] justify-end ${up ? "text-gain" : "text-loss"}`}>
-              <Sparkline points={r.spark} />
+            <span className={`flex w-[84px] justify-end pl-2 ${up ? "text-gain" : "text-loss"}`}>
+              <Sparkline points={r.spark} baseline dot />
             </span>
           </Link>
         )
