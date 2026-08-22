@@ -179,6 +179,12 @@ def api_chart(symbol: str, days: int = 2, range: str | None = None,
     return series
 
 
+# Two seconds between pushes per product. Long enough that a 420ms flash is
+# followed by calm rather than the next flash, short enough that the strip is
+# obviously live — and still thirty times the old sixty-second poll.
+_CRYPTO_MIN_PUSH_S = float(os.environ.get("CRYPTO_MIN_PUSH_S", "2.0"))
+
+
 @app.get("/api/stream-crypto")
 async def api_stream_crypto(request: Request):
     """Live crypto prices for the ticker, pushed as Server-Sent Events.
@@ -207,26 +213,40 @@ async def api_stream_crypto(request: Request):
 
         taken = [p for p in products if crypto.acquire(p)]
         yield f"event: hello\ndata: {_json.dumps({'products': taken, 'live': bool(taken)})}\n\n"
-        last: dict[str, str] = {}
+        import time as _time
+        last_price: dict[str, float] = {}
+        last_sent: dict[str, float] = {}
         try:
             while True:
                 if await request.is_disconnected():
                     break
+                now = _time.monotonic()
                 moved = []
                 for p in taken:
                     tick = crypto.latest(p)
-                    # Keyed on the exchange's own timestamp, so a price that
-                    # prints twice at the same value is not re-sent.
-                    if tick and tick.get("at") != last.get(p):
-                        last[p] = tick.get("at", "")
-                        moved.append(tick)
+                    if not tick:
+                        continue
+                    px = tick.get("price")
+                    # Deduped on PRICE, not on the exchange timestamp. Coinbase
+                    # stamps every message, so timestamp-dedup re-sent a price
+                    # that had not moved and spent the client's flash on it.
+                    if px == last_price.get(p):
+                        continue
+                    # Rate limited per product. Bitcoin genuinely moves one to
+                    # two times a second, and at that rate a 420ms flash is lit
+                    # more than half the time — which reads as a permanent tint
+                    # rather than a change. This strip is glanceable context by
+                    # its own definition, not a quote feed, so it takes the
+                    # latest price on an interval instead of every print.
+                    if now - last_sent.get(p, 0.0) < _CRYPTO_MIN_PUSH_S:
+                        continue
+                    last_price[p] = px
+                    last_sent[p] = now
+                    moved.append(tick)
                 if moved:
                     yield f"data: {_json.dumps({'ticks': moved})}\n\n"
                 else:
                     yield ": keep-alive\n\n"
-                # A quarter second. The feed pushes far faster than that, and
-                # a ticker updating four times a second already reads as live
-                # while a browser repainting at the feed's rate does not.
                 await asyncio.sleep(0.25)
         finally:
             for p in taken:
