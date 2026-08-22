@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { api, type SymbolHit } from "@/lib/api"
 import { useBoardSymbols } from "@/lib/boardSymbols"
+import { normalize } from "@/lib/watchlist"
 
 /** Add a symbol to the board's strip and scope the board to it.
  *
@@ -64,7 +65,13 @@ export function SymbolSearch() {
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") { e.preventDefault(); setActive(a => Math.min(a + 1, hits.length - 1)) }
     else if (e.key === "ArrowUp") { e.preventDefault(); setActive(a => Math.max(a - 1, 0)) }
-    else if (e.key === "Enter" && hits[active]) { e.preventDefault(); pick(hits[active].symbol) }
+    else if (e.key === "Enter") {
+      e.preventDefault()
+      // Falls through to the typed text when the list has nothing, so Enter
+      // never silently does nothing on a symbol the search does not know.
+      if (hits[active]) pick(hits[active].symbol)
+      else if (normalize(q)) pick(q)
+    }
     else if (e.key === "Escape") { e.preventDefault(); setOpen(false) }
   }
 
@@ -74,6 +81,10 @@ export function SymbolSearch() {
         type="button"
         onClick={() => setOpen(o => !o)}
         aria-label="Add a symbol"
+        // A bare dashed circle does not say "you can search the whole listed
+        // universe from here", and the search behind it covers every symbol
+        // the terminal accepts — so the hover says so.
+        title="Add a symbol — search any ticker or company"
         aria-expanded={open}
         className={`flex h-[22px] w-[22px] items-center justify-center rounded-full border border-dashed text-[13px] transition-colors ${
           open ? "border-accent text-accent" : "border-border text-muted-foreground hover:border-accent hover:text-accent"
@@ -98,9 +109,41 @@ export function SymbolSearch() {
           )}
           <div className="max-h-[320px] overflow-y-auto">
             {hits.length === 0 ? (
-              <p className="px-4 py-4 text-[13px] text-muted-foreground">
-                {q ? `Nothing tradable matches “${q}”.` : "No movers right now."}
-              </p>
+              q ? (
+                /* THE ESCAPE HATCH. The list behind this box is Alpaca's
+                   tradable universe — 13,396 names covering US equities, ETFs,
+                   ADRs and class shares. What it does NOT cover is anything
+                   Alpaca will not trade: a foreign listing like NESN, an OTC
+                   quote, a symbol listed since the asset cache was built. The
+                   chart runs on yfinance, which can price several of those, so
+                   a symbol missing from the search is not necessarily one the
+                   terminal cannot show — and refusing to add it was the search
+                   speaking for the whole app.
+
+                   Adding it here is a real attempt, not a promise: the tiles
+                   load it and say so plainly when there is nothing behind it.
+
+                   Index symbols are still out of reach, and not because of
+                   this box — `normalize` and nine server-side sanitizers all
+                   strip the caret, so ^GSPC arrives as GSPC. Widening that is
+                   its own change. */
+                <button
+                  type="button"
+                  onClick={() => pick(q)}
+                  className="flex w-full flex-col gap-0.5 px-4 py-3 text-left hover:bg-muted"
+                >
+                  <span className="text-[14px] font-semibold text-accent">
+                    {normalize(q) || q.toUpperCase()}
+                  </span>
+                  <span className="text-[13px] text-muted-foreground">
+                    Not in the tradable list — add it anyway and try to load it
+                  </span>
+                </button>
+              ) : (
+                <p className="px-4 py-4 text-[13px] text-muted-foreground">
+                  No movers right now.
+                </p>
+              )
             ) : hits.map((h, i) => (
               <button
                 key={h.symbol}

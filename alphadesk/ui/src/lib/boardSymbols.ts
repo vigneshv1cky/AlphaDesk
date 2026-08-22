@@ -14,8 +14,16 @@ import { normalize } from "@/lib/watchlist"
  * in `?symbols=`" is what lets every existing link keep working untouched. A
  * movers row and an earnings row both link with `?symbol=NVDA` alone, and that
  * arrives here as a one-chip strip with NVDA active — no redirect, no
- * migration. It also means activating a chip does not reorder the strip, so
- * chips never jump out from under the cursor.
+ * migration.
+ *
+ * THE ACTIVE CHIP RENDERS FIRST. The strip used to hold insertion order on the
+ * grounds that a chip which moves when you click it can move out from under a
+ * second click — a real hazard, and the reason it was built the other way. It
+ * is ordered active-first now because the one chip that scopes the entire
+ * board should not be somewhere in the middle of the row, and reading it at a
+ * glance matters more often than double-clicking a chip does. The underlying
+ * `?symbols=` order is untouched, so the ordering is presentation only and a
+ * shared link still restores the same strip.
  *
  * Deliberately URL state, not localStorage: `?symbol=` is already how the
  * pages and the AI rail talk to each other, and a board you can send someone
@@ -80,5 +88,15 @@ export function useBoardSymbols() {
     commit(next, sym === active ? (next[i] ?? next[i - 1] ?? "") : active)
   }, [symbols, active, commit])
 
-  return { symbols, active, add, activate, remove }
+  /** The strip AS RENDERED: active first, everything else in the order it was
+   * added. Separate from `symbols` on purpose — add/activate/remove all reason
+   * about the real order, and only the tab bar reads this one. */
+  const ordered = useMemo(
+    () => (active && symbols.includes(active)
+      ? [active, ...symbols.filter(s => s !== active)]
+      : symbols),
+    [symbols, active],
+  )
+
+  return { symbols, ordered, active, add, activate, remove }
 }

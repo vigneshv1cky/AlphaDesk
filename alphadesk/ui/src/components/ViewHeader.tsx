@@ -13,13 +13,16 @@ import { useBoardSymbols } from "@/lib/boardSymbols"
  * The strip is allowed to be empty. Closing the last chip is a real state, not
  * an edge case to prevent: the tiles fall back to their own "pick a symbol"
  * placeholders, and the `+` is the way back.
+ *
+ * Rendered active-first — see lib/boardSymbols for why that beats insertion
+ * order here.
  */
 export function ViewHeader({ title }: { title: string }) {
-  const { symbols, active, activate, remove } = useBoardSymbols()
+  const { ordered, active, activate, remove } = useBoardSymbols()
   return (
     <div className="flex h-[42px] shrink-0 items-center gap-2 px-3">
       <h1 className="text-[15px] font-semibold">{title}</h1>
-      {symbols.map(symbol => {
+      {ordered.map(symbol => {
         const on = symbol === active
         return (
           <span
