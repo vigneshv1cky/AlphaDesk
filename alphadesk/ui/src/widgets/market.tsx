@@ -34,7 +34,7 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 
 /** The quote block. Scoped by ?symbol= like every other widget, so changing
  * the chip in the view header re-points it along with the rest of the board. */
-function EquityOverview() {
+export function EquityOverview() {
   const [params] = useSearchParams()
   const symbol = (params.get("symbol") || "").toUpperCase()
   const { data: q, isPending, error } = useQuote(symbol)

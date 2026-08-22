@@ -14,7 +14,12 @@ import { Badge, Widget } from "@/components/terminal"
  */
 const RANGES: ChartRange[] = ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y", "MAX"]
 
-export function SymbolChart({ symbol: requested }: { symbol: string }) {
+export function SymbolChart({ symbol: requested, span = 12 }: {
+  symbol: string
+  /** Analysis runs the chart at 8 with the quote panel beside it, the way
+   * AlphaSpace's analysis view does; the markets board keeps it full width. */
+  span?: number
+}) {
   const theme = useChartTheme()
   const [data, setData] = useState<ChartSeries | null>(null)
   const [range, setRange] = useState<ChartRange>("5D")
@@ -38,7 +43,7 @@ export function SymbolChart({ symbol: requested }: { symbol: string }) {
   useEffect(() => { if (requested) load(requested, range) }, [requested, range])
 
   return (
-    <Widget span={12} symbol={requested} title="Chart"
+    <Widget span={span} symbol={requested} title="Chart"
       subtitle={data ? `${data.bar_count} bars · ${data.interval_label ?? ""}` : undefined}>
       <div className="flex flex-wrap items-center gap-px border-b border-border px-[12px] py-1">
         {loading && <span className="px-1 text-[12px] text-muted-foreground">loading…</span>}

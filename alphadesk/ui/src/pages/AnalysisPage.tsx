@@ -2,10 +2,14 @@ import { useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { SymbolChart } from "@/components/SymbolChart"
 import { SymbolFilings } from "@/components/SymbolFilings"
+import { SymbolFundamentals } from "@/components/SymbolFundamentals"
+import { SymbolNews } from "@/components/SymbolNews"
+import { EquityOverview } from "@/widgets/market"
 import { Btn, fieldCls } from "@/components/terminal"
 import { normalize, useWatchlist } from "@/lib/watchlist"
 
-/** Everything about ONE company, in one place: the chart and its filings.
+/** Everything about ONE company, in one place: chart, quote, financials,
+ * headlines and filings.
  *
  * These used to be two routes with two symbol inputs, which meant the terminal
  * could be showing you NVDA's chart and AAPL's 10-K at the same time. One
@@ -61,7 +65,14 @@ export default function AnalysisPage() {
         </button>
       </form>
 
-      <SymbolChart symbol={urlSymbol} />
+      {/* Row 1: chart two-thirds with the quote beside it — the same split the
+          markets board uses, and the same one AlphaSpace's analysis view uses.
+          A full-width chart with nothing next to it was the one layout neither
+          board had. */}
+      <SymbolChart symbol={urlSymbol} span={8} />
+      <EquityOverview />
+      <SymbolFundamentals symbol={urlSymbol} />
+      <SymbolNews symbol={urlSymbol} />
       <SymbolFilings symbol={urlSymbol} />
     </div>
   )
