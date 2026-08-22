@@ -1,6 +1,7 @@
 import { useScreener } from "@/lib/queries"
 import { Empty, Widget } from "@/components/terminal"
 import { WindowTable } from "@/components/WindowTable"
+import { NewsTape } from "@/widgets/builtin"
 
 /** The front door — an unranked inventory of what's in the window.
  *
@@ -23,7 +24,14 @@ export default function NewsPage() {
   return (
     <div className="collage">
       <Widget
-        span={12}
+        // Two columns, the way their news view runs a main list beside a
+        // secondary one. The window keeps the width because it is the thing
+        // this page is for; the headline tape is the sidebar to it.
+        //
+        // Their right column also carries a video panel. We have no video
+        // source, and a placeholder for one would be a promise the page cannot
+        // keep, so the tape simply takes the whole column.
+        span={8}
         title="News window"
         subtitle={
           rows === null
@@ -38,6 +46,7 @@ export default function NewsPage() {
         )}
         {rows !== null && rows.length > 0 && <WindowTable rows={rows} />}
       </Widget>
+      <NewsTape span={4} />
     </div>
   )
 }

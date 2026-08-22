@@ -203,10 +203,19 @@ export function Widget({
       // reserves the tile's normal height while leaving the body free to be a
       // fixed box that scrolls inside it, and grid stretch still lets a tall
       // neighbour hand this one extra room to fill.
+      // A STRING height needs the floor just as much as a number does, and for
+      // a while it did not get one. The body is `flex-1`, which is
+      // `flex-basis: 0%`, and on the main axis flex-basis beats an explicit
+      // height — so a tile asking for `calc(100vh - 150px)` collapsed to its
+      // header. The Earnings calendar rendered 172 rows into a body 0px tall.
+      // Numbers were fine only because they already reserved the space here.
       style={{
         gridColumn: `span ${cols} / span ${cols}`,
-        ...(bodyHeight && typeof bodyHeight === "number"
-          ? { minHeight: `${bodyHeight + HEADER_H + (toolbar ? TOOLBAR_H : 0)}px` } : {}),
+        ...(bodyHeight
+          ? { minHeight: typeof bodyHeight === "number"
+                ? `${bodyHeight + HEADER_H + (toolbar ? TOOLBAR_H : 0)}px`
+                : `calc(${bodyHeight} + ${HEADER_H + (toolbar ? TOOLBAR_H : 0)}px)` }
+          : {}),
       }}
       className={cn(
         "flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-panel",

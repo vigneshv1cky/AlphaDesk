@@ -8,18 +8,22 @@ import { Empty, Widget } from "@/components/terminal"
  * nothing. If the symbol is not in the window there is nothing to show, and it
  * says which symbol it found nothing for rather than rendering an empty box.
  */
-export function SymbolNews({ symbol }: { symbol: string }) {
+export function SymbolNews({ symbol, span = 12, scroll = 300 }: {
+  symbol: string
+  span?: number
+  scroll?: number | string
+}) {
   const { data, isPending } = useScreener()
   const row = (data?.symbols ?? []).find(r => r.symbol === symbol)
   const headlines = row?.headlines ?? []
 
   return (
     <Widget
-      span={12}
+      span={span}
       symbol={symbol}
       title="News"
       subtitle={headlines.length ? `${headlines.length} in the window` : undefined}
-      scroll={300}
+      scroll={scroll}
     >
       {isPending ? <Empty>loading…</Empty>
        : !headlines.length ? <Empty>no headlines for {symbol} in the current window</Empty> : (

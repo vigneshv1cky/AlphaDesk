@@ -11,7 +11,12 @@ import { TILE_BODY_HEIGHT } from "@/widgets/tile"
  * between these without renumbering.
  */
 
-function NewsTape() {
+export function NewsTape({ span = 12 }: {
+  /** The markets board runs this full width; the news view runs it at 4 as the
+   * secondary column beside the window, the way their news view puts a
+   * headline list beside the main list. */
+  span?: number
+}) {
   const screener = useScreener()
   const withNews = (screener.data?.symbols ?? []).filter(s => s.article_count > 0)
   const headlines = withNews
@@ -19,15 +24,17 @@ function NewsTape() {
     .sort((a, b) => String(b.published_at ?? "").localeCompare(String(a.published_at ?? "")))
     .slice(0, 60)
   return (
-  <Widget span={12} title="Market News" subtitle={`${headlines.length} headlines, newest first`} scroll={TILE_BODY_HEIGHT}>
+  <Widget span={span} title="Market News" subtitle={`${headlines.length} headlines, newest first`} scroll={TILE_BODY_HEIGHT}>
     {!screener.data ? (
       <Empty>loading…</Empty>
     ) : headlines.length === 0 ? (
       <Empty>no news in the window</Empty>
     ) : (
       <ul>
+        {/* row-rule, not a solid border: every other list on the board moved to
+            the dashed hairline and this one was the last solid one left. */}
         {headlines.map((h, i) => (
-          <li key={i} className="border-b border-grid-line last:border-b-0 hover:bg-muted/60">
+          <li key={i} className="row-rule hover:bg-muted/60">
             <a href={h.url} target="_blank" rel="noreferrer" className="block px-2 py-1">
               <span className="num mr-1.5 text-[12px] font-semibold text-accent">{h.symbol}</span>
               <span className="text-[14px]">{h.title}</span>
