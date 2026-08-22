@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { Plus } from "lucide-react"
 import { api, type SymbolHit } from "@/lib/api"
 import { useBoardSymbols } from "@/lib/boardSymbols"
 import { normalize } from "@/lib/watchlist"
@@ -86,11 +87,15 @@ export function SymbolSearch() {
         // the terminal accepts — so the hover says so.
         title="Add a symbol — search any ticker or company"
         aria-expanded={open}
-        className={`flex h-[22px] w-[22px] items-center justify-center rounded-full border border-dashed text-[13px] transition-colors ${
+        // 24px explicitly, not h-6. Tailwind's rem sizes scale off this app's
+        // 14px root, so h-6 lands at 21px — theirs measures 24 on a 16px root.
+        className={`flex h-[24px] w-[24px] shrink-0 items-center justify-center rounded-full border border-dashed transition-colors ${
           open ? "border-accent text-accent" : "border-border text-muted-foreground hover:border-accent hover:text-accent"
         }`}
       >
-        +
+        {/* 12px, same reason as the button: h-3 is 0.75rem, which is 10.5px
+            against a 14px root. */}
+        <Plus className="h-[12px] w-[12px]" aria-hidden="true" />
       </button>
 
       {open && (
@@ -105,43 +110,33 @@ export function SymbolSearch() {
             className="w-full border-b border-grid-line bg-transparent px-4 py-3 text-[14px] text-foreground outline-none placeholder:text-muted-foreground"
           />
           {trending && hits.length > 0 && (
-            <div className="px-4 pb-1 pt-3 text-[13px] font-semibold">Most active</div>
+            <div className="px-4 pb-1 pt-3 text-[13px] font-semibold">Trending Tickers</div>
           )}
           <div className="max-h-[320px] overflow-y-auto">
             {hits.length === 0 ? (
               q ? (
-                /* THE ESCAPE HATCH. The list behind this box is Alpaca's
-                   tradable universe — 13,396 names covering US equities, ETFs,
-                   ADRs and class shares. What it does NOT cover is anything
-                   Alpaca will not trade: a foreign listing like NESN, an OTC
-                   quote, a symbol listed since the asset cache was built. The
-                   chart runs on yfinance, which can price several of those, so
-                   a symbol missing from the search is not necessarily one the
-                   terminal cannot show — and refusing to add it was the search
-                   speaking for the whole app.
-
-                   Adding it here is a real attempt, not a promise: the tiles
-                   load it and say so plainly when there is nothing behind it.
-
-                   Index symbols are still out of reach, and not because of
-                   this box — `normalize` and nine server-side sanitizers all
-                   strip the caret, so ^GSPC arrives as GSPC. Widening that is
-                   its own change. */
+                /* A symbol the list does not carry is still offered, in the
+                   same shape as any other row rather than as a warning. The
+                   list behind this box is Alpaca's TRADABLE universe — it does
+                   not carry a foreign listing, an OTC quote, or anything listed
+                   since the asset cache was built, and the chart runs on
+                   yfinance which can price several of those. So "not in the
+                   list" was never the same claim as "the terminal cannot show
+                   it", and saying so in the picker made the search speak for
+                   the whole app. It just offers the symbol. */
                 <button
                   type="button"
                   onClick={() => pick(q)}
-                  className="flex w-full flex-col gap-0.5 px-4 py-3 text-left hover:bg-muted"
+                  className="flex w-full items-baseline justify-between gap-3 border-b border-dashed border-grid-line px-4 py-2 text-left last:border-b-0 bg-accent text-accent-foreground"
                 >
-                  <span className="text-[14px] font-semibold text-accent">
+                  <span className="text-[14px] font-semibold">
                     {normalize(q) || q.toUpperCase()}
                   </span>
-                  <span className="text-[13px] text-muted-foreground">
-                    Not in the tradable list — add it anyway and try to load it
-                  </span>
+                  <span className="shrink-0 text-[12px] opacity-90">Add</span>
                 </button>
               ) : (
                 <p className="px-4 py-4 text-[13px] text-muted-foreground">
-                  No movers right now.
+                  Nothing moving right now.
                 </p>
               )
             ) : hits.map((h, i) => (
@@ -150,7 +145,7 @@ export function SymbolSearch() {
                 type="button"
                 onMouseEnter={() => setActive(i)}
                 onClick={() => pick(h.symbol)}
-                className={`flex w-full flex-col gap-0.5 border-b border-grid-line px-4 py-2 text-left last:border-b-0 ${
+                className={`flex w-full flex-col gap-0.5 border-b border-dashed border-grid-line px-4 py-2 text-left last:border-b-0 ${
                   i === active ? "bg-accent text-accent-foreground" : "hover:bg-muted"
                 }`}
               >
