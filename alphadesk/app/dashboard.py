@@ -179,6 +179,64 @@ def api_chart(symbol: str, days: int = 2, range: str | None = None,
     return series
 
 
+@app.get("/api/stream-crypto")
+async def api_stream_crypto(request: Request):
+    """Live crypto prices for the ticker, pushed as Server-Sent Events.
+
+    ALL the tape's crypto products on ONE connection, unlike the per-symbol
+    equity stream above. The tape shows a handful of them and every reader
+    wants the same set, so a stream per product would be several sockets
+    carrying identical traffic.
+
+    Coinbase rather than Alpaca, and it is not a close call: measured over the
+    same window Coinbase pushed 517 BTC updates carrying 25 distinct prices in
+    15 seconds where Alpaca's crypto feed gave 12 quotes in 20 and no trades.
+    It also needs no credentials, so this works on a fresh clone.
+
+    Path is /api/stream-crypto, not /api/stream/crypto, so it cannot ever be
+    read as a symbol named "crypto" by the route above.
+    """
+    from alphadesk.ingest.cryptostream import crypto_products
+    from alphadesk.ingest.cryptostream import stream as crypto
+
+    products = crypto_products()
+
+    async def events():
+        import asyncio
+        import json as _json
+
+        taken = [p for p in products if crypto.acquire(p)]
+        yield f"event: hello\ndata: {_json.dumps({'products': taken, 'live': bool(taken)})}\n\n"
+        last: dict[str, str] = {}
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                moved = []
+                for p in taken:
+                    tick = crypto.latest(p)
+                    # Keyed on the exchange's own timestamp, so a price that
+                    # prints twice at the same value is not re-sent.
+                    if tick and tick.get("at") != last.get(p):
+                        last[p] = tick.get("at", "")
+                        moved.append(tick)
+                if moved:
+                    yield f"data: {_json.dumps({'ticks': moved})}\n\n"
+                else:
+                    yield ": keep-alive\n\n"
+                # A quarter second. The feed pushes far faster than that, and
+                # a ticker updating four times a second already reads as live
+                # while a browser repainting at the feed's rate does not.
+                await asyncio.sleep(0.25)
+        finally:
+            for p in taken:
+                crypto.release(p)
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache",
+                                      "X-Accel-Buffering": "no"})
+
+
 @app.get("/api/stream/{symbol}")
 async def api_stream(symbol: str, request: Request):
     """Live trades for ONE symbol, pushed as Server-Sent Events.

@@ -417,3 +417,54 @@ class TestQuoteFailuresAreNotCached:
         if got is not None:          # the builder needs fields the stub may lack
             assert "FAKE2" in prices._quote_cache
             assert prices._quote_cache["FAKE2"][1] is not None
+
+
+class TestTapeMerge:
+    """The tape must not lose a symbol because one fetch came back short.
+
+    yfinance drops symbols under load. A fetch returned five of eight and the
+    strip simply lost Bitcoin, Crude and the Russell — which reads as delisted
+    rather than as one bad request, and on a 24/7 symbol it is the difference
+    between "not flashing" and "not there".
+    """
+
+    def _fake_download(self, monkeypatch, available: set):
+        import sys
+        import types
+
+        class _Frame:
+            def __init__(self, sym): self.sym = sym
+            def __getitem__(self, key):
+                if key != "Close":
+                    raise KeyError(key)
+                return self
+            def dropna(self): return self
+            def __len__(self): return 2
+            @property
+            def iloc(self):
+                base = 100.0 + len(self.sym)
+                return [base, base * 1.01]
+
+        class _Data:
+            def __getitem__(self, sym):
+                if sym not in available:
+                    raise KeyError(sym)
+                return _Frame(sym)
+
+        mod = types.ModuleType("yfinance")
+        mod.download = lambda *a, **k: _Data()   # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "yfinance", mod)
+
+    def test_a_short_fetch_keeps_the_symbols_it_did_not_return(self, monkeypatch):
+        prices._tape_cache = (0.0, [])
+        self._fake_download(monkeypatch, {"^GSPC", "^DJI", "^IXIC", "^RUT",
+                                          "^TNX", "CL=F", "GC=F", "BTC-USD"})
+        full = [r["symbol"] for r in prices.market_tape()]
+        assert "BTC-USD" in full and len(full) >= 8
+
+        # Now a degraded round that only prices three of them.
+        prices._tape_cache = (0.0, prices._tape_cache[1])
+        self._fake_download(monkeypatch, {"^GSPC", "^DJI", "^IXIC"})
+        after = [r["symbol"] for r in prices.market_tape()]
+        assert "BTC-USD" in after, "a short fetch dropped a symbol off the tape"
+        assert after == full, "order changed when a symbol failed and returned"

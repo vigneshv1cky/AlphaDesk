@@ -1087,8 +1087,20 @@ def market_tape() -> list[dict]:
         log.debug("market tape failed: %s", exc)
         return cached             # keep the last good tape rather than blanking it
 
+    # MERGED per symbol, not replaced wholesale. yfinance drops symbols under
+    # load — a fetch came back with five of eight and the tape simply lost
+    # Bitcoin, Crude and the Russell for a minute. Replacing the cache with a
+    # short answer makes a missing symbol look delisted; keeping the last good
+    # value for the ones that failed keeps the strip whole while the rest
+    # refresh. Same failure shape as the quote cache remembering a None.
     if out:
-        _tape_cache = (time.time(), out)
+        by_symbol = {r["symbol"]: r for r in cached}
+        by_symbol.update({r["symbol"]: r for r in out})
+        # Rebuilt in MARKET_TAPE's own order so the strip does not reshuffle
+        # when a symbol drops out and comes back.
+        merged = [by_symbol[s] for s, _ in pairs if s in by_symbol]
+        _tape_cache = (time.time(), merged)
+        return merged
     return out
 
 

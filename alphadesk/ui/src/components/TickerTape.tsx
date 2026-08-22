@@ -1,4 +1,5 @@
 import { useTape } from "@/lib/queries"
+import { useCryptoTicks } from "@/lib/liveCrypto"
 import type { TapeEntry } from "@/lib/api"
 import { Flash } from "@/components/terminal"
 
@@ -18,16 +19,26 @@ import { Flash } from "@/components/terminal"
  * replaces was a horizontal scrollbar nobody drags.
  *
  * Prices still flash on change, which is the part that does encode data.
+ *
+ * Crypto is STREAMED, everything else is polled. The tape refreshes on the
+ * minute, which is fine for an index that only moves in session and useless for
+ * a market that never closes — Bitcoin sat frozen for a minute at a time while
+ * it was genuinely moving about twice a second. Coinbase pushes those prices
+ * over /api/stream-crypto; the poll still owns the label and the day's change.
  */
-function Item({ t }: { t: TapeEntry }) {
+function Item({ t, livePrice }: { t: TapeEntry; livePrice?: number }) {
+  // The streamed price wins when there is one; the polled row still supplies
+  // everything else. A stale tick is ignored rather than shown, because a
+  // 24/7 market going quiet means the connection is unwell, not the market.
+  const price = livePrice ?? t.price
   const up = t.change_pct >= 0
   return (
     <div className="flex shrink-0 items-baseline gap-2 px-3 leading-[40px]" title={t.symbol}>
       <span className="text-[14px] font-semibold uppercase tracking-[0.02em] text-foreground">
         {t.label}
       </span>
-      <Flash value={t.price} className="num text-[14px] text-muted-foreground">
-        {t.price.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+      <Flash value={price} className="num text-[14px] text-muted-foreground">
+        {price.toLocaleString(undefined, { maximumFractionDigits: 2 })}
       </Flash>
       <span className={`num text-[14px] ${up ? "text-gain" : "text-loss"}`}>
         {up ? "+" : ""}{t.change_pct.toFixed(2)}%
@@ -38,7 +49,12 @@ function Item({ t }: { t: TapeEntry }) {
 
 export function TickerTape() {
   const { data } = useTape()
+  const ticks = useCryptoTicks()
   const tape = data?.tape ?? []
+  const liveFor = (sym: string) => {
+    const t = ticks[sym.toUpperCase()]
+    return t && !t.stale ? t.price : undefined
+  }
   if (!tape.length) return null
   return (
     <div className="flex h-[40px] shrink-0 items-stretch border-b border-border bg-background">
@@ -49,11 +65,11 @@ export function TickerTape() {
       </div>
       <div className="marquee-viewport min-w-0 flex-1 overflow-hidden">
         <div className="marquee-track flex w-max">
-          {tape.map(t => <Item key={t.symbol} t={t} />)}
+          {tape.map(t => <Item key={t.symbol} t={t} livePrice={liveFor(t.symbol)} />)}
           {/* The second copy is decoration for the loop, not content — hidden
               from assistive tech so the list is not announced twice. */}
           <div className="flex" aria-hidden="true">
-            {tape.map(t => <Item key={`dup-${t.symbol}`} t={t} />)}
+            {tape.map(t => <Item key={`dup-${t.symbol}`} t={t} livePrice={liveFor(t.symbol)} />)}
           </div>
         </div>
       </div>

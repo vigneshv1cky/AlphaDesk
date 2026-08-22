@@ -14,3 +14,4 @@ python-multipart            # form parsing
 # <2: mcp 2.0 moved FastMCP out of `mcp.server.fastmcp`, which mcp_server.py
 # imports. Lifting the ceiling means porting that module, not just the pin.
 mcp>=1.0,<2                 # `alphadesk.main mcp` — exposes the terminal to agents
+websockets>=12.0   # Coinbase market-data feed (ingest/cryptostream.py)
