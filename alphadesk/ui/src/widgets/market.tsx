@@ -1,8 +1,9 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import type { MoverRow, TapeEntry } from "@/lib/api"
 import { useCrypto, useIndices, useMovers, useQuote } from "@/lib/queries"
 import { useCryptoBoard } from "@/lib/liveCrypto"
+import { useLiveQuotes } from "@/lib/liveQuotes"
 import { useLiveTrade } from "@/lib/live"
 import { Empty, Flash, Sparkline, Widget } from "@/components/terminal"
 import { registerWidget } from "@/widgets/registry"
@@ -246,6 +247,23 @@ function MoversTable({ rows, linked = true, empty }: {
 function StockMovers() {
   const [tab, setTab] = useState<(typeof TABS)[number]["id"]>("most_active")
   const { data, isPending } = useMovers()
+  // Memoised on (data, tab), not written inline: `?? []` mints a new array
+  // every render, which would re-run everything downstream of it forever.
+  const rows = useMemo(() => data?.[tab] ?? [], [data, tab])
+  // Subscribe to the rows on screen, not the whole response — the three tabs
+  // overlap heavily and the visible tab is the only one anyone is watching.
+  const symbols = useMemo(() => rows.map(r => r.symbol), [rows])
+  const live = useLiveQuotes(symbols)
+  const priced = useMemo(
+    () => rows.map(r => {
+      const t = live[r.symbol]
+      // The poll owns the row; a trade only moves its price. The change stays
+      // as the provider computed it rather than being recomputed off a tick
+      // against a previous close this panel does not hold.
+      return t && !t.stale ? { ...r, price: t.price } : r
+    }),
+    [rows, live],
+  )
   return (
     <Widget
       span={4}
@@ -261,7 +279,7 @@ function StockMovers() {
       toolbar={<TabStrip tabs={TABS} value={tab} onChange={setTab} />}
       scroll={TILE_BODY_HEIGHT}
     >
-      {isPending ? <Empty>loading…</Empty> : <MoversTable rows={data?.[tab] ?? []} />}
+      {isPending ? <Empty>loading…</Empty> : <MoversTable rows={priced} />}
     </Widget>
   )
 }

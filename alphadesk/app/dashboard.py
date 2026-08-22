@@ -189,6 +189,68 @@ _CRYPTO_MIN_PUSH_S = float(os.environ.get("CRYPTO_MIN_PUSH_S", "2.0"))
 _CRYPTO_BOARD_PUSH_S = float(os.environ.get("CRYPTO_BOARD_PUSH_S", "5.0"))
 
 
+@app.get("/api/stream-quotes")
+async def api_stream_quotes(request: Request, symbols: str = ""):
+    """Live trades for a LIST of equities on one connection.
+
+    The movers and index panels poll every minute or two, so in session they
+    would flash once a poll — technically live, and nothing like the ticker
+    beside them. This is the same fan-out the crypto strip uses, pointed at the
+    equity stream that already existed.
+
+    WHAT TO EXPECT FROM THIS FEED, because it is not Coinbase. It is Alpaca's
+    IEX tape, a few percent of consolidated volume, and ingest/stream.py records
+    the measurement: over 26 seconds mid-session NVDA printed 23 trades, AAPL
+    11, and ENTA nothing at all. So the busiest rows will flash often, the
+    quiet ones rarely, and some never. A row that does not flash means this
+    feed saw no print — not that the stock did not trade.
+
+    Outside market hours it subscribes and sits silent, which is correct and
+    indistinguishable from a very quiet symbol. Nothing here reports "live"
+    on that basis alone.
+    """
+    from alphadesk.ingest.stream import stream as market
+
+    wanted, seen = [], set()
+    for raw in symbols.split(","):
+        sym = "".join(c for c in raw.upper() if c.isalnum() or c in ".-")[:12]
+        if sym and sym not in seen:
+            seen.add(sym)
+            wanted.append(sym)
+    if len(wanted) > 40:
+        raise HTTPException(400, "too many symbols (max 40)")
+
+    async def events():
+        import asyncio
+        import json as _json
+
+        taken = [s for s in wanted if market.acquire(s)]
+        yield f"event: hello\ndata: {_json.dumps({'symbols': taken, 'live': bool(taken)})}\n\n"
+        last: dict[str, str] = {}
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                moved = []
+                for sym in taken:
+                    tick = market.latest(sym)
+                    if tick and not tick.get("stale") and tick.get("at") != last.get(sym):
+                        last[sym] = tick.get("at", "")
+                        moved.append(tick)
+                if moved:
+                    yield f"data: {_json.dumps({'ticks': moved})}\n\n"
+                else:
+                    yield ": keep-alive\n\n"
+                await asyncio.sleep(0.5)
+        finally:
+            for sym in taken:
+                market.release(sym)
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache",
+                                      "X-Accel-Buffering": "no"})
+
+
 @app.get("/api/stream-crypto")
 async def api_stream_crypto(request: Request):
     """Live crypto prices for the ticker, pushed as Server-Sent Events.
