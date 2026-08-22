@@ -209,6 +209,55 @@ def _row(sym: str, meta: dict) -> dict:
             "asset_class": _CLASS_LABEL.get(meta.get("class", ""), meta.get("class") or None)}
 
 
+_WORD_RE = __import__("re").compile(r"[^A-Z0-9.]+")
+
+# Name markers for instruments that merely REFERENCE a company rather than
+# being it. "tesla" should offer TSLA before a 2x inverse ETN with Tesla in its
+# title, and the asset class cannot tell them apart — Alpaca files all of these
+# as us_equity, so the name is the only signal available.
+_DERIVATIVE_MARKERS = (
+    " ETF", " ETN", "ETNS", "LEVERAGED", "INVERSE", " 2X", " 3X", "-1X",
+    "BULL", "BEAR", "INDEX-LINKED", "TRUST SERIES", "COVERED CALL",
+)
+
+
+def _norm(text: str) -> str:
+    """Uppercase, punctuation to spaces, whitespace collapsed.
+
+    This is what makes "coca cola" find Coca-Cola. The old search asked whether
+    the raw query was a substring of the raw name, so a hyphen in the company
+    and a space in the query missed each other completely and KO was simply
+    unreachable by name.
+    """
+    return " ".join(_WORD_RE.sub(" ", (text or "").upper()).split())
+
+
+def _rank(sym: str, name: str, q: str, q_norm: str, tokens: list[str]) -> int | None:
+    """Lower is better; None means no match.
+
+    Tiers rather than a similarity score, because the tiers are the intent: an
+    exact ticker is never not what was meant, a ticker prefix is the next most
+    likely, and only then does the company name matter.
+    """
+    name_norm = _norm(name)
+    penalty = 50 if any(m in f" {name_norm} " for m in _DERIVATIVE_MARKERS) else 0
+
+    if sym == q:
+        return 0
+    if sym.startswith(q):
+        return 100 + len(sym)
+    if not name_norm:
+        return None
+    if name_norm.startswith(q_norm):
+        return 200 + penalty + len(sym)
+    # Every token present, in any order — "global venture" finds Venture Global.
+    if tokens and all(t in name_norm for t in tokens):
+        return 300 + penalty + len(sym)
+    if q_norm and q_norm in name_norm:
+        return 400 + penalty + len(sym)
+    return None
+
+
 def search_symbols(query: str, limit: int = 12) -> list[dict]:
     """Ticker/name search over the cached Alpaca asset list.
 
@@ -216,30 +265,30 @@ def search_symbols(query: str, limit: int = 12) -> list[dict]:
     warranted — a linear scan of that is microseconds and the list only changes
     on the weekly universe refresh.
 
-    Ranked so an exact ticker wins, then ticker prefixes, then name matches.
-    Typing "AA" should offer AA before every company with "aa" in its name.
+    Ranked in tiers: exact ticker, ticker prefix, name prefix, all query tokens
+    present, then a loose substring. Within a tier a derivative is demoted and
+    the shorter ticker wins, which favours the primary listing over the ETFs
+    named after it — "jpmorgan" used to answer JIG, a JPMorgan ETF, ahead of
+    JPM itself, because both merely contained the word and the tie fell to
+    dictionary order.
+
+    Ties break on the symbol, so the same query always returns the same list.
     """
     q = (query or "").strip().upper()
     if not q:
         return []
     _load_names()
-    exact, prefix, name_hit = [], [], []
+    q_norm = _norm(q)
+    tokens = [t for t in q_norm.split() if t]
+
+    scored: list[tuple[int, str, str]] = []
     for sym, meta in (_names or {}).items():
-        name = (meta or {}).get("name", "")
-        if sym == q:
-            exact.append((sym, name))
-        elif sym.startswith(q):
-            prefix.append((sym, name))
-        elif q in (name or "").upper():
-            name_hit.append((sym, name))
-    # Within name matches, a name that STARTS with the query is what was meant:
-    # "tesla" should offer TSLA before a 2x inverse ETF that merely has Tesla in
-    # its title, and "nvid" should offer NVDA. Shorter ticker breaks the tie,
-    # which favours the primary listing over its derivatives.
-    prefix.sort(key=lambda r: len(r[0]))
-    name_hit.sort(key=lambda r: (not (r[1] or "").upper().startswith(q), len(r[0])))
-    out = exact + prefix + name_hit
-    return [_row(s_, (_names or {}).get(s_) or {}) for s_, _n in out[:limit]]
+        name = (meta or {}).get("name", "") or ""
+        r = _rank(sym, name, q, q_norm, tokens)
+        if r is not None:
+            scored.append((r, sym, name))
+    scored.sort(key=lambda t: (t[0], t[1]))
+    return [_row(sym, (_names or {}).get(sym) or {}) for _r, sym, _n in scored[:limit]]
 
 
 def _load_names() -> None:
