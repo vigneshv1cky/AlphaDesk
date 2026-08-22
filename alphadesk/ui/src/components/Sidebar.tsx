@@ -1,15 +1,19 @@
 import { NavLink } from "react-router-dom"
 import {
-  Activity, CalendarDays, LineChart, Newspaper, Star, Wrench,
+  Activity, CalendarDays, Layers, LineChart, Newspaper, Star, Wrench,
 } from "lucide-react"
+import { useThemes } from "@/lib/queries"
 
 /** Left rail — sectioned, icon-led, with an identity card pinned to the
  * bottom: a VIEWS group of surfaces, then account chrome.
  *
- * There was a THEMES group of preset symbol sets here. It was removed because
- * the links carried a ?q= the window never read — three buttons that looked
- * like filters and filtered nothing. Worth rebuilding on top of a real filter,
- * not before one.
+ * The THEMES group was removed once, because its links carried a ?q= the
+ * window never read — three buttons that looked like filters and filtered
+ * nothing. The note left behind said to rebuild it on top of a real surface
+ * rather than before one, and /themes/:id is that surface: live quotes per
+ * member, a heatmap over them, and a chart scoped to the row you pick. The
+ * list is server config (THEMES), so a deployment can change it without a
+ * rebuild — which is also why it is fetched rather than hardcoded here.
  *
  * Vertical rather than top tabs because a terminal's horizontal band is spoken
  * for by the ticker strip, and a list grows without wrapping.
@@ -33,6 +37,38 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       </div>
       {children}
     </div>
+  )
+}
+
+/** Renders nothing until the config arrives, and nothing if it is empty — an
+ * empty THEMES list should leave no heading behind. */
+function ThemeLinks() {
+  const { data } = useThemes()
+  const themes = data?.themes ?? []
+  if (!themes.length) return null
+  return (
+    <Section title="Themes">
+      {themes.map(t => (
+        <NavLink
+          key={t.id}
+          to={`/themes/${t.id}`}
+          className={({ isActive }) =>
+            `mx-2 flex items-center gap-2.5 rounded-md px-2 py-[7px] text-[15px] transition-colors ${
+              isActive
+                ? "bg-muted font-medium text-foreground"
+                : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+            }`
+          }
+        >
+          {({ isActive }) => (
+            <>
+              <Layers className={`h-[15px] w-[15px] shrink-0 ${isActive ? "text-accent" : ""}`} />
+              <span className="truncate">{t.label}</span>
+            </>
+          )}
+        </NavLink>
+      ))}
+    </Section>
   )
 }
 
@@ -61,6 +97,8 @@ export function Sidebar() {
           </NavLink>
         ))}
       </Section>
+
+      <ThemeLinks />
 
       <div className="flex-1" />
 

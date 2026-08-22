@@ -306,6 +306,52 @@ INDEX_BOARD = [
 # was a judgment about which names are INTERESTING; this is the same ordering
 # the equity movers list already takes from the provider, computed here only
 # because no screener endpoint covers crypto.
+# Curated baskets. A theme is a NAME and a list of symbols — nothing is scored,
+# ranked or picked here, and the order is the order you write. That keeps it on
+# the right side of the 2026-08-18 screener-ranking deletion: choosing what
+# belongs in "AI & Tech" is an editorial act, and it is done once, in config,
+# where a reader can see it and change it — not computed per-request and
+# presented as a finding.
+#
+# Override wholesale with THEMES_JSON, which must be a JSON list of
+# {"id", "label", "symbols"}. Left as a literal rather than a packed string
+# because a nested list in a comma-separated env var is unreadable.
+_DEFAULT_THEMES = [
+    {"id": "mag-7", "label": "Magnificent Seven",
+     "symbols": ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA"]},
+    {"id": "ai-tech", "label": "AI & Tech",
+     "symbols": ["NVDA", "AMD", "AVGO", "PLTR", "MU", "ARM", "TSM", "SMCI"]},
+    {"id": "semis", "label": "Semiconductors",
+     "symbols": ["NVDA", "AMD", "AVGO", "TSM", "MU", "INTC", "QCOM", "TXN", "ADI"]},
+    {"id": "financials", "label": "Financial Services",
+     "symbols": ["JPM", "BAC", "WFC", "GS", "MS", "C", "SCHW", "BLK", "AXP"]},
+    {"id": "energy", "label": "Energy",
+     "symbols": ["XOM", "CVX", "COP", "SLB", "EOG", "PSX", "MPC", "OXY"]},
+]
+
+
+def _load_themes() -> list[dict]:
+    raw = os.environ.get("THEMES_JSON")
+    if not raw:
+        return _DEFAULT_THEMES
+    try:
+        import json
+        parsed = json.loads(raw)
+        out = []
+        for t in parsed:
+            tid, label = str(t["id"]).strip(), str(t["label"]).strip()
+            syms = [str(x).strip().upper() for x in t["symbols"] if str(x).strip()]
+            if tid and label and syms:
+                out.append({"id": tid, "label": label, "symbols": syms})
+        # A malformed override must not silently empty the nav.
+        return out or _DEFAULT_THEMES
+    except Exception:
+        return _DEFAULT_THEMES
+
+
+THEMES = _load_themes()
+
+
 CRYPTO_UNIVERSE = [
     s.strip() for s in os.environ.get(
         "CRYPTO_UNIVERSE", "BTC/USD:Bitcoin,ETH/USD:Ethereum,SOL/USD:Solana,"

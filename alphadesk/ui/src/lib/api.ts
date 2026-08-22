@@ -221,6 +221,14 @@ export interface CryptoMovers {
   losers: MoverRow[]
 }
 
+/** A curated basket. Server-side config: nothing here is scored or ranked,
+ * and `symbols` is in the order it was written. */
+export interface Theme {
+  id: string
+  label: string
+  symbols: string[]
+}
+
 export interface TapeEntry {
   symbol: string
   label: string
@@ -427,6 +435,7 @@ export const api = {
     get<EarningsWeek>(`/api/earnings/week${start ? `?start=${start}` : ""}`),
   tape: () => get<{ tape: TapeEntry[] }>("/api/tape"),
   indices: () => get<{ indices: TapeEntry[] }>("/api/indices"),
+  themes: () => get<{ themes: Theme[] }>("/api/themes"),
   crypto: (top = 20) => get<CryptoMovers>(`/api/crypto?top=${top}`),
   quote: (symbol: string) => get<Quote>(`/api/quote/${encodeURIComponent(symbol)}`),
   movers: (top = 20) => get<Movers>(`/api/movers?top=${top}`),

@@ -323,3 +323,47 @@ class TestCryptoRanking:
     def test_top_clamps_every_view(self):
         out = prices._rank_crypto(self.ROWS, 2)
         assert all(len(v) <= 2 for v in out.values())
+
+
+class TestThemes:
+    """Curated baskets. The parsing matters more than it looks: THEMES feeds the
+    sidebar, so a bad override does not fail loudly — it silently empties the
+    navigation."""
+
+    def _load(self, monkeypatch, raw):
+        import importlib
+        from alphadesk import config
+        if raw is None:
+            monkeypatch.delenv("THEMES_JSON", raising=False)
+        else:
+            monkeypatch.setenv("THEMES_JSON", raw)
+        return importlib.reload(config).THEMES
+
+    def test_defaults_are_non_empty_and_uniquely_keyed(self, monkeypatch):
+        themes = self._load(monkeypatch, None)
+        assert themes
+        ids = [t["id"] for t in themes]
+        assert len(ids) == len(set(ids))
+        for t in themes:
+            assert t["label"] and t["symbols"]
+
+    def test_override_replaces_the_defaults(self, monkeypatch):
+        themes = self._load(
+            monkeypatch, '[{"id":"x","label":"X","symbols":["aapl","msft"]}]')
+        assert [t["id"] for t in themes] == ["x"]
+        # Symbols are upper-cased on the way in, so a lowercase config does not
+        # produce quote requests that miss the cache the rest of the app shares.
+        assert themes[0]["symbols"] == ["AAPL", "MSFT"]
+
+    def test_malformed_override_falls_back_rather_than_emptying_the_nav(self, monkeypatch):
+        for bad in ("not json at all", "[]", '[{"id":"","label":"","symbols":[]}]',
+                    '[{"id":"x"}]'):
+            themes = self._load(monkeypatch, bad)
+            assert themes, f"{bad!r} emptied THEMES"
+
+    def test_entries_without_symbols_are_dropped_not_kept_empty(self, monkeypatch):
+        themes = self._load(
+            monkeypatch,
+            '[{"id":"a","label":"A","symbols":["NVDA"]},'
+            ' {"id":"b","label":"B","symbols":[]}]')
+        assert [t["id"] for t in themes] == ["a"]

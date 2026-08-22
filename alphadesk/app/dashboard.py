@@ -310,6 +310,15 @@ def api_tape():
     return {"tape": get_prices().market_tape()}
 
 
+@app.get("/api/themes")
+def api_themes():
+    """The curated baskets and their members. Pure config read — no prices, no
+    ordering, no scoring. The page fetches quotes per symbol from /api/quote,
+    which is already cached and shared."""
+    from alphadesk.config import THEMES
+    return {"themes": THEMES}
+
+
 @app.get("/api/indices")
 def api_indices():
     """The cross-asset board: indices, rates, commodities, FX. Wider than

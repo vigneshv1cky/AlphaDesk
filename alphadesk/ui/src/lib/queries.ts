@@ -16,6 +16,7 @@ export const keys = {
   system: ["system"] as const,
   tape: ["tape"] as const,
   indices: ["indices"] as const,
+  themes: ["themes"] as const,
   crypto: ["crypto"] as const,
   movers: ["movers"] as const,
   quote: (symbol: string) => ["quote", symbol] as const,
@@ -45,6 +46,10 @@ export const useTape = () =>
 
 export const useMovers = () =>
   useQuery({ queryKey: keys.movers, queryFn: () => api.movers(20), refetchInterval: 120_000 })
+
+/** Server config, so it changes only on redeploy — no refetch interval. */
+export const useThemes = () =>
+  useQuery({ queryKey: keys.themes, queryFn: api.themes, staleTime: Infinity })
 
 export const useIndices = () =>
   useQuery({ queryKey: keys.indices, queryFn: api.indices, refetchInterval: 60_000 })
