@@ -144,6 +144,8 @@ _NAMES_CACHE = DATA_DIR / "symbol_meta_v2.json"
 _UNIVERSE_MAX_AGE_S = 7 * 24 * 3600
 _universe: set[str] | None = None
 _names: dict[str, str] | None = None
+# One vendor round trip per process, not one per keystroke — see _load_names.
+_names_fetch_tried = False
 
 
 def _fetch_universe_from_alpaca() -> list[str]:
@@ -312,16 +314,51 @@ def search_symbols(query: str, limit: int = 12) -> list[dict]:
     return [_row(sym, (_names or {}).get(sym) or {}) for _r, sym, _n in scored[:limit]]
 
 
+def _read_names_file() -> dict:
+    try:
+        raw = json.loads(_NAMES_CACHE.read_text())
+        # Guard the shape: a v1 file (symbol -> string) would otherwise be
+        # read as metadata and every lookup would return nonsense.
+        return raw if all(isinstance(v, dict) for v in raw.values()) else {}
+    except Exception:
+        return {}
+
+
 def _load_names() -> None:
-    global _names
-    if _names is None:
-        try:
-            raw = json.loads(_NAMES_CACHE.read_text())
-            # Guard the shape: a v1 file (symbol -> string) would otherwise be
-            # read as metadata and every lookup would return nonsense.
-            _names = raw if all(isinstance(v, dict) for v in raw.values()) else {}
-        except Exception:
-            _names = {}
+    """Symbol metadata, fetching it once if the cache cannot supply it.
+
+    THIS USED TO FAIL SILENTLY AND PERMANENTLY. The metadata file is written in
+    exactly one place — inside _fetch_universe_from_alpaca — which only runs
+    when load_universe finds universe.json missing or older than a week. So a
+    deployment holding a FRESH universe.json and no symbol_meta_v2.json (a
+    container that predates the v2 file, or any data dir where the two got out
+    of step) took the cache-hit path forever: nothing ever wrote the metadata,
+    _names stayed empty, and every search returned no suggestions at all. Not
+    an error, not a log line — an empty list, until universe.json aged out
+    seven days later.
+
+    Asking for a refresh here closes that. The fetch is attempted ONCE per
+    process: without the guard a terminal with no Alpaca credentials would try
+    to reach the vendor on every keystroke of every search.
+    """
+    global _names, _names_fetch_tried
+    if _names is not None:
+        return
+    _names = _read_names_file()
+    if _names or _names_fetch_tried:
+        return
+    _names_fetch_tried = True
+    try:
+        # refresh=True rather than a plain call: a fresh universe.json is
+        # exactly the case that leaves the metadata unwritten, so the cache-hit
+        # path is the one that must be bypassed.
+        load_universe(refresh=True)
+    except Exception as exc:
+        log.warning("symbol metadata unavailable, search will be empty: %s", exc)
+        return
+    _names = _read_names_file()
+    if _names:
+        log.info("Symbol metadata fetched on demand: %d symbols", len(_names))
 
 
 def symbol_meta(symbol: str) -> dict | None:

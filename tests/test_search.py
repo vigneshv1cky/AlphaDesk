@@ -117,3 +117,47 @@ class TestSymbolSubstring:
         search. Prefix and exact still work at one character."""
         assert rank("CLFD", "Clearfield, Inc.", "F") is None
         assert rank("F", "Ford Motor Company", "F") == 0
+
+
+class TestMetadataSelfHeal:
+    """The search must not go permanently silent when its cache is absent.
+
+    The metadata file is written in exactly one place — inside the universe
+    fetch — which only runs when universe.json is missing or a week old. A data
+    dir holding a FRESH universe.json and no symbol_meta_v2.json therefore took
+    the cache-hit path forever: nothing wrote the metadata, and every search
+    returned an empty list with no error and no log line.
+    """
+
+    def test_a_missing_cache_triggers_one_fetch_not_one_per_call(self, monkeypatch, tmp_path):
+        import alphadesk.config as cfg
+
+        calls = {"n": 0}
+
+        def fake_refresh(refresh=False):
+            calls["n"] += 1
+            raise RuntimeError("no credentials")
+
+        monkeypatch.setattr(cfg, "_NAMES_CACHE", tmp_path / "absent.json")
+        monkeypatch.setattr(cfg, "load_universe", fake_refresh)
+        monkeypatch.setattr(cfg, "_names", None)
+        monkeypatch.setattr(cfg, "_names_fetch_tried", False)
+
+        assert cfg.search_symbols("AAPL") == []
+        assert cfg.search_symbols("NVDA") == []
+        assert cfg.search_symbols("MSFT") == []
+        # Once for the process. Without the guard, a terminal with no Alpaca
+        # credentials would reach for the vendor on every keystroke.
+        assert calls["n"] == 1
+
+    def test_a_v1_shaped_file_is_treated_as_absent(self, monkeypatch, tmp_path):
+        """v1 was {symbol: "name"}. Read as v2 metadata every lookup returns
+        nonsense, so it counts as no cache and earns a refresh."""
+        import json
+
+        import alphadesk.config as cfg
+
+        old = tmp_path / "v1.json"
+        old.write_text(json.dumps({"AAPL": "Apple Inc."}))
+        monkeypatch.setattr(cfg, "_NAMES_CACHE", old)
+        assert cfg._read_names_file() == {}
