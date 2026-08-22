@@ -1,6 +1,6 @@
 import { NavLink } from "react-router-dom"
 import {
-  Activity, CalendarDays, Layers, LineChart, Newspaper, Star, Wrench,
+  Activity, CalendarDays, Layers, Layers3, LineChart, Newspaper, Star, Wrench,
 } from "lucide-react"
 import { useThemes } from "@/lib/queries"
 
@@ -27,6 +27,7 @@ const VIEWS = [
   { to: "/news", label: "News", Icon: Newspaper },
   { to: "/portfolio", label: "My Portfolio", Icon: Star },
   { to: "/earnings", label: "Earnings Hub", Icon: CalendarDays },
+  { to: "/options", label: "Options", Icon: Layers3 },
 ]
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

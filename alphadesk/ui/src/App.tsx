@@ -15,6 +15,7 @@ const PortfolioPage = lazy(() => import("@/pages/PortfolioPage"))
 const EarningsPage = lazy(() => import("@/pages/EarningsPage"))
 const SystemPage = lazy(() => import("@/pages/SystemPage"))
 const ThemePage = lazy(() => import("@/pages/ThemePage"))
+const OptionsPage = lazy(() => import("@/pages/OptionsPage"))
 
 const TITLES: Record<string, string> = {
   "/markets": "Markets · AlphaDesk",
@@ -114,6 +115,7 @@ function Shell() {
               <Route path="/portfolio" element={<PortfolioPage />} />
               <Route path="/earnings" element={<EarningsPage />} />
               <Route path="/themes/:id" element={<ThemePage />} />
+              <Route path="/options" element={<OptionsPage />} />
               <Route path="/system" element={<SystemPage />} />
               {/* Old paths, kept as redirects so links and bookmarks still
                   land somewhere. /chart and /filings merged into Analysis and

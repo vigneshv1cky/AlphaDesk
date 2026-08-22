@@ -229,6 +229,27 @@ export interface Theme {
   symbols: string[]
 }
 
+/** One contract. No implied_volatility and no greeks: the feed returns both as
+ * null on this entitlement, so they are absent rather than columns of dashes.
+ * `mid` is null unless BOTH sides quote — a mid off a one-sided book is an
+ * invented price, not a wide one. */
+export interface OptionRow {
+  symbol: string
+  strike: number
+  bid: number | null
+  ask: number | null
+  last: number | null
+  mid: number | null
+  open_interest: number
+}
+
+export interface OptionChain {
+  symbol: string
+  expiry: string
+  calls: OptionRow[]
+  puts: OptionRow[]
+}
+
 export interface TapeEntry {
   symbol: string
   label: string
@@ -436,6 +457,12 @@ export const api = {
   tape: () => get<{ tape: TapeEntry[] }>("/api/tape"),
   indices: () => get<{ indices: TapeEntry[] }>("/api/indices"),
   themes: () => get<{ themes: Theme[] }>("/api/themes"),
+  optionExpirations: (symbol: string) =>
+    get<{ symbol: string; expirations: string[] }>(
+      `/api/options/${encodeURIComponent(symbol)}`),
+  optionChain: (symbol: string, expiry: string) =>
+    get<OptionChain>(
+      `/api/options/${encodeURIComponent(symbol)}/chain?expiry=${encodeURIComponent(expiry)}`),
   quotes: (symbols: string[]) =>
     get<{ quotes: Record<string, Quote | null> }>(
       `/api/quotes?symbols=${encodeURIComponent(symbols.join(","))}`),

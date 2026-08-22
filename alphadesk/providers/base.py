@@ -160,6 +160,17 @@ class PriceProvider(Protocol):
         list. Same rule about omitting what you cannot price."""
         ...
 
+    def option_expirations(self, symbol: str) -> list[str]:
+        """Upcoming expiries, soonest first. An empty list means the symbol has
+        no listed options — a real answer, not a failure."""
+        ...
+
+    def option_chain(self, symbol: str, expiry: str) -> dict:
+        """{symbol, expiry, calls, puts}, each row {strike, bid, ask, last, mid,
+        open_interest}. Order by STRIKE ascending on both sides: a chain is a
+        price ladder and any other order destroys its only structure."""
+        ...
+
     def crypto_movers(self, top: int = 20) -> dict:
         """{all, most_active, gainers, losers} for crypto, each
         [{symbol, name, price, change_pct, volume, spark}]. Measure change over

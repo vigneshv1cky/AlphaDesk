@@ -70,5 +70,13 @@ class BuiltinPrices:
         from alphadesk.ingest import prices
         return prices.crypto_movers(top=top)
 
+    def option_expirations(self, symbol: str) -> list[str]:
+        from alphadesk.ingest import options
+        return options.expirations(symbol)
+
+    def option_chain(self, symbol: str, expiry: str) -> dict:
+        from alphadesk.ingest import options
+        return options.chain(symbol, expiry)
+
 
 register("prices", BuiltinPrices.name, BuiltinPrices)

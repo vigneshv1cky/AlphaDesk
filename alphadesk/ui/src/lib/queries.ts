@@ -17,6 +17,8 @@ export const keys = {
   tape: ["tape"] as const,
   indices: ["indices"] as const,
   themes: ["themes"] as const,
+  optionExpirations: (symbol: string) => ["option-expiries", symbol] as const,
+  optionChain: (symbol: string, expiry: string) => ["option-chain", symbol, expiry] as const,
   quotes: (symbols: string[]) => ["quotes", symbols.join(",")] as const,
   crypto: ["crypto"] as const,
   movers: ["movers"] as const,
@@ -58,6 +60,24 @@ export const useQuotes = (symbols: string[]) =>
     queryKey: keys.quotes(symbols),
     queryFn: () => api.quotes(symbols),
     enabled: symbols.length > 0,
+    refetchInterval: 60_000,
+  })
+
+/** Expiries move once a day at most, so this does not poll. */
+export const useOptionExpirations = (symbol: string) =>
+  useQuery({
+    queryKey: keys.optionExpirations(symbol),
+    queryFn: () => api.optionExpirations(symbol),
+    enabled: !!symbol,
+    staleTime: 10 * 60_000,
+  })
+
+/** The quotes inside a chain do move, so this does. */
+export const useOptionChain = (symbol: string, expiry: string) =>
+  useQuery({
+    queryKey: keys.optionChain(symbol, expiry),
+    queryFn: () => api.optionChain(symbol, expiry),
+    enabled: !!symbol && !!expiry,
     refetchInterval: 60_000,
   })
 

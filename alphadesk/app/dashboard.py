@@ -366,6 +366,35 @@ def api_quotes(symbols: str = ""):
     return {"quotes": {sym: got.get(sym) for sym in wanted}}
 
 
+def _clean_symbol(raw: str) -> str:
+    return "".join(c for c in raw.upper() if c.isalnum() or c in ".-")[:12]
+
+
+@app.get("/api/options/{symbol}")
+def api_option_expirations(symbol: str):
+    """Upcoming expiries for one underlying."""
+    from alphadesk.providers import get_prices
+    sym = _clean_symbol(symbol)
+    if not sym:
+        raise HTTPException(400, "bad symbol")
+    return {"symbol": sym, "expirations": get_prices().option_expirations(sym)}
+
+
+@app.get("/api/options/{symbol}/chain")
+def api_option_chain(symbol: str, expiry: str = ""):
+    """One expiry's chain. `expiry` is required — a chain without one is every
+    strike of every expiry at once, which is thousands of rows and answers no
+    question anyone asked."""
+    from alphadesk.providers import get_prices
+    sym = _clean_symbol(symbol)
+    exp = "".join(c for c in expiry if c.isdigit() or c == "-")[:10]
+    if not sym:
+        raise HTTPException(400, "bad symbol")
+    if len(exp) != 10:
+        raise HTTPException(400, "expiry must be YYYY-MM-DD")
+    return get_prices().option_chain(sym, exp)
+
+
 @app.get("/api/themes")
 def api_themes():
     """The curated baskets and their members. Pure config read — no prices, no
