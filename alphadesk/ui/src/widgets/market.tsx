@@ -165,6 +165,30 @@ const TABS = [
   { id: "losers", label: "Losers" },
 ] as const
 
+/** MODULE SCOPE, and it has to be.
+ *
+ * This lived inside MoversTable, which made it a new component *type* on every
+ * render — React compares types by identity, so every data update unmounted
+ * and remounted the whole row subtree instead of updating it. That reset each
+ * Flash's `prev` ref to the value arriving, so `was === value`, and the flash
+ * never fired: Stock Movers and Crypto Movers carried thirty-nine flash hosts
+ * between them and produced nothing in twenty seconds of live prices.
+ *
+ * The remount was invisible in every other respect. Nothing looked wrong —
+ * only the one behaviour that depends on a component remembering its previous
+ * value silently stopped working.
+ */
+function RowWrap({ symbol, linked, className, children }: {
+  symbol: string
+  linked: boolean
+  className?: string
+  children: React.ReactNode
+}) {
+  return linked
+    ? <Link to={`/analysis?symbol=${encodeURIComponent(symbol)}`} className={className}>{children}</Link>
+    : <div className={className}>{children}</div>
+}
+
 /** Rows link to the analysis page only when the symbol is one it can open.
  * ^GSPC and BTC-USD are not equities: a link that lands on an empty analysis
  * page is worse than plain text, because it invites the click first. */
@@ -174,11 +198,6 @@ function MoversTable({ rows, linked = true, empty }: {
   if (!rows.length) {
     return <Empty>{empty ?? "nothing clears the price and turnover floors right now"}</Empty>
   }
-  const RowWrap = ({ symbol, className, children }: {
-    symbol: string; className?: string; children: React.ReactNode
-  }) => linked
-    ? <Link to={`/analysis?symbol=${encodeURIComponent(symbol)}`} className={className}>{children}</Link>
-    : <div className={className}>{children}</div>
   return (
     <div>
       <div className="sticky top-0 z-10 flex items-center bg-panel px-[12px] py-[10px] text-[10px] font-medium uppercase tracking-[1px] text-muted-foreground">
@@ -192,6 +211,7 @@ function MoversTable({ rows, linked = true, empty }: {
           <RowWrap
             key={r.symbol}
             symbol={r.symbol}
+            linked={linked}
             className="row-rule flex h-[44px] items-center px-[12px] text-[14px] hover:bg-muted/60"
           >
             {/* Symbol is plain foreground at normal weight — theirs is not a
