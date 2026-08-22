@@ -179,14 +179,20 @@ def api_chart(symbol: str, days: int = 2, range: str | None = None,
     return series
 
 
-# Two seconds between pushes per product. Long enough that a 420ms flash is
-# followed by calm rather than the next flash, short enough that the strip is
-# obviously live — and still thirty times the old sixty-second poll.
-_CRYPTO_MIN_PUSH_S = float(os.environ.get("CRYPTO_MIN_PUSH_S", "2.0"))
+# HOW OFTEN A LIVE SURFACE MAY REPAINT. Two numbers, and the split is the
+# point: a flash lasts 420ms, so anything pushed faster than about a second
+# leaves the tint permanently on and stops reading as a change at all — which
+# is exactly what the first version of the crypto ticker did.
+#
+# A single number can take a faster cadence than a table. The strip shows one
+# price per instrument and nothing moves position; a panel re-ranks twenty rows,
+# and a table reordering every two seconds is unreadable however live it is.
+_TICKER_PUSH_S = float(os.environ.get("CRYPTO_MIN_PUSH_S", "2.0"))
+_PANEL_PUSH_S = float(os.environ.get("PANEL_PUSH_S", "5.0"))
 
-# The board re-ranks twenty rows, so it moves slower than a single price. Five
-# seconds is live enough to watch and slow enough to read.
-_CRYPTO_BOARD_PUSH_S = float(os.environ.get("CRYPTO_BOARD_PUSH_S", "5.0"))
+# Kept as the old names so a deployment's existing env still applies.
+_CRYPTO_MIN_PUSH_S = _TICKER_PUSH_S
+_CRYPTO_BOARD_PUSH_S = float(os.environ.get("CRYPTO_BOARD_PUSH_S", str(_PANEL_PUSH_S)))
 
 
 @app.get("/api/stream-quotes")
@@ -224,19 +230,36 @@ async def api_stream_quotes(request: Request, symbols: str = ""):
         import asyncio
         import json as _json
 
+        import time as _time
+
         taken = [s for s in wanted if market.acquire(s)]
         yield f"event: hello\ndata: {_json.dumps({'symbols': taken, 'live': bool(taken)})}\n\n"
-        last: dict[str, str] = {}
+        last_price: dict[str, float] = {}
+        last_sent: dict[str, float] = {}
         try:
             while True:
                 if await request.is_disconnected():
                     break
+                now = _time.monotonic()
                 moved = []
                 for sym in taken:
                     tick = market.latest(sym)
-                    if tick and not tick.get("stale") and tick.get("at") != last.get(sym):
-                        last[sym] = tick.get("at", "")
-                        moved.append(tick)
+                    if not tick or tick.get("stale"):
+                        continue
+                    px = tick.get("price")
+                    # Deduped on PRICE, and rate limited per symbol, for the
+                    # same reason the crypto strip is: a busy name prints about
+                    # once a second on this feed, and a 420ms flash fired that
+                    # often is a permanent tint rather than a change. This
+                    # panel sits beside Crypto Movers, so it takes the panel
+                    # cadence rather than inventing its own.
+                    if px == last_price.get(sym):
+                        continue
+                    if now - last_sent.get(sym, 0.0) < _PANEL_PUSH_S:
+                        continue
+                    last_price[sym] = px
+                    last_sent[sym] = now
+                    moved.append(tick)
                 if moved:
                     yield f"data: {_json.dumps({'ticks': moved})}\n\n"
                 else:
