@@ -234,8 +234,14 @@
     from { background-color: color-mix(in srgb, var(--loss) 26%, transparent); }
     to   { background-color: transparent; }
   }
-  .flash-gain { animation: flash-gain 700ms ease-out; border-radius: 3px; }
-  .flash-loss { animation: flash-loss 700ms ease-out; border-radius: 3px; }
+  /* 420ms, measured off their animated-number-flash rule rather than chosen.
+     FLASH_MS in components/terminal.tsx must match: the component holds the
+     class for that long, and holding it longer than the animation runs leaves
+     a window where a fresh tick cannot re-trigger the flash.
+     It reads as a blink rather than a fade, which is what a tick deserves —
+     the 700ms this ran at was still tinting when the next print landed. */
+  .flash-gain { animation: flash-gain 420ms ease-out; border-radius: 3px; }
+  .flash-loss { animation: flash-loss 420ms ease-out; border-radius: 3px; }
   /* The ticker marquee. Two identical copies live in the track, so -50% lands
      the second exactly where the first started and the loop has no seam. */
   @keyframes marquee-scroll {

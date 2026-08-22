@@ -22,7 +22,7 @@ import { Flash } from "@/components/terminal"
 function Item({ t }: { t: TapeEntry }) {
   const up = t.change_pct >= 0
   return (
-    <div className="flex shrink-0 items-baseline gap-2 px-3 leading-[32px]" title={t.symbol}>
+    <div className="flex shrink-0 items-baseline gap-2 px-3 leading-[40px]" title={t.symbol}>
       <span className="text-[14px] font-semibold uppercase tracking-[0.02em] text-foreground">
         {t.label}
       </span>
@@ -41,7 +41,7 @@ export function TickerTape() {
   const tape = data?.tape ?? []
   if (!tape.length) return null
   return (
-    <div className="flex h-[32px] shrink-0 items-stretch border-b border-border bg-background">
+    <div className="flex h-[40px] shrink-0 items-stretch border-b border-border bg-background">
       {/* Pinned, outside the scroll — it names what the strip is, so it must
           not wander off the left edge. */}
       <div className="flex shrink-0 items-center gap-1.5 border-r border-border px-3 text-[14px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">

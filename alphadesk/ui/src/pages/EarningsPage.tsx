@@ -40,7 +40,10 @@ export default function EarningsPage() {
         // inside it, so a sticky header only holds when this body is the
         // scroller. Viewport-relative rather than a fixed height: a calendar
         // is as tall as the screen allows.
-        scroll="calc(100vh - 150px)"
+        // 158, not 150: the ticker strip grew from 32px to 40px and this is
+        // the only height in the app measured from the viewport down, so it is
+        // the only one that had to follow.
+        scroll="calc(100vh - 158px)"
         bodyClassName="overflow-x-auto"
       >
         <EarningsCalendar picked={symbol || null} onPick={pick} />

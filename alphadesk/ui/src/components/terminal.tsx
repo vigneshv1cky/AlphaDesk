@@ -88,6 +88,12 @@ export function Sparkline({
 
 /* ── Flash: a value that just moved ─────────────────────────────────────── */
 
+/** Must stay in step with the .flash-gain / .flash-loss rules in index.css.
+ * Holding the class longer than the animation runs leaves a dead window where
+ * a fresh tick cannot re-trigger it. */
+const FLASH_MS = 420
+
+
 /** Tint a number for a moment when it changes, green up and red down.
  *
  * The one animation in the terminal, and it earns it: the house rule is that
@@ -96,8 +102,16 @@ export function Sparkline({
  * streaming — a figure can move while the eye is on another panel, and without
  * this the only evidence is that it now reads differently than you remember.
  *
- * Keyed on the value, so React remounts the span and restarts the animation
- * even when two changes land back to back.
+ * Remounted per change, so the animation restarts even when two ticks land
+ * back to back. That is not cosmetic: without it, a second tick in the SAME
+ * direction sets `dir` to the value it already holds, React bails on identical
+ * state, the class never changes and the CSS animation never re-fires. On a
+ * streaming price, consecutive ticks the same way are the common case, so the
+ * flash was silently skipping most of them.
+ *
+ * The remount key is a counter rather than the value itself, because a price
+ * that ticks away and back — A to B to A — would otherwise reuse the first
+ * key and swallow the second change for the same reason.
  */
 export function Flash({ value, className, children }: {
   value: number | null | undefined
@@ -106,16 +120,21 @@ export function Flash({ value, className, children }: {
 }) {
   const prev = React.useRef(value)
   const [dir, setDir] = React.useState<"up" | "down" | null>(null)
+  const [seq, setSeq] = React.useState(0)
   React.useEffect(() => {
     const was = prev.current
     prev.current = value
     if (typeof was !== "number" || typeof value !== "number" || was === value) return
     setDir(value > was ? "up" : "down")
-    const t = setTimeout(() => setDir(null), 700)
+    setSeq(n => n + 1)
+    const t = setTimeout(() => setDir(null), FLASH_MS)
     return () => clearTimeout(t)
   }, [value])
   return (
-    <span className={cn(dir === "up" && "flash-gain", dir === "down" && "flash-loss", className)}>
+    <span
+      key={seq}
+      className={cn(dir === "up" && "flash-gain", dir === "down" && "flash-loss", className)}
+    >
       {children}
     </span>
   )
