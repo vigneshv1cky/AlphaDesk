@@ -1,5 +1,6 @@
 import { useMemo } from "react"
 import type { ChartBar } from "@/lib/api"
+import { Flash } from "@/components/terminal"
 
 /** The O/H/L/C/V line above the chart, plus the card that follows the
  * crosshair. Both describe the same bar, so they live together — two
@@ -24,9 +25,17 @@ export function OhlcvStrip({ bar, live, symbol, first, at }: {
   const base = first?.c
   const pct = base ? ((bar.c - base) / Math.abs(base)) * 100 : null
 
-  const Cell = ({ k, v }: { k: string; v: string }) => (
+  /* `flash` is opt-in per cell and gated on `live` below, because this strip
+     changes for TWO different reasons and only one of them is data. Moving the
+     crosshair rewrites every cell, and flashing on a cursor move is precisely
+     the noise the house rule exists to prevent. Only the live bar's close is a
+     value that moved on its own. */
+  const Cell = ({ k, v, flash }: { k: string; v: string; flash?: number }) => (
     <span className="whitespace-nowrap">
-      <span className="text-muted-foreground">{k}</span> <span className={`tnum ${tone}`}>{v}</span>
+      <span className="text-muted-foreground">{k}</span>{" "}
+      {flash == null
+        ? <span className={`tnum ${tone}`}>{v}</span>
+        : <Flash value={flash} className={`tnum ${tone}`}>{v}</Flash>}
     </span>
   )
 
@@ -36,7 +45,7 @@ export function OhlcvStrip({ bar, live, symbol, first, at }: {
         <Cell k="O" v={bar.o.toFixed(2)} />
         <Cell k="H" v={bar.h.toFixed(2)} />
         <Cell k="L" v={bar.l.toFixed(2)} />
-        <Cell k="C" v={bar.c.toFixed(2)} />
+        <Cell k="C" v={bar.c.toFixed(2)} flash={live ? bar.c : undefined} />
         <Cell k="V" v={bar.v == null ? "—" : compact.format(bar.v)} />
         <span className="tnum text-[11px] text-muted-foreground">
           {stamp}{live ? " · latest" : ""}

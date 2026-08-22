@@ -1,10 +1,17 @@
 import { useTape } from "@/lib/queries"
+import { Flash } from "@/components/terminal"
 
 /** The market strip pinned under the header — indices, rates, commodities,
  * crypto. Glanceable context, not a quote feed: it refreshes on the minute.
  *
  * It scrolls horizontally rather than wrapping, because a tape that reflows to
  * a second line pushes the whole terminal down every time a number gets wider.
+ *
+ * Prices flash on change. This strip is the one thing on screen you are never
+ * looking directly at — it sits above whatever you are actually reading — so a
+ * value that moves here is the likeliest of any to move unseen. That is exactly
+ * the case the house rule allows motion for: it encodes a change in the data
+ * and nothing else.
  */
 export function TickerTape() {
   const { data } = useTape()
@@ -26,9 +33,9 @@ export function TickerTape() {
             <span className="text-[14px] font-semibold uppercase tracking-[0.02em] text-foreground">
               {t.label}
             </span>
-            <span className="num text-[14px] text-muted-foreground">
+            <Flash value={t.price} className="num text-[14px] text-muted-foreground">
               {t.price.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-            </span>
+            </Flash>
             <span className={`num text-[14px] ${up ? "text-gain" : "text-loss"}`}>
               {up ? "+" : ""}{t.change_pct.toFixed(2)}%
             </span>
