@@ -1,5 +1,6 @@
 import { useSearchParams } from "react-router-dom"
 import { EarningsCalendar } from "@/components/EarningsCalendar"
+import { EarningsDetail } from "@/components/EarningsDetail"
 import { SymbolNews } from "@/components/SymbolNews"
 import { Widget } from "@/components/terminal"
 import { normalize } from "@/lib/watchlist"
@@ -11,16 +12,22 @@ import { normalize } from "@/lib/watchlist"
  * The column here follows ?symbol=, which is how every other view in this app
  * is scoped and what the AI rail already reads.
  *
- * It does NOT follow a click in the calendar, because the calendar's own
- * selection is a DATE (it filters the week down to one day), not a company.
- * Wiring row-click to the column means adding a second kind of selection to a
- * component that already has one, and the ticker in each row is currently a
- * link out to Analysis — a useful affordance to keep. Left deliberately, not
- * forgotten.
+ * Clicking a row scopes the column. That is a SECOND kind of selection in a
+ * component that already had one — the calendar's own `selected` is a DATE,
+ * filtering the week down to a day — so the two are kept apart: the date
+ * selection stays internal, the company selection goes to ?symbol= where the
+ * rest of the app can see it. The ticker in each row still links out to
+ * Analysis and stops the click from bubbling, or picking a row and leaving the
+ * page would happen on the same click.
  */
 export default function EarningsPage() {
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
   const symbol = normalize(params.get("symbol") || "")
+  const pick = (sym: string) => {
+    const next = new URLSearchParams(params)
+    next.set("symbol", sym)
+    setParams(next, { replace: true })
+  }
   return (
     <div className="collage">
       <Widget
@@ -36,11 +43,21 @@ export default function EarningsPage() {
         scroll="calc(100vh - 150px)"
         bodyClassName="overflow-x-auto"
       >
-        <EarningsCalendar />
+        <EarningsCalendar picked={symbol || null} onPick={pick} />
       </Widget>
       {/* No symbol means no column — the calendar takes the full width rather
-          than sitting next to an empty box asking to be filled. */}
-      {symbol && <SymbolNews symbol={symbol} span={4} scroll="calc(100vh - 150px)" />}
+          than sitting next to an empty box asking to be filled.
+          
+          The column is ONE grid child that stacks its panels, not three
+          siblings: three span-4 panels beside a span-8 calendar would wrap onto
+          the next row and land underneath it instead of alongside. Inside a
+          flex parent each Widget's inline gridColumn is simply inert. */}
+      {symbol && (
+        <div className="col-span-4 flex min-w-0 flex-col gap-2.5">
+          <EarningsDetail symbol={symbol} />
+          <SymbolNews symbol={symbol} span={4} scroll={220} />
+        </div>
+      )}
     </div>
   )
 }

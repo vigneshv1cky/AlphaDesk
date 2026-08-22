@@ -86,7 +86,12 @@ function DayCell({
   )
 }
 
-function DayTable({ day }: { day: EarningsDay }) {
+function DayTable({ day, picked, onPick }: {
+  day: EarningsDay
+  /** The company the page is scoped to, so the row can show as selected. */
+  picked?: string | null
+  onPick?: (symbol: string) => void
+}) {
   if (!day.rows.length) return null
   return (
     <section id={`day-${day.date}`} className="scroll-mt-2">
@@ -111,10 +116,17 @@ function DayTable({ day }: { day: EarningsDay }) {
             {day.rows.map(r => {
               const surprise = r.surprise_pct
               return (
-                <tr key={`${r.symbol}-${r.report_date}`} className="hover:bg-muted/50">
+                <tr
+                  key={`${r.symbol}-${r.report_date}`}
+                  onClick={() => onPick?.(r.symbol)}
+                  aria-selected={picked === r.symbol}
+                  className={`cursor-pointer ${
+                    picked === r.symbol ? "bg-muted" : "hover:bg-muted/50"}`}
+                >
                   <td className="px-[12px] py-[6px] text-[14px]">
                     <Link
                       to={`/analysis?symbol=${encodeURIComponent(r.symbol)}`}
+                      onClick={e => e.stopPropagation()}
                       className="hover:underline"
                     >
                       {r.symbol}
@@ -143,7 +155,10 @@ function DayTable({ day }: { day: EarningsDay }) {
   )
 }
 
-export function EarningsCalendar() {
+export function EarningsCalendar({ picked, onPick }: {
+  picked?: string | null
+  onPick?: (symbol: string) => void
+} = {}) {
   const [start, setStart] = useState<string | undefined>(undefined)
   const { data, isPending, isError } = useEarningsWeek(start)
   const [selected, setSelected] = useState<string | null>(null)
@@ -218,7 +233,7 @@ export function EarningsCalendar() {
       {total === 0 ? (
         <Empty>nothing reports this week</Empty>
       ) : (
-        shown.map(d => <DayTable key={d.date} day={d} />)
+        shown.map(d => <DayTable key={d.date} day={d} picked={picked} onPick={onPick} />)
       )}
     </div>
   )
