@@ -188,7 +188,7 @@ export default function ThemePage() {
                 key={h.id}
                 onClick={() => setMetric(h.id)}
                 aria-pressed={h.id === metric}
-                className={`rounded px-2 py-[3px] text-[12px] leading-none transition-colors ${
+                className={`rounded-sm px-2 py-[3px] text-[12px] leading-none transition-colors ${
                   h.id === metric ? "bg-muted font-medium text-foreground"
                                   : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"}`}
               >

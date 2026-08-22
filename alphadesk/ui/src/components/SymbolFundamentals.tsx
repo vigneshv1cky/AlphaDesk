@@ -70,7 +70,7 @@ export function SymbolFundamentals({ symbol }: { symbol: string }) {
               key={g}
               onClick={() => setGroup(g)}
               aria-pressed={g === active}
-              className={`rounded px-2 py-[3px] text-[12px] leading-none transition-colors ${
+              className={`rounded-sm px-2 py-[3px] text-[12px] leading-none transition-colors ${
                 g === active ? "bg-muted font-medium text-foreground"
                              : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"}`}
             >
@@ -83,7 +83,7 @@ export function SymbolFundamentals({ symbol }: { symbol: string }) {
               key={p.id}
               onClick={() => setPeriod(p.id)}
               aria-pressed={p.id === period}
-              className={`rounded px-2 py-[3px] text-[12px] leading-none transition-colors ${
+              className={`rounded-sm px-2 py-[3px] text-[12px] leading-none transition-colors ${
                 p.id === period ? "bg-muted font-medium text-foreground"
                                 : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"}`}
             >

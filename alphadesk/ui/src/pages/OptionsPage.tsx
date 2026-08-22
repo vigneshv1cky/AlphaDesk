@@ -111,7 +111,7 @@ export default function OptionsPage() {
           onChange={e => setQuery(e.target.value)}
           placeholder="Symbol"
           aria-label="Underlying symbol"
-          className={`${fieldCls} w-28 font-mono uppercase`}
+          className={`${fieldCls} w-28 uppercase tracking-[0.04em]`}
         />
         <Btn type="submit" variant="accent">Load</Btn>
         <span className="num text-[15px] font-semibold">{symbol}</span>
@@ -127,7 +127,7 @@ export default function OptionsPage() {
               type="button"
               onClick={() => setExpiry(d)}
               aria-pressed={d === active}
-              className={`rounded px-2 py-[3px] text-[12px] leading-none transition-colors ${
+              className={`rounded-sm px-2 py-[3px] text-[12px] leading-none transition-colors ${
                 d === active ? "bg-muted font-medium text-foreground"
                              : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"}`}
             >

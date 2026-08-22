@@ -133,7 +133,7 @@ export function WindowTable({ rows }: { rows: ScreenerRow[] }) {
           value={query}
           onChange={e => setQuery(e.target.value)}
           placeholder="Filter symbol…"
-          className={`${fieldCls} w-40 font-mono uppercase`}
+          className={`${fieldCls} w-40 uppercase tracking-[0.04em]`}
         />
         <Btn active={newsOnly} onClick={() => setNewsOnly(v => !v)}>
           with news only

@@ -120,7 +120,7 @@ export default function PortfolioPage() {
             onChange={e => setDraft(e.target.value)}
             placeholder="Add a symbol"
             aria-label="Add a symbol to the watchlist"
-            className={`${fieldCls} w-32 font-mono uppercase`}
+            className={`${fieldCls} w-32 uppercase tracking-[0.04em]`}
           />
           <Btn type="submit" variant="accent" disabled={!normalize(draft)}>Add</Btn>
           <span className="text-[14px] text-muted-foreground">

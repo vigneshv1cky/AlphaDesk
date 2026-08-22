@@ -145,7 +145,7 @@ function TabStrip<T extends string>({ tabs, value, onChange }: {
           key={t.id}
           onClick={() => onChange(t.id)}
           aria-pressed={value === t.id}
-          className={`rounded px-2 py-[3px] text-[12px] leading-none transition-colors ${
+          className={`rounded-sm px-2 py-[3px] text-[12px] leading-none transition-colors ${
             value === t.id
               ? "bg-muted font-medium text-foreground"
               : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"

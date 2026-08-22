@@ -48,7 +48,7 @@ export default function AnalysisPage() {
           onChange={e => setQuery(e.target.value)}
           placeholder="Symbol"
           aria-label="Symbol to analyse"
-          className={`${fieldCls} w-28 font-mono uppercase`}
+          className={`${fieldCls} w-28 uppercase tracking-[0.04em]`}
         />
         <Btn type="submit" variant="accent">Load</Btn>
         <span className="num text-[15px] font-semibold">{urlSymbol}</span>

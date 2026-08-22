@@ -182,7 +182,7 @@ export function AiRail() {
             value={symbol}
             onChange={e => setSymbol(e.target.value.toUpperCase())}
             placeholder="Symbol"
-            className={`${fieldCls} w-20 font-mono uppercase`}
+            className={`${fieldCls} w-20 uppercase tracking-[0.04em]`}
           />
           {mode === "filing" && (
             <select
