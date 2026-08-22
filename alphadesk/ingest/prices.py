@@ -1203,6 +1203,18 @@ def crypto_movers(top: int = 20) -> dict:
     the reader can check. Hourly bars give the 24h-ago price, the 24h turnover
     and the spark off one request; the snapshot supplies a live last price.
     """
+    # THE STREAM FIRST. Coinbase pushes price, the rolling 24h open and real
+    # 24h volume continuously, so when it has data this is both live and more
+    # correct than the REST path below — which ranks "Most Active" on Alpaca's
+    # own venue, about 11 BTC a day against Coinbase's 18,000.
+    from alphadesk.ingest import cryptostream
+    live = cryptostream.board(top)
+    if live:
+        return live
+    # Nothing yet: warm the subscription so the next call is live, and answer
+    # this one from REST rather than returning an empty board.
+    cryptostream.ensure_board_subscribed()
+
     global _crypto_cache
     ts, cached = _crypto_cache
     if cached and time.time() - ts < _CRYPTO_TTL_S:

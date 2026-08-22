@@ -184,6 +184,10 @@ def api_chart(symbol: str, days: int = 2, range: str | None = None,
 # obviously live — and still thirty times the old sixty-second poll.
 _CRYPTO_MIN_PUSH_S = float(os.environ.get("CRYPTO_MIN_PUSH_S", "2.0"))
 
+# The board re-ranks twenty rows, so it moves slower than a single price. Five
+# seconds is live enough to watch and slow enough to read.
+_CRYPTO_BOARD_PUSH_S = float(os.environ.get("CRYPTO_BOARD_PUSH_S", "5.0"))
+
 
 @app.get("/api/stream-crypto")
 async def api_stream_crypto(request: Request):
@@ -202,10 +206,15 @@ async def api_stream_crypto(request: Request):
     Path is /api/stream-crypto, not /api/stream/crypto, so it cannot ever be
     read as a symbol named "crypto" by the route above.
     """
+    from alphadesk.ingest import cryptostream
     from alphadesk.ingest.cryptostream import crypto_products
     from alphadesk.ingest.cryptostream import stream as crypto
 
     products = crypto_products()
+    # The movers board rides the SAME connection. Its twenty products are
+    # already subscribed process-wide, and opening a second EventSource to
+    # carry them would duplicate a socket for data this one is holding anyway.
+    cryptostream.ensure_board_subscribed()
 
     async def events():
         import asyncio
@@ -216,6 +225,7 @@ async def api_stream_crypto(request: Request):
         import time as _time
         last_price: dict[str, float] = {}
         last_sent: dict[str, float] = {}
+        last_board = [0.0]
         try:
             while True:
                 if await request.is_disconnected():
@@ -243,8 +253,19 @@ async def api_stream_crypto(request: Request):
                     last_price[p] = px
                     last_sent[p] = now
                     moved.append(tick)
+                payload: dict = {}
                 if moved:
-                    yield f"data: {_json.dumps({'ticks': moved})}\n\n"
+                    payload["ticks"] = moved
+                # The board goes at its own, slower cadence: it is twenty rows
+                # that get re-ranked, not one number, and a table reordering
+                # twice a second is unreadable however live it is.
+                if now - last_board[0] >= _CRYPTO_BOARD_PUSH_S:
+                    b = cryptostream.board(20)
+                    if b:
+                        last_board[0] = now
+                        payload["board"] = b
+                if payload:
+                    yield f"data: {_json.dumps(payload)}\n\n"
                 else:
                     yield ": keep-alive\n\n"
                 await asyncio.sleep(0.25)

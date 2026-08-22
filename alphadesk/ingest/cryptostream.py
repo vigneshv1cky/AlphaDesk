@@ -105,9 +105,32 @@ class _CryptoStream:
                         px = msg.get("price")
                         if not pid or px is None:
                             continue
+                        # The WHOLE row, not just the price. Coinbase's
+                        # ticker already carries open_24h, volume_24h and the
+                        # day's range, which is every column the movers panel
+                        # renders — so one subscription answers both the strip
+                        # and the panel, and the panel stops needing a poll.
+                        def _f(key):
+                            v = msg.get(key)
+                            try:
+                                return float(v) if v is not None else None
+                            except (TypeError, ValueError):
+                                return None
+
+                        open24 = _f("open_24h")
+                        price = float(px)
                         self._last[pid] = {
                             "symbol": pid,
-                            "price": float(px),
+                            "price": price,
+                            # Rolling 24h, the figure every crypto venue quotes
+                            # — and the one the panel already claims to show.
+                            "change_pct": (round(100.0 * (price - open24) / open24, 2)
+                                           if open24 else None),
+                            "volume": _f("volume_24h"),
+                            "high_24h": _f("high_24h"),
+                            "low_24h": _f("low_24h"),
+                            "bid": _f("best_bid"),
+                            "ask": _f("best_ask"),
                             "at": str(msg.get("time", "")),
                             "received": time.time(),
                         }
@@ -161,6 +184,101 @@ class _CryptoStream:
 
 
 stream = _CryptoStream()
+
+
+_board_subscribed = False
+
+
+def ensure_board_subscribed() -> None:
+    """Hold one reference per universe product, once, for the process life.
+
+    Deliberately not reference counted like the readers are. The crypto board
+    is a fixture of the terminal rather than something opened and closed, and
+    twenty products on an existing socket cost nothing — where acquiring and
+    releasing them per request would tear the subscription down between polls
+    and guarantee the next one found nothing.
+    """
+    global _board_subscribed
+    if _board_subscribed:
+        return
+    for pid in board_products():
+        stream.acquire(pid)
+    _board_subscribed = True
+
+
+def board(top: int = 20) -> dict:
+    """{all, most_active, gainers, losers} straight off the live stream.
+
+    Same shape ingest/prices.crypto_movers() returns, so the panel does not
+    care which produced it — but two things are better here than in the REST
+    path it replaces.
+
+    The volume is REAL. Alpaca's crypto venue prints about 11 BTC a day, which
+    made "Most Active" honest only as busiest-on-this-feed; Coinbase's
+    volume_24h for the same window is over 18,000. Ranking by it now means what
+    a reader assumes it means.
+
+    And the change is the venue's own rolling 24h open rather than a figure
+    assembled from hourly bars, so it agrees with what every other crypto
+    screen shows.
+
+    Returns {} when nothing has arrived yet — the caller falls back rather than
+    rendering an empty board.
+    """
+    names = labels()
+    rows = []
+    for pid in board_products():
+        tick = stream.latest(pid)
+        if not tick or tick.get("stale") or tick.get("change_pct") is None:
+            continue
+        price = tick["price"]
+        vol = tick.get("volume") or 0.0
+        dp = 6 if price < 1 else (4 if price < 100 else 2)
+        rows.append({
+            "symbol": pid,
+            "name": names.get(pid, pid),
+            "price": round(price, dp),
+            "change_pct": tick["change_pct"],
+            "volume": int(vol),
+            "dollar_volume": vol * price,
+            # No spark: a stream carries the present, not a series. The REST
+            # path built one from hourly bars, and inventing a shape from a
+            # single point would be worse than leaving the cell empty — the
+            # Sparkline primitive already renders nothing below two points.
+            "spark": [],
+        })
+    if not rows:
+        return {}
+    from alphadesk.ingest.prices import _rank_crypto
+    return _rank_crypto(rows, top)
+
+
+def board_products() -> list[str]:
+    """CRYPTO_UNIVERSE in Coinbase's product form.
+
+    The universe is written in Alpaca's notation (BTC/USD) because the REST
+    fallback still speaks it; Coinbase uses a hyphen. All twenty were verified
+    present and online on Coinbase, which lists 398 USD pairs.
+    """
+    from alphadesk.config import CRYPTO_UNIVERSE
+    out = []
+    for entry in CRYPTO_UNIVERSE:
+        sym = entry.partition(":")[0].strip().upper().replace("/", "-")
+        if sym:
+            out.append(sym)
+    return out
+
+
+def labels() -> dict[str, str]:
+    """Coinbase product id -> the display name from config."""
+    from alphadesk.config import CRYPTO_UNIVERSE
+    out = {}
+    for entry in CRYPTO_UNIVERSE:
+        sym, _, label = entry.partition(":")
+        pid = sym.strip().upper().replace("/", "-")
+        if pid:
+            out[pid] = (label or pid).strip()
+    return out
 
 
 def crypto_products() -> list[str]:

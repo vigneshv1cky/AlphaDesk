@@ -2,6 +2,7 @@ import { useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import type { MoverRow, TapeEntry } from "@/lib/api"
 import { useCrypto, useIndices, useMovers, useQuote } from "@/lib/queries"
+import { useCryptoBoard } from "@/lib/liveCrypto"
 import { useLiveTrade } from "@/lib/live"
 import { Empty, Flash, Sparkline, Widget } from "@/components/terminal"
 import { registerWidget } from "@/widgets/registry"
@@ -309,19 +310,24 @@ const CRYPTO_TABS = [
  * exactly the kind of quiet mismatch a terminal should not ship. */
 function CryptoMovers() {
   const [tab, setTab] = useState<(typeof CRYPTO_TABS)[number]["id"]>("all")
+  // Streamed when the connection has produced a frame, polled until then. The
+  // poll is the floor rather than the source: it answers on first paint and
+  // whenever the stream is unavailable, and the stream takes over silently.
+  const live = useCryptoBoard()
   const { data, isPending } = useCrypto()
+  const board = live ?? data
   return (
     <Widget
       span={4}
       title="Crypto Movers"
       // Short because a span-4 header leaves the subtitle ~110px; the full
       // sentence is the tooltip, and the reason is the docstring upstream.
-      subtitle="rolling 24h"
+      subtitle={live ? "rolling 24h · live" : "rolling 24h"}
       toolbar={<TabStrip tabs={CRYPTO_TABS} value={tab} onChange={setTab} />}
       scroll={TILE_BODY_HEIGHT}
     >
-      {isPending ? <Empty>loading…</Empty> : (
-        <MoversTable rows={data?.[tab] ?? []} linked={false}
+      {isPending && !live ? <Empty>loading…</Empty> : (
+        <MoversTable rows={board?.[tab] ?? []} linked={false}
                      empty={tab === "losers" ? "nothing is down over 24h" : "no crypto quotes right now"} />
       )}
     </Widget>

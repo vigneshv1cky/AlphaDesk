@@ -468,3 +468,44 @@ class TestTapeMerge:
         after = [r["symbol"] for r in prices.market_tape()]
         assert "BTC-USD" in after, "a short fetch dropped a symbol off the tape"
         assert after == full, "order changed when a symbol failed and returned"
+
+
+class TestCryptoBoardFromStream:
+    """Rows built from a live Coinbase ticker frame rather than from bars."""
+
+    def _put(self, monkeypatch, pid, price, open24, vol):
+        from alphadesk.ingest import cryptostream
+        import time as _t
+        cryptostream.stream._last[pid] = {
+            "symbol": pid, "price": price,
+            "change_pct": round(100.0 * (price - open24) / open24, 2) if open24 else None,
+            "volume": vol, "at": "2026-08-22T05:00:00Z", "received": _t.time(),
+        }
+
+    def test_rows_carry_no_spark(self, monkeypatch):
+        """A stream carries the present, not a series. Inventing a shape from a
+        single point would be worse than an empty cell — Sparkline already
+        renders nothing below two points."""
+        from alphadesk.ingest import cryptostream
+        cryptostream.stream._last.clear()
+        self._put(monkeypatch, "BTC-USD", 78000.0, 75000.0, 18000.0)
+        b = cryptostream.board(20)
+        assert b["all"], "no rows built from a live frame"
+        assert b["all"][0]["spark"] == []
+        assert b["all"][0]["change_pct"] == 4.0
+
+    def test_a_stale_product_is_omitted(self, monkeypatch):
+        """Crypto trades around the clock, so silence means the connection is
+        unwell — not that the market is shut. A stale row must not render as a
+        current price."""
+        from alphadesk.ingest import cryptostream
+        cryptostream.stream._last.clear()
+        self._put(monkeypatch, "BTC-USD", 78000.0, 75000.0, 18000.0)
+        cryptostream.stream._last["BTC-USD"]["received"] -= (
+            cryptostream.TICK_STALE_AFTER_S + 5)
+        assert cryptostream.board(20) == {}
+
+    def test_empty_stream_returns_empty_so_the_caller_falls_back(self):
+        from alphadesk.ingest import cryptostream
+        cryptostream.stream._last.clear()
+        assert cryptostream.board(20) == {}
