@@ -450,8 +450,9 @@ export const api = {
   system: () => get<SystemInfo>("/api/system"),
   fundamentals: (symbol: string, period: MetricPeriod) =>
     get<Fundamentals>(`/api/fundamentals/${encodeURIComponent(symbol)}?period=${period}`),
-  search: (q: string) =>
-    get<{ results: SymbolHit[]; trending: boolean }>(`/api/search?q=${encodeURIComponent(q)}`),
+  search: (q: string, limit = 50) =>
+    get<{ results: SymbolHit[]; trending: boolean }>(
+      `/api/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   earningsWeek: (start?: string) =>
     get<EarningsWeek>(`/api/earnings/week${start ? `?start=${start}` : ""}`),
   tape: () => get<{ tape: TapeEntry[] }>("/api/tape"),

@@ -232,6 +232,12 @@ def _norm(text: str) -> str:
     return " ".join(_WORD_RE.sub(" ", (text or "").upper()).split())
 
 
+def _starts_word(haystack: str, token: str) -> bool:
+    """Does `token` begin a word in `haystack`? Both are already normalised, so
+    words are simply space-separated."""
+    return haystack.startswith(token) or (" " + token) in haystack
+
+
 def _rank(sym: str, name: str, q: str, q_norm: str, tokens: list[str]) -> int | None:
     """Lower is better; None means no match.
 
@@ -246,14 +252,29 @@ def _rank(sym: str, name: str, q: str, q_norm: str, tokens: list[str]) -> int | 
         return 0
     if sym.startswith(q):
         return 100 + len(sym)
-    if not name_norm:
-        return None
     if name_norm.startswith(q_norm):
         return 200 + penalty + len(sym)
-    # Every token present, in any order — "global venture" finds Venture Global.
-    if tokens and all(t in name_norm for t in tokens):
+    # The ticker CONTAINS the query. Typing "fd" should reach CLFD and BZFD,
+    # not just the forty-one symbols that happen to begin FD — a substring of a
+    # ticker is a ticker hunt, and there was no tier for it at all.
+    #
+    # Below name-prefix on purpose. Two letters match an enormous number of
+    # symbols somewhere in the middle, and for a query like "co" the company
+    # whose NAME starts with it (Coca-Cola, Costco) is far likelier to be the
+    # one meant than an arbitrary ticker with CO buried in it.
+    if len(q) >= 2 and q in sym:
+        return 250 + len(sym)
+    if not name_norm:
+        return None
+    # Every token present AT A WORD START, in any order — "global venture"
+    # finds Venture Global. Word-anchored rather than anywhere-in-the-string
+    # because a bare substring makes short queries meaningless: "f" appears
+    # inside CLEARFIELD, and matching that returns half the market rather than
+    # a search.
+    if tokens and all(_starts_word(name_norm, t) for t in tokens):
         return 300 + penalty + len(sym)
-    if q_norm and q_norm in name_norm:
+    # Loosest tier, and two characters minimum for the same reason.
+    if len(q_norm) >= 2 and q_norm in name_norm:
         return 400 + penalty + len(sym)
     return None
 

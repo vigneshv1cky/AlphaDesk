@@ -436,7 +436,7 @@ def api_quote(symbol: str):
 
 
 @app.get("/api/search")
-def api_search(q: str = "", limit: int = 12):
+def api_search(q: str = "", limit: int = 50):
     """Ticker/name search, so a symbol can be picked rather than typed exactly.
 
     Served from the cached Alpaca asset list — no vendor round trip, and it
@@ -444,7 +444,11 @@ def api_search(q: str = "", limit: int = 12):
     box cannot promise.
     """
     from alphadesk.config import search_symbols, symbol_meta
-    n = max(1, min(limit, 50))
+    # 100, not 50. A two-letter query legitimately matches dozens — "fd" has 41
+    # symbols starting with it before a single one that merely contains it, so
+    # a short cap made the substring matches unreachable rather than merely
+    # low. The popover scrolls; the reader decides where to stop looking.
+    n = max(1, min(limit, 100))
     if q.strip():
         return {"results": search_symbols(q, limit=n), "trending": False}
 

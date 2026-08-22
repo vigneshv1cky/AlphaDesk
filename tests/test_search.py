@@ -85,3 +85,35 @@ class TestDerivativesAreDemoted:
         short = rank("TSLA", "Tesla, Inc. Common Stock", "tesla")
         long_ = rank("TSLAX", "Tesla 2X Long Fund", "tesla")
         assert better(short, long_)
+
+
+class TestSymbolSubstring:
+    """Typing part of a ticker should reach tickers containing it.
+
+    "fd" matched only the 41 symbols starting FD; the 28 that merely contain it
+    — CLFD, BZFD, DFDV, MFDX — had no tier at all and were unreachable however
+    far you scrolled.
+    """
+
+    def test_a_ticker_containing_the_query_matches(self):
+        assert rank("CLFD", "Clearfield, Inc.", "FD") is not None
+        assert rank("BZFD", "BuzzFeed, Inc.", "FD") is not None
+
+    def test_prefix_still_outranks_containment(self):
+        pref = rank("FDX", "FedEx Corporation", "FD")
+        mid = rank("CLFD", "Clearfield, Inc.", "FD")
+        assert better(pref, mid)
+
+    def test_a_name_prefix_still_outranks_a_buried_ticker(self):
+        """Two letters sit inside an enormous number of tickers. For "co" the
+        company whose NAME starts with it is far likelier to be the one meant
+        than an arbitrary symbol with CO in the middle."""
+        by_name = rank("KO", "Coca-Cola Company", "CO")
+        by_ticker = rank("DOCO", "Some Other Holdings", "CO")
+        assert better(by_name, by_ticker)
+
+    def test_single_character_does_not_trigger_containment(self):
+        """One letter is in half the market; it would return noise, not a
+        search. Prefix and exact still work at one character."""
+        assert rank("CLFD", "Clearfield, Inc.", "F") is None
+        assert rank("F", "Ford Motor Company", "F") == 0
