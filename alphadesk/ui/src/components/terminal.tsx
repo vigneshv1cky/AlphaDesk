@@ -133,7 +133,8 @@ export function Flash({ value, className, children }: {
   return (
     <span
       key={seq}
-      className={cn(dir === "up" && "flash-gain", dir === "down" && "flash-loss", className)}
+      className={cn("flash-host",
+                    dir === "up" && "flash-gain", dir === "down" && "flash-loss", className)}
     >
       {children}
     </span>

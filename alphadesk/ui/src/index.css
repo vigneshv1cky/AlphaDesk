@@ -227,11 +227,11 @@
      does. With prices now streaming, a value can move while the eye is
      elsewhere; the flash is what says which one moved. */
   @keyframes flash-gain {
-    from { background-color: color-mix(in srgb, var(--gain) 26%, transparent); }
+    from { background-color: color-mix(in srgb, var(--gain) 17%, transparent); }
     to   { background-color: transparent; }
   }
   @keyframes flash-loss {
-    from { background-color: color-mix(in srgb, var(--loss) 26%, transparent); }
+    from { background-color: color-mix(in srgb, var(--loss) 17%, transparent); }
     to   { background-color: transparent; }
   }
   /* 420ms, measured off their animated-number-flash rule rather than chosen.
@@ -240,8 +240,20 @@
      a window where a fresh tick cannot re-trigger the flash.
      It reads as a blink rather than a fade, which is what a tick deserves —
      the 700ms this ran at was still tinting when the next print landed. */
-  .flash-gain { animation: flash-gain 420ms ease-out; border-radius: 3px; }
-  .flash-loss { animation: flash-loss 420ms ease-out; border-radius: 3px; }
+  /* The tint paints the span's LINE BOX, not its glyphs, so a tight line
+     height is what keeps the patch the size of the number. The ticker sets
+     leading-[32px] to centre its row, and the flash inherited it — a 14px
+     price wearing a 40px block, nearly three times the text. Theirs measures
+     15px on a 12px number, a ratio of 1.25, which is what this reproduces.
+
+     Applied to the host at all times, not only mid-flash: switching line
+     height on and off would reflow the row every time a price moved. */
+  .flash-host { line-height: 1.25; }
+  /* 17% and 2px, both measured off their rule rather than picked. At 26% the
+     patch read as a highlight sitting behind the number instead of a tint
+     passing over it. */
+  .flash-gain { animation: flash-gain 420ms ease-out; border-radius: 2px; }
+  .flash-loss { animation: flash-loss 420ms ease-out; border-radius: 2px; }
   /* The ticker marquee. Two identical copies live in the track, so -50% lands
      the second exactly where the first started and the loop has no seam. */
   @keyframes marquee-scroll {
