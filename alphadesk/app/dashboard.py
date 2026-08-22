@@ -7,6 +7,7 @@ holds, closes or scores a position. The trading endpoints (/api/picks/*,
 2026-08-18.
 """
 
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -310,11 +311,66 @@ def api_tape():
     return {"tape": get_prices().market_tape()}
 
 
+# Four, measured: nine concurrent per-symbol quotes made the upstream hand back
+# 404s at random, and one at a time took 8.9s for eight symbols.
+_QUOTES_CONCURRENCY = int(os.environ.get("QUOTES_CONCURRENCY", "4"))
+
+
+@app.get("/api/quotes")
+def api_quotes(symbols: str = ""):
+    """Quotes for a BASKET, in one request.
+
+    A theme page asking for nine symbols used to fire nine per-symbol requests
+    at once. Every endpoint here is a sync def on a 40-worker threadpool, so
+    that is nine threads hitting the upstream simultaneously — and it throttled,
+    returning 404 for two or three of them at random. The rows that lost the
+    race rendered as dashes, which reads as "this company has no price" rather
+    than "we asked too fast".
+
+    BOUNDED, not serial and not unbounded. Nine at once throttles; one at a
+    time is nine times a single quote's latency, which measured 8.9s cold for
+    eight symbols and is a page that looks broken while it loads. Four workers
+    is the middle: fast enough to paint, slow enough that the upstream does not
+    start refusing. The per-symbol cache underneath makes a warm basket
+    effectively free (measured 0.002s), and this fills that same cache, so
+    opening one of these names on Analysis afterwards is already answered.
+
+    A symbol that genuinely has no quote comes back null rather than dropping
+    out: the caller asked for a specific list and needs to know which member
+    failed, not receive a shorter list.
+    """
+    from alphadesk.providers import get_prices
+    wanted, seen = [], set()
+    for raw in symbols.split(","):
+        sym = "".join(c for c in raw.upper() if c.isalnum() or c in ".-")[:12]
+        if sym and sym not in seen:
+            seen.add(sym)
+            wanted.append(sym)
+    if not wanted:
+        return {"quotes": {}}
+    if len(wanted) > 50:
+        raise HTTPException(400, "too many symbols (max 50)")
+    prices = get_prices()
+
+    def one(sym: str):
+        try:
+            return sym, prices.quote(sym)
+        except Exception:
+            return sym, None      # one bad symbol must not empty the basket
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=_QUOTES_CONCURRENCY) as pool:
+        got = dict(pool.map(one, wanted))
+    # Rebuilt in the ORDER ASKED, so the caller can render straight down its
+    # own list without re-sorting a map whose iteration order it did not choose.
+    return {"quotes": {sym: got.get(sym) for sym in wanted}}
+
+
 @app.get("/api/themes")
 def api_themes():
     """The curated baskets and their members. Pure config read — no prices, no
-    ordering, no scoring. The page fetches quotes per symbol from /api/quote,
-    which is already cached and shared."""
+    ordering, no scoring. The page prices the members through /api/quotes,
+    which batches them into one request."""
     from alphadesk.config import THEMES
     return {"themes": THEMES}
 

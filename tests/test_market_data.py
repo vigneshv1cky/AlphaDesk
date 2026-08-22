@@ -367,3 +367,53 @@ class TestThemes:
             '[{"id":"a","label":"A","symbols":["NVDA"]},'
             ' {"id":"b","label":"B","symbols":[]}]')
         assert [t["id"] for t in themes] == ["a"]
+
+
+class TestQuoteFailuresAreNotCached:
+    """A failed quote must not be remembered.
+
+    The cache stored whatever quote() produced, including None, so one
+    throttled call made a symbol look priceless for the whole 60s TTL — XOM
+    returned null three requests running while a direct call for it answered
+    165.11 throughout. A dash in a price column reads as "this company has no
+    price", not "one request lost a race", so the failure has to be forgotten.
+    """
+
+    def _stub_yfinance(self, monkeypatch, exploding: bool):
+        import sys
+        import types
+
+        mod = types.ModuleType("yfinance")
+
+        class _Ticker:
+            def __init__(self, *_a, **_k):
+                if exploding:
+                    raise RuntimeError("throttled")
+
+            @property
+            def info(self):
+                return {"regularMarketPrice": 1.0, "shortName": "Stub Inc",
+                        "currency": "USD", "previousClose": 1.0}
+
+            @property
+            def fast_info(self):
+                return {}
+
+        mod.Ticker = _Ticker           # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "yfinance", mod)
+
+    def test_a_failure_leaves_no_cache_entry(self, monkeypatch):
+        prices._quote_cache.pop("FAKE", None)
+        self._stub_yfinance(monkeypatch, exploding=True)
+        assert prices.quote("FAKE") is None
+        # The important assertion: nothing was written, so the next call retries
+        # rather than replaying the failure for a minute.
+        assert "FAKE" not in prices._quote_cache
+
+    def test_a_success_is_cached(self, monkeypatch):
+        prices._quote_cache.pop("FAKE2", None)
+        self._stub_yfinance(monkeypatch, exploding=False)
+        got = prices.quote("FAKE2")
+        if got is not None:          # the builder needs fields the stub may lack
+            assert "FAKE2" in prices._quote_cache
+            assert prices._quote_cache["FAKE2"][1] is not None

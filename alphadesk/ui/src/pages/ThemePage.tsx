@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
 import { Link, useParams, useSearchParams } from "react-router-dom"
-import { useQuote, useThemes } from "@/lib/queries"
+import type { Quote } from "@/lib/api"
+import { useQuotes, useThemes } from "@/lib/queries"
 import { Empty, Flash, Widget } from "@/components/terminal"
 import { SymbolChart } from "@/components/SymbolChart"
 import { SymbolNews } from "@/components/SymbolNews"
@@ -13,9 +14,13 @@ import { SymbolNews } from "@/components/SymbolNews"
  * before one. This is that surface: every row is a live quote, and the chart
  * and news below are scoped to the row you pick.
  *
- * Quotes are per-symbol requests, so each row fetches its own — the same shape
- * PortfolioPage uses. A basket is eight or nine names, and the shared query
- * cache means a symbol already open on Analysis costs nothing here.
+ * The whole basket is priced in ONE request. Each row fetching its own looked
+ * fine and was not: nine concurrent per-symbol calls land on nine threadpool
+ * workers, the upstream throttled, and two or three came back 404 at random —
+ * so those rows rendered as dashes, which reads as "no price exists" rather
+ * than "we asked too fast". /api/quotes walks the list server-side and fills
+ * the same per-symbol cache on the way, so opening one of these names on
+ * Analysis afterwards is already answered.
  */
 const compact = (n: number | null | undefined): string => {
   if (n == null) return "—"
@@ -39,10 +44,14 @@ const HEAT = [
 
 type Heat = (typeof HEAT)[number]["id"]
 
-function Row({ symbol, active, onPick }: {
-  symbol: string; active: boolean; onPick: () => void
+function Row({ symbol, data, loading, active, onPick }: {
+  symbol: string
+  data: Quote | null | undefined
+  loading: boolean
+  active: boolean
+  onPick: () => void
 }) {
-  const { data, isPending } = useQuote(symbol)
+  const isPending = loading
   const chg = data?.change_pct ?? null
   const up = (chg ?? 0) >= 0
   return (
@@ -75,10 +84,12 @@ function Row({ symbol, active, onPick }: {
  * by direction and labelled with the chosen measure. A treemap sized by market
  * cap would put NVDA at forty times AAPL's area and make the other six
  * unreadable, which is a worse answer than a plain grid. */
-function HeatCell({ symbol, metric, onPick }: {
-  symbol: string; metric: Heat; onPick: () => void
+function HeatCell({ symbol, data, metric, onPick }: {
+  symbol: string
+  data: Quote | null | undefined
+  metric: Heat
+  onPick: () => void
 }) {
-  const { data } = useQuote(symbol)
   const chg = data?.change_pct ?? null
   const up = (chg ?? 0) >= 0
   const spec = HEAT.find(h => h.id === metric)!
@@ -114,7 +125,9 @@ export default function ThemePage() {
     () => (data?.themes ?? []).find(t => t.id === id) ?? null,
     [data, id],
   )
-  const symbols = theme?.symbols ?? []
+  const symbols = useMemo(() => theme?.symbols ?? [], [theme])
+  const quotes = useQuotes(symbols)
+  const priced = quotes.data?.quotes
   const picked = params.get("symbol")?.toUpperCase() || symbols[0] || ""
   const pick = (sym: string) => {
     const next = new URLSearchParams(params)
@@ -157,7 +170,8 @@ export default function ThemePage() {
           </thead>
           <tbody>
             {symbols.map(s => (
-              <Row key={s} symbol={s} active={s === picked} onPick={() => pick(s)} />
+              <Row key={s} symbol={s} data={priced?.[s]} loading={quotes.isPending}
+                   active={s === picked} onPick={() => pick(s)} />
             ))}
           </tbody>
         </table>
@@ -187,7 +201,8 @@ export default function ThemePage() {
         <div className="grid gap-1.5 p-2"
              style={{ gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))" }}>
           {symbols.map(s => (
-            <HeatCell key={s} symbol={s} metric={metric} onPick={() => pick(s)} />
+            <HeatCell key={s} symbol={s} data={priced?.[s]} metric={metric}
+                      onPick={() => pick(s)} />
           ))}
         </div>
       </Widget>

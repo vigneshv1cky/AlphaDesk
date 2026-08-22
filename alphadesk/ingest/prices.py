@@ -1214,10 +1214,13 @@ def crypto_movers(top: int = 20) -> dict:
         client = _bound(CryptoHistoricalDataClient(os.environ.get("ALPACA_API_KEY"),
                                                    os.environ.get("ALPACA_SECRET_KEY")))
         end_t = datetime.now(timezone.utc)
-        bars = client.get_crypto_bars(CryptoBarsRequest(
+        _bars = client.get_crypto_bars(CryptoBarsRequest(
             symbol_or_symbols=symbols,
             timeframe=TimeFrame(1, TimeFrameUnit.Hour),
-            start=end_t - timedelta(days=2), end=end_t)).data
+            start=end_t - timedelta(days=2), end=end_t))
+        # The SDK returns a BarSet normally and a plain dict when it has
+        # nothing to wrap, so ask for .data and fall back to the object itself.
+        bars: dict = getattr(_bars, "data", _bars) or {}
         try:
             snaps = client.get_crypto_snapshot(
                 CryptoSnapshotRequest(symbol_or_symbols=symbols))
@@ -1233,7 +1236,7 @@ def crypto_movers(top: int = 20) -> dict:
         if len(series) < 2:
             continue              # omit rather than render an unpriced row
         closes = [float(b.close) for b in series]
-        snap = snaps.get(sym) if snaps else None
+        snap = snaps.get(sym) if isinstance(snaps, dict) else None
         live = getattr(getattr(snap, "latest_trade", None), "price", None)
         last = float(live) if live else closes[-1]
         # 25 hourly bars back is 24 hours of elapsed time.
@@ -1370,10 +1373,18 @@ def quote(symbol: str) -> Optional[dict]:
     except Exception as exc:
         log.debug("quote failed %s: %s", sym, exc)
 
-    with _cache_lock:
-        if len(_quote_cache) >= _CACHE_MAX_ENTRIES:
-            _evict_expired(_quote_cache, _QUOTE_TTL_S)
-        _quote_cache[sym] = (time.time(), out)
+    # SUCCESSES ONLY. A failure used to be cached like any other answer, which
+    # meant one throttled call made a symbol look priceless for the whole TTL:
+    # XOM returned null three requests running while a direct yfinance call for
+    # it answered 165.11 the whole time. The row rendered a dash, and a dash
+    # here reads as "this company has no price" rather than "one request lost a
+    # race". Not caching the failure costs a retry on the next poll, which is a
+    # minute away, and is the difference between a blip and a stuck panel.
+    if out is not None:
+        with _cache_lock:
+            if len(_quote_cache) >= _CACHE_MAX_ENTRIES:
+                _evict_expired(_quote_cache, _QUOTE_TTL_S)
+            _quote_cache[sym] = (time.time(), out)
     return out
 
 

@@ -17,6 +17,7 @@ export const keys = {
   tape: ["tape"] as const,
   indices: ["indices"] as const,
   themes: ["themes"] as const,
+  quotes: (symbols: string[]) => ["quotes", symbols.join(",")] as const,
   crypto: ["crypto"] as const,
   movers: ["movers"] as const,
   quote: (symbol: string) => ["quote", symbol] as const,
@@ -46,6 +47,19 @@ export const useTape = () =>
 
 export const useMovers = () =>
   useQuery({ queryKey: keys.movers, queryFn: () => api.movers(20), refetchInterval: 120_000 })
+
+/** Quotes for a whole basket in ONE request.
+ *
+ * Nine per-symbol requests fired at once made the upstream throttle and hand
+ * back 404s for two or three of them at random, so rows rendered as dashes.
+ * The server walks the list instead. */
+export const useQuotes = (symbols: string[]) =>
+  useQuery({
+    queryKey: keys.quotes(symbols),
+    queryFn: () => api.quotes(symbols),
+    enabled: symbols.length > 0,
+    refetchInterval: 60_000,
+  })
 
 /** Server config, so it changes only on redeploy — no refetch interval. */
 export const useThemes = () =>

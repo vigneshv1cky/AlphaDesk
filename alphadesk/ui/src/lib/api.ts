@@ -436,6 +436,9 @@ export const api = {
   tape: () => get<{ tape: TapeEntry[] }>("/api/tape"),
   indices: () => get<{ indices: TapeEntry[] }>("/api/indices"),
   themes: () => get<{ themes: Theme[] }>("/api/themes"),
+  quotes: (symbols: string[]) =>
+    get<{ quotes: Record<string, Quote | null> }>(
+      `/api/quotes?symbols=${encodeURIComponent(symbols.join(","))}`),
   crypto: (top = 20) => get<CryptoMovers>(`/api/crypto?top=${top}`),
   quote: (symbol: string) => get<Quote>(`/api/quote/${encodeURIComponent(symbol)}`),
   movers: (top = 20) => get<Movers>(`/api/movers?top=${top}`),
